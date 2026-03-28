@@ -115,7 +115,7 @@ def _handle_npc_conversation(
     response = compose_response(
         narrative_text=(
             f'You ask {npc.name}{public_identity}, "{quoted_input}" '
-            "She answers carefully and stays close to what is already known."
+            "They answer carefully and stay close to what is already known."
         ),
         state_changes=[f"Recorded a new conversation beat with {npc.name}."] if npc.name else [],
         learned=[] if clue is None else [clue.clue_text],

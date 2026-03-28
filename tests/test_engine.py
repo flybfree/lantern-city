@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from dataclasses import replace
+
 import pytest
 
 from lantern_city.active_slice import ActiveSlice
@@ -297,7 +299,7 @@ def test_handle_player_request_returns_npc_conversation_response_and_only_mutate
     assert outcome.intent == "talk_to_npc"
     assert outcome.response.narrative_text == (
         'You ask Ila Venn, shrine keeper, "Ask about the outage." '
-        "She answers carefully and stays close to what is already known."
+        "They answer carefully and stay close to what is already known."
     )
     assert outcome.response.state_changes == ["Recorded a new conversation beat with Ila Venn."]
     assert outcome.response.learned == ["Fresh scoring marks suggest recent tampering."]
@@ -323,3 +325,120 @@ def test_handle_player_request_returns_npc_conversation_response_and_only_mutate
         }
     ]
     assert populated_store.load_cache(f"response:talk_to_npc:{NPC_ID}:ask about the outage") is None
+
+
+
+def test_handle_player_request_returns_inspection_response_without_state_changes(
+    populated_store: SQLiteStore,
+) -> None:
+    from lantern_city.engine import handle_player_request
+
+    request = make_request(intent="inspect location", target_id=LOCATION_ID)
+
+    outcome = handle_player_request(populated_store, city_id=CITY_ID, request=request)
+    city = populated_store.load_object("CityState", CITY_ID)
+    location = populated_store.load_object("LocationState", LOCATION_ID)
+
+    assert outcome.intent == "inspect_location"
+    assert outcome.changed_objects == []
+    assert outcome.response.narrative_text == "You inspect Shrine Lane for anything that stands out."
+    assert outcome.response.learned == ["Fresh scoring marks suggest recent tampering."]
+    assert outcome.response.now_available == ["Ask about what you found"]
+    assert outcome.response.next_actions == ["Inspect a narrower detail", "Review known clues"]
+    assert city is not None
+    assert isinstance(city, CityState)
+    assert city.version == 1
+    assert location is not None
+    assert isinstance(location, LocationState)
+    assert location.version == 1
+
+
+
+def test_handle_player_request_returns_case_progression_response_without_state_changes(
+    populated_store: SQLiteStore,
+) -> None:
+    from lantern_city.engine import handle_player_request
+
+    request = make_request(intent="review case", target_id=CASE_ID)
+
+    outcome = handle_player_request(populated_store, city_id=CITY_ID, request=request)
+    case = populated_store.load_object("CaseState", CASE_ID)
+
+    assert outcome.intent == "case_progression"
+    assert outcome.changed_objects == []
+    assert outcome.response.narrative_text == "You review The Missing Clerk."
+    assert outcome.response.learned == []
+    assert outcome.response.now_available == ["Follow a case lead"]
+    assert outcome.response.next_actions == ["Inspect related evidence", "Speak to an involved NPC"]
+    assert case is not None
+    assert isinstance(case, CaseState)
+    assert case.version == 1
+
+
+
+def test_handle_player_request_returns_generic_action_response_without_state_changes(
+    populated_store: SQLiteStore,
+) -> None:
+    from lantern_city.engine import handle_player_request
+
+    request = make_request(intent="wait")
+
+    outcome = handle_player_request(populated_store, city_id=CITY_ID, request=request)
+    city = populated_store.load_object("CityState", CITY_ID)
+
+    assert outcome.intent == "generic_action"
+    assert outcome.changed_objects == []
+    assert outcome.response.narrative_text == "You pause and take stock of the scene."
+    assert outcome.response.state_changes == []
+    assert outcome.response.learned == []
+    assert outcome.response.now_available == []
+    assert outcome.response.next_actions == ["Review what stands out", "Choose a more specific action"]
+    assert city is not None
+    assert isinstance(city, CityState)
+    assert city.version == 1
+
+
+
+def test_handle_player_request_raises_when_npc_conversation_slice_has_no_npc(
+    populated_store: SQLiteStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from lantern_city import engine
+
+    request = make_request(intent="conversation", target_id=NPC_ID)
+    empty_npc_slice = replace(_district_entry_slice(request), npcs=[])
+
+    monkeypatch.setattr(
+        engine,
+        "orchestrate_request",
+        lambda store, *, city_id, request: OrchestratedRequest(
+            request=request,
+            intent="talk_to_npc",
+            active_slice=empty_npc_slice,
+        ),
+    )
+
+    with pytest.raises(LookupError, match="Conversation request requires an active NPC slice"):
+        engine.handle_player_request(populated_store, city_id=CITY_ID, request=request)
+
+
+
+def test_handle_player_request_raises_when_district_entry_slice_has_no_district(
+    populated_store: SQLiteStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from lantern_city import engine
+
+    request = make_request(intent="district entry", target_id=DISTRICT_ID)
+    empty_district_slice = replace(_district_entry_slice(request), district=None)
+
+    monkeypatch.setattr(
+        engine,
+        "orchestrate_request",
+        lambda store, *, city_id, request: OrchestratedRequest(
+            request=request,
+            intent="district_entry",
+            active_slice=empty_district_slice,
+        ),
+    )
+
+    with pytest.raises(LookupError, match="District request requires an active district slice"):
+        engine.handle_player_request(populated_store, city_id=CITY_ID, request=request)
