@@ -7,7 +7,7 @@ from pydantic import BaseModel
 
 from lantern_city.models import RuntimeModel
 
-RuntimeModelT = TypeVar("RuntimeModelT", bound=RuntimeModel)
+BaseModelT = TypeVar("BaseModelT", bound=BaseModel)
 
 
 MODEL_TYPES: dict[str, type[RuntimeModel]] = {
@@ -35,8 +35,8 @@ def serialize_model(model: BaseModel) -> str:
 def deserialize_model(
     payload: str | dict[str, object],
     *,
-    model_cls: type[RuntimeModelT] | None = None,
-) -> RuntimeModel | RuntimeModelT:
+    model_cls: type[BaseModelT] | None = None,
+) -> RuntimeModel | BaseModelT:
     normalized_payload = _normalize_payload(payload)
 
     if model_cls is None:
@@ -44,8 +44,9 @@ def deserialize_model(
         if not isinstance(runtime_type, str) or runtime_type not in MODEL_TYPES:
             msg = f"Unknown model type: {runtime_type!r}"
             raise ValueError(msg)
-        model_cls = MODEL_TYPES[runtime_type]
-    else:
+        return MODEL_TYPES[runtime_type].model_validate(normalized_payload)
+
+    if issubclass(model_cls, RuntimeModel):
         payload_type = normalized_payload.get("type")
         expected_type = model_cls.model_fields["type"].default
         if payload_type != expected_type:

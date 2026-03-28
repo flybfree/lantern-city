@@ -86,6 +86,16 @@ def test_deserialize_model_accepts_explicit_model_class(city_state: CityState) -
 
 
 
+def test_deserialize_model_accepts_non_runtime_model_class() -> None:
+    score_tier = ScoreTier(score=32, tier="Informed")
+
+    restored = deserialize_model(to_json_string(score_tier), model_cls=ScoreTier)
+
+    assert isinstance(restored, ScoreTier)
+    assert restored == score_tier
+
+
+
 def test_deserialize_model_rejects_unknown_runtime_type() -> None:
     with pytest.raises(ValueError, match="Unknown model type"):
         deserialize_model(
