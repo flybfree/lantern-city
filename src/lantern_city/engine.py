@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from lantern_city.active_slice import ActiveSlice, RequestIntent
-from lantern_city.models import CityState, ClueState, DistrictState, NPCState, PlayerRequest
+from lantern_city.models import CityState, ClueState, DistrictState, NPCState, PlayerRequest, RuntimeModel
 from lantern_city.orchestrator import orchestrate_request
 from lantern_city.response import ResponsePayload, compose_response
 from lantern_city.store import SQLiteStore
@@ -17,6 +17,17 @@ class EngineOutcome:
     changed_objects: list[str]
 
 
+@dataclass(slots=True)
+class StateUpdateEngine:
+    store: SQLiteStore
+
+    def apply_updates(self, *objects: RuntimeModel) -> list[str]:
+        if not objects:
+            return []
+        self.store.save_objects_atomically(objects)
+        return [f"{obj.type}:{obj.id}" for obj in objects]
+
+
 def handle_player_request(
     store: SQLiteStore,
     *,
@@ -25,17 +36,18 @@ def handle_player_request(
 ) -> EngineOutcome:
     orchestrated = orchestrate_request(store, city_id=city_id, request=request)
     city = _load_city(store, city_id)
+    state_update_engine = StateUpdateEngine(store)
 
     if orchestrated.intent == "district_entry":
         response, changed_objects = _handle_district_entry(
-            store,
+            state_update_engine,
             city,
             orchestrated.active_slice,
             request,
         )
     elif orchestrated.intent == "talk_to_npc":
         response, changed_objects = _handle_npc_conversation(
-            store,
+            state_update_engine,
             orchestrated.active_slice,
             request,
         )
@@ -61,7 +73,7 @@ def handle_player_request(
 
 
 def _handle_district_entry(
-    store: SQLiteStore,
+    state_update_engine: StateUpdateEngine,
     city: CityState,
     active_slice: ActiveSlice,
     request: PlayerRequest,
@@ -87,9 +99,9 @@ def _handle_district_entry(
             "updated_at": request.updated_at,
         }
     )
-    store.save_object(updated_city)
+    changed_objects = state_update_engine.apply_updates(updated_city)
     _cache_response(
-        store,
+        state_update_engine.store,
         cache_key=f"response:district_entry:{district.id}",
         object_type="DistrictState",
         object_id=district.id,
@@ -97,11 +109,11 @@ def _handle_district_entry(
         request=request,
         response=response,
     )
-    return response, [f"CityState:{city.id}"]
+    return response, changed_objects
 
 
 def _handle_npc_conversation(
-    store: SQLiteStore,
+    state_update_engine: StateUpdateEngine,
     active_slice: ActiveSlice,
     request: PlayerRequest,
 ) -> tuple[ResponsePayload, list[str]]:
@@ -136,9 +148,9 @@ def _handle_npc_conversation(
             "updated_at": request.updated_at,
         }
     )
-    store.save_object(updated_npc)
+    changed_objects = state_update_engine.apply_updates(updated_npc)
     _cache_response(
-        store,
+        state_update_engine.store,
         cache_key=f"response:talk_to_npc:{npc.id}:{_normalize_cache_fragment(request.input_text)}",
         object_type="NPCState",
         object_id=npc.id,
@@ -146,7 +158,7 @@ def _handle_npc_conversation(
         request=request,
         response=response,
     )
-    return response, [f"NPCState:{npc.id}"]
+    return response, changed_objects
 
 
 def _build_inspection_response(active_slice: ActiveSlice) -> ResponsePayload:
@@ -269,4 +281,4 @@ def _display_name(identifier: str) -> str:
     return identifier
 
 
-__all__ = ["EngineOutcome", "handle_player_request"]
+__all__ = ["EngineOutcome", "StateUpdateEngine", "handle_player_request"]

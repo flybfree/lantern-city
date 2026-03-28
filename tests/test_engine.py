@@ -210,6 +210,33 @@ def test_handle_player_request_uses_orchestrator_to_build_the_active_slice(
     assert outcome.active_slice == expected_slice
 
 
+def test_handle_player_request_routes_district_entry_updates_through_state_update_engine(
+    populated_store: SQLiteStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from lantern_city import engine
+
+    request = make_request(intent="district entry", target_id=DISTRICT_ID)
+    applied_objects: list[object] = []
+
+    def fake_apply_updates(self, *objects):
+        applied_objects.extend(objects)
+        return [f"{obj.type}:{obj.id}" for obj in objects]
+
+    monkeypatch.setattr(engine.StateUpdateEngine, "apply_updates", fake_apply_updates)
+
+    outcome = engine.handle_player_request(populated_store, city_id=CITY_ID, request=request)
+
+    assert outcome.changed_objects == [f"CityState:{CITY_ID}"]
+    assert len(applied_objects) == 1
+    updated_city = applied_objects[0]
+    assert isinstance(updated_city, CityState)
+    assert updated_city.id == CITY_ID
+    assert updated_city.player_presence_level == pytest.approx(0.1)
+    assert updated_city.version == 2
+    assert updated_city.updated_at == TURN_ONE
+
+
+
 def test_handle_player_request_returns_district_entry_response_and_persists_city_update(
     populated_store: SQLiteStore,
 ) -> None:
