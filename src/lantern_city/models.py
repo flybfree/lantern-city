@@ -10,7 +10,7 @@ type JSONObject = dict[str, JSONValue]
 
 
 class LanternCityModel(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", strict=True)
 
 
 class RuntimeModel(LanternCityModel):
@@ -240,11 +240,17 @@ __all__ = [
     "FactionState",
     "GeneratedOutput",
     "GenerationJob",
+    "JSONObject",
+    "JSONScalar",
+    "JSONValue",
+    "LanternCityModel",
     "LanternState",
     "LocationState",
     "NPCState",
     "PlayerProgressState",
     "PlayerRequest",
     "PlayerResponse",
+    "RuntimeModel",
     "SceneState",
+    "ScoreTier",
 ]
