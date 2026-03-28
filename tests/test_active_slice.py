@@ -267,6 +267,45 @@ def test_build_active_slice_for_location_inspection(populated_store: SQLiteStore
     assert [clue.id for clue in active_slice.clues] == [CLUE_BRACKET]
 
 
+def test_build_active_slice_for_case_progression_uses_target_id_as_case_reference(
+    populated_store: SQLiteStore,
+) -> None:
+    request = make_request(intent="case progression", target_id=CASE_MAIN)
+
+    active_slice = build_active_slice(populated_store, city_id=CITY_ID, request=request)
+
+    assert active_slice.district is None
+    assert active_slice.location is None
+    assert active_slice.scene is None
+    assert active_slice.case is not None
+    assert active_slice.case.id == CASE_MAIN
+    assert active_slice.working_set.case_id == CASE_MAIN
+    assert active_slice.working_set.district_id is None
+    assert active_slice.npcs == []
+    assert [clue.id for clue in active_slice.clues] == [CLUE_BRACKET, CLUE_LEDGER]
+
+
+def test_build_active_slice_resolves_explicit_location_target_type_without_prefix_rules(
+    populated_store: SQLiteStore,
+) -> None:
+    request = make_request(
+        intent="wait",
+        target_id=LOCATION_SHRINE,
+        context_refs={"target_type": "location"},
+    )
+
+    active_slice = build_active_slice(populated_store, city_id=CITY_ID, request=request)
+
+    assert active_slice.location is not None
+    assert active_slice.location.id == LOCATION_SHRINE
+    assert active_slice.district is not None
+    assert active_slice.district.id == DISTRICT_OLD
+    assert active_slice.case is not None
+    assert active_slice.case.id == CASE_MAIN
+    assert active_slice.npcs == []
+    assert [clue.id for clue in active_slice.clues] == [CLUE_BRACKET]
+
+
 def test_build_active_slice_excludes_unrelated_world_objects(populated_store: SQLiteStore) -> None:
     request = make_request(intent="talk to NPC", target_id=NPC_KEEPER, scene_id=SCENE_TALK)
 

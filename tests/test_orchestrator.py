@@ -170,3 +170,22 @@ def test_orchestrate_request_returns_controlled_empty_slice_for_generic_action_w
     assert orchestrated.active_slice.case is None
     assert orchestrated.active_slice.npcs == []
     assert orchestrated.active_slice.clues == []
+
+
+def test_orchestrate_request_builds_case_progression_slice_from_target_id(populated_store: SQLiteStore) -> None:
+    request = PlayerRequest(
+        id="request_005",
+        created_at=TURN_ZERO,
+        updated_at=TURN_ZERO,
+        player_id="player_001",
+        intent="review case",
+        target_id=CASE_ID,
+    )
+
+    orchestrated = orchestrate_request(populated_store, city_id=CITY_ID, request=request)
+
+    assert orchestrated.intent == "case_progression"
+    assert orchestrated.active_slice.case is not None
+    assert orchestrated.active_slice.case.id == CASE_ID
+    assert orchestrated.active_slice.working_set.case_id == CASE_ID
+    assert [clue.id for clue in orchestrated.active_slice.clues] == [CLUE_ID]
