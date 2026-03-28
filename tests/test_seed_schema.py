@@ -204,6 +204,51 @@ def test_validate_city_seed_allows_duplicate_npc_names(
     assert [npc.name for npc in validated.npc_configuration.npcs] == ["Ila Venn", "Ila Venn"]
 
 
+def test_validate_city_seed_strips_required_string_fields(
+    valid_seed_payload: dict[str, object],
+) -> None:
+    payload = copy.deepcopy(valid_seed_payload)
+    payload["city_identity"]["city_name"] = "  Lantern City  "
+    payload["district_configuration"]["districts"][0]["id"] = "  district_old_quarter  "
+    payload["district_configuration"]["districts"][0]["name"] = "  Old Quarter  "
+    payload["faction_configuration"]["factions"][0]["id"] = "  faction_memory_keepers  "
+    payload["faction_configuration"]["factions"][0]["name"] = "  Memory Keepers  "
+    payload["faction_configuration"]["factions"][0]["influence_by_district"] = {
+        "  district_old_quarter  ": 0.78,
+        "district_lantern_ward": 0.22,
+    }
+    payload["faction_configuration"]["tension_map"] = {
+        "  faction_memory_keepers  | faction_council_lights  ": 0.58,
+    }
+    payload["case_configuration"]["cases"][0]["id"] = "  case_missing_clerk  "
+    payload["case_configuration"]["cases"][0]["involved_district_ids"] = ["  district_old_quarter  "]
+    payload["case_configuration"]["cases"][0]["involved_faction_ids"] = ["  faction_memory_keepers  "]
+    payload["case_configuration"]["cases"][0]["key_npc_ids"] = [
+        "  npc_shrine_keeper  ",
+        " npc_archive_clerk ",
+    ]
+    payload["npc_configuration"]["npcs"][0]["id"] = "  npc_shrine_keeper  "
+    payload["npc_configuration"]["npcs"][0]["district_id"] = "  district_old_quarter  "
+    payload["npc_configuration"]["npcs"][0]["location_id"] = "  location_shrine_lane  "
+
+    validated = validate_city_seed(payload)
+
+    assert validated.city_identity.city_name == "Lantern City"
+    assert validated.district_configuration.districts[0].id == "district_old_quarter"
+    assert validated.district_configuration.districts[0].name == "Old Quarter"
+    assert validated.faction_configuration.factions[0].id == "faction_memory_keepers"
+    assert validated.faction_configuration.factions[0].name == "Memory Keepers"
+    assert validated.case_configuration.cases[0].id == "case_missing_clerk"
+    assert validated.case_configuration.cases[0].key_npc_ids == [
+        "npc_shrine_keeper",
+        "npc_archive_clerk",
+    ]
+    assert validated.npc_configuration.npcs[0].location_id == "location_shrine_lane"
+    assert validated.faction_configuration.tension_map == {
+        "faction_memory_keepers|faction_council_lights": 0.58,
+    }
+
+
 @pytest.mark.parametrize(
     ("mutator", "match"),
     [
@@ -240,6 +285,16 @@ def test_validate_city_seed_allows_duplicate_npc_names(
             id="duplicate-district-id",
         ),
         pytest.param(
+            lambda payload: payload["district_configuration"]["districts"][0].__setitem__("id", "   "),
+            "district_configuration.districts.0.id",
+            id="blank-district-id",
+        ),
+        pytest.param(
+            lambda payload: payload["district_configuration"]["districts"][0].__setitem__("name", "   "),
+            "district_configuration.districts.0.name",
+            id="blank-district-name",
+        ),
+        pytest.param(
             lambda payload: payload["district_configuration"]["districts"][0].__setitem__(
                 "stability_baseline", 1.2
             ),
@@ -266,6 +321,34 @@ def test_validate_city_seed_allows_duplicate_npc_names(
             id="invalid-tension-map-key-format",
         ),
         pytest.param(
+            lambda payload: payload["faction_configuration"]["factions"][0].__setitem__("id", "   "),
+            "faction_configuration.factions.0.id",
+            id="blank-faction-id",
+        ),
+        pytest.param(
+            lambda payload: payload["faction_configuration"]["factions"][0].__setitem__("name", "   "),
+            "faction_configuration.factions.0.name",
+            id="blank-faction-name",
+        ),
+        pytest.param(
+            lambda payload: payload["faction_configuration"]["factions"][0].__setitem__(
+                "influence_by_district",
+                {
+                    "district_old_quarter": 1.2,
+                    "district_lantern_ward": 0.22,
+                },
+            ),
+            "influence_by_district values must be between 0.0 and 1.0",
+            id="faction-influence-out-of-range",
+        ),
+        pytest.param(
+            lambda payload: payload["faction_configuration"].__setitem__(
+                "tension_map", {"faction_memory_keepers|faction_council_lights": -0.1}
+            ),
+            "tension_map values must be between 0.0 and 1.0",
+            id="tension-map-value-out-of-range",
+        ),
+        pytest.param(
             lambda payload: payload["lantern_configuration"].__setitem__(
                 "lantern_condition_distribution",
                 {
@@ -278,6 +361,32 @@ def test_validate_city_seed_allows_duplicate_npc_names(
             ),
             "lantern_condition_distribution",
             id="lantern-distribution-does-not-sum-to-one",
+        ),
+        pytest.param(
+            lambda payload: payload["lantern_configuration"].__setitem__(
+                "lantern_condition_distribution",
+                {
+                    "bright": 0.75,
+                    "dim": 0.15,
+                    "flickering": 0.10,
+                },
+            ),
+            "must define every lantern state explicitly",
+            id="lantern-distribution-missing-categories",
+        ),
+        pytest.param(
+            lambda payload: payload["lantern_configuration"].__setitem__(
+                "lantern_condition_distribution",
+                {
+                    "bright": 1.05,
+                    "dim": 0.0,
+                    "flickering": 0.0,
+                    "extinguished": 0.0,
+                    "altered": -0.05,
+                },
+            ),
+            "lantern_condition_distribution values must be between 0.0 and 1.0",
+            id="lantern-distribution-entry-out-of-range",
         ),
         pytest.param(
             lambda payload: payload["lantern_configuration"].__setitem__(
@@ -320,6 +429,11 @@ def test_validate_city_seed_allows_duplicate_npc_names(
             id="case-references-unknown-faction",
         ),
         pytest.param(
+            lambda payload: payload["case_configuration"]["cases"][0].__setitem__("id", "   "),
+            "case_configuration.cases.0.id",
+            id="blank-case-id",
+        ),
+        pytest.param(
             lambda payload: payload["case_configuration"]["cases"][0].__setitem__(
                 "key_npc_ids", ["npc_unknown"]
             ),
@@ -342,6 +456,11 @@ def test_validate_city_seed_allows_duplicate_npc_names(
             ),
             "district_unknown",
             id="npc-references-unknown-district",
+        ),
+        pytest.param(
+            lambda payload: payload["npc_configuration"]["npcs"][0].__setitem__("location_id", "   "),
+            "npc_configuration.npcs.0.location_id",
+            id="blank-npc-location-id",
         ),
         pytest.param(
             lambda payload: payload["progression_start_state"].__setitem__(
