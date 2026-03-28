@@ -138,12 +138,17 @@ class OpenAICompatibleLLMClient:
 
         content = message.get("content")
         if isinstance(content, str):
-            return content
-        if isinstance(content, list):
+            if content:
+                return content
+        elif isinstance(content, list):
             text_parts = [part.get("text", "") for part in content if isinstance(part, dict)]
             combined = "".join(text_parts).strip()
             if combined:
                 return combined
+
+        reasoning_content = message.get("reasoning_content")
+        if isinstance(reasoning_content, str) and reasoning_content:
+            return reasoning_content
 
         raise LLMClientResponseError("Model response did not include textual message content")
 

@@ -184,6 +184,33 @@ def test_openai_compatible_client_includes_bearer_auth_when_api_key_is_present(
             {"value": 2},
             id="content-parts",
         ),
+        pytest.param(
+            {
+                "choices": [
+                    {
+                        "message": {
+                            "content": "",
+                            "reasoning_content": '{"value": 3}',
+                        }
+                    }
+                ]
+            },
+            {"value": 3},
+            id="empty-content-falls-back-to-reasoning-content",
+        ),
+        pytest.param(
+            {
+                "choices": [
+                    {
+                        "message": {
+                            "reasoning_content": '{"value": 4}',
+                        }
+                    }
+                ]
+            },
+            {"value": 4},
+            id="missing-content-falls-back-to-reasoning-content",
+        ),
     ],
 )
 def test_parse_json_content_extracts_json_from_supported_response_shapes(
@@ -196,6 +223,27 @@ def test_parse_json_content_extracts_json_from_supported_response_shapes(
     parsed = client.parse_json_content(response_payload)
 
     assert parsed == expected
+
+
+def test_extract_content_prefers_non_empty_content_over_reasoning_content() -> None:
+    client = OpenAICompatibleLLMClient(
+        OpenAICompatibleConfig(base_url="http://127.0.0.1:8080", model="demo-model")
+    )
+
+    content = client.extract_content(
+        {
+            "choices": [
+                {
+                    "message": {
+                        "content": '{"value": 1}',
+                        "reasoning_content": '{"value": 999}',
+                    }
+                }
+            ]
+        }
+    )
+
+    assert content == '{"value": 1}'
 
 
 def test_parse_json_content_raises_clear_error_for_invalid_json() -> None:
