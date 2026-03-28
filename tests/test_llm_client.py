@@ -1,0 +1,141 @@
+from __future__ import annotations
+
+import json
+
+import httpx
+import pytest
+
+from lantern_city.llm_client import LLMClientResponseError, OpenAICompatibleConfig, OpenAICompatibleLLMClient
+
+
+@pytest.fixture
+def sample_messages() -> list[dict[str, str]]:
+    return [
+        {"role": "system", "content": "Return JSON only."},
+        {"role": "user", "content": "Generate a city seed."},
+    ]
+
+
+def test_openai_compatible_client_posts_to_v1_chat_completions(sample_messages: list[dict[str, str]]) -> None:
+    captured: dict[str, object] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["url"] = str(request.url)
+        captured["headers"] = dict(request.headers)
+        captured["json"] = json.loads(request.content.decode("utf-8"))
+        return httpx.Response(
+            200,
+            json={
+                "id": "chatcmpl-1",
+                "choices": [
+                    {
+                        "message": {
+                            "content": '{"schema_version": "1.0"}',
+                        }
+                    }
+                ],
+            },
+        )
+
+    transport = httpx.MockTransport(handler)
+    http_client = httpx.Client(transport=transport)
+    client = OpenAICompatibleLLMClient(
+        OpenAICompatibleConfig(base_url="http://192.168.3.181:1234", model="nvidia/nemotron-3-nano-4b"),
+        http_client=http_client,
+    )
+
+    response = client.create_chat_completion(messages=sample_messages, temperature=0.2, max_tokens=700)
+
+    assert captured["url"] == "http://192.168.3.181:1234/v1/chat/completions"
+    assert "authorization" not in {key.lower() for key in captured["headers"]}
+    assert captured["json"] == {
+        "model": "nvidia/nemotron-3-nano-4b",
+        "messages": sample_messages,
+        "temperature": 0.2,
+        "max_tokens": 700,
+        "response_format": {"type": "json_object"},
+    }
+    assert response.content == '{"schema_version": "1.0"}'
+
+
+def test_openai_compatible_client_includes_bearer_auth_when_api_key_is_present(
+    sample_messages: list[dict[str, str]],
+) -> None:
+    captured_headers: dict[str, str] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured_headers.update(dict(request.headers))
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "message": {
+                            "content": '{"ok": true}',
+                        }
+                    }
+                ]
+            },
+        )
+
+    transport = httpx.MockTransport(handler)
+    http_client = httpx.Client(transport=transport)
+    client = OpenAICompatibleLLMClient(
+        OpenAICompatibleConfig(
+            base_url="http://127.0.0.1:8080/v1",
+            model="demo-model",
+            api_key="secret-token",
+        ),
+        http_client=http_client,
+    )
+
+    client.create_chat_completion(messages=sample_messages)
+
+    normalized_headers = {key.lower(): value for key, value in captured_headers.items()}
+    assert normalized_headers["authorization"] == "Bearer secret-token"
+
+
+@pytest.mark.parametrize(
+    ("response_payload", "expected"),
+    [
+        pytest.param(
+            {"choices": [{"message": {"content": '{"value": 1}'}}]},
+            {"value": 1},
+            id="plain-json-string",
+        ),
+        pytest.param(
+            {
+                "choices": [
+                    {
+                        "message": {
+                            "content": [
+                                {"type": "output_text", "text": '{"value": 2}'},
+                            ]
+                        }
+                    }
+                ]
+            },
+            {"value": 2},
+            id="content-parts",
+        ),
+    ],
+)
+def test_parse_json_content_extracts_json_from_supported_response_shapes(
+    response_payload: dict[str, object], expected: dict[str, object]
+) -> None:
+    client = OpenAICompatibleLLMClient(
+        OpenAICompatibleConfig(base_url="http://127.0.0.1:8080", model="demo-model")
+    )
+
+    parsed = client.parse_json_content(response_payload)
+
+    assert parsed == expected
+
+
+def test_parse_json_content_raises_clear_error_for_invalid_json() -> None:
+    client = OpenAICompatibleLLMClient(
+        OpenAICompatibleConfig(base_url="http://127.0.0.1:8080", model="demo-model")
+    )
+
+    with pytest.raises(LLMClientResponseError, match="invalid JSON"):
+        client.parse_json_content({"choices": [{"message": {"content": "not json"}}]})
