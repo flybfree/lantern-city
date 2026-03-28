@@ -33,8 +33,8 @@ class CityIdentity(SeedModel):
             raise ValueError("dominant_mood must contain 2 to 4 entries")
 
         for mood in self.dominant_mood:
-            if not mood.strip() or len(mood.strip()) > 32:
-                raise ValueError("dominant_mood entries must be short, non-empty strings")
+            if not mood.strip():
+                raise ValueError("dominant_mood entries must be non-empty strings")
 
         return self
 
@@ -180,13 +180,12 @@ class NPCConfiguration(SeedModel):
 
     @model_validator(mode="after")
     def validate_npcs(self) -> NPCConfiguration:
+        if self.tracked_npc_count != len(self.npcs):
+            raise ValueError("tracked_npc_count must match the number of detailed NPC records")
+
         npc_ids = [npc.id for npc in self.npcs]
         if len(set(npc_ids)) != len(npc_ids):
             raise ValueError("each NPC must have a unique npc id")
-
-        npc_names = [npc.name for npc in self.npcs]
-        if len(set(npc_names)) != len(npc_names):
-            raise ValueError("each NPC must have a unique npc name")
 
         return self
 
@@ -256,14 +255,6 @@ class CitySeedDocument(SeedModel):
         for npc in self.npc_configuration.npcs:
             if npc.district_id not in district_ids:
                 raise ValueError(f"npc references unknown district id: {npc.district_id}")
-
-        tracked_npc_count = self.npc_configuration.tracked_npc_count
-        detailed_record_count = len(self.npc_configuration.npcs)
-        key_anchor_count = len(key_npc_anchor_ids)
-        if tracked_npc_count < detailed_record_count or tracked_npc_count < key_anchor_count:
-            raise ValueError(
-                "tracked_npc_count must match the number of detailed NPC records or be at least the number of key NPC anchors"
-            )
 
         return self
 

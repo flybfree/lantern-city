@@ -179,6 +179,31 @@ def test_validate_city_seed_accepts_documented_shape(valid_seed_payload: dict[st
     ]
 
 
+def test_validate_city_seed_allows_long_dominant_mood_entries(
+    valid_seed_payload: dict[str, object],
+) -> None:
+    payload = copy.deepcopy(valid_seed_payload)
+    payload["city_identity"]["dominant_mood"] = [
+        "oppressively ceremonial and haunted by procedural memory",
+        "rain-soaked and politically exhausted after years of managed forgetting",
+    ]
+
+    validated = validate_city_seed(payload)
+
+    assert validated.city_identity.dominant_mood == payload["city_identity"]["dominant_mood"]
+
+
+def test_validate_city_seed_allows_duplicate_npc_names(
+    valid_seed_payload: dict[str, object],
+) -> None:
+    payload = copy.deepcopy(valid_seed_payload)
+    payload["npc_configuration"]["npcs"][1]["name"] = payload["npc_configuration"]["npcs"][0]["name"]
+
+    validated = validate_city_seed(payload)
+
+    assert [npc.name for npc in validated.npc_configuration.npcs] == ["Ila Venn", "Ila Venn"]
+
+
 @pytest.mark.parametrize(
     ("mutator", "match"),
     [
@@ -304,7 +329,12 @@ def test_validate_city_seed_accepts_documented_shape(valid_seed_payload: dict[st
         pytest.param(
             lambda payload: payload["npc_configuration"].__setitem__("tracked_npc_count", 1),
             "tracked_npc_count",
-            id="tracked-npc-count-below-anchor-count",
+            id="tracked-npc-count-below-detailed-record-count",
+        ),
+        pytest.param(
+            lambda payload: payload["npc_configuration"].__setitem__("tracked_npc_count", 3),
+            "tracked_npc_count",
+            id="tracked-npc-count-above-detailed-record-count",
         ),
         pytest.param(
             lambda payload: payload["npc_configuration"]["npcs"][0].__setitem__(
