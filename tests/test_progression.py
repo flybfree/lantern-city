@@ -8,7 +8,10 @@ from lantern_city.progression import (
     apply_progress_change,
     can_convert_clues_to_leverage,
     can_interpret_lantern_clue,
+    can_pressure_npc,
     can_pursue_city_impact_opportunity,
+    can_reopen_blocked_conversation,
+    can_use_informal_access,
     current_unlocks,
     describe_track,
     get_tier,
@@ -173,3 +176,91 @@ def test_city_impact_opportunities_require_matching_access_for_larger_scopes() -
 
     assert can_pursue_city_impact_opportunity(connected, scope="district") is True
     assert can_pursue_city_impact_opportunity(connected, scope="citywide") is False
+
+
+def test_reputation_enables_informal_access_when_familiarity_or_standing_covers_the_gap() -> None:
+    progress = starting_progress_state(
+        progress_id="progress_06",
+        created_at=TURN_ZERO,
+        updated_at=TURN_ZERO,
+    )
+
+    assert can_use_informal_access(progress, required_access="restricted") is False
+    assert can_use_informal_access(
+        progress,
+        required_access="restricted",
+        district_or_faction_familiar=True,
+    ) is True
+
+    respected, _ = apply_progress_change(
+        progress,
+        track="reputation",
+        amount=35,
+        reason="Repeatedly delivered for the same neighborhood network.",
+        updated_at=TURN_ONE,
+    )
+
+    assert can_use_informal_access(respected, required_access="restricted") is True
+    assert can_use_informal_access(respected, required_access="trusted") is False
+
+
+def test_leverage_gates_pressure_against_people_and_institutions() -> None:
+    progress = starting_progress_state(
+        progress_id="progress_07",
+        created_at=TURN_ZERO,
+        updated_at=TURN_ZERO,
+    )
+
+    assert can_pressure_npc(progress, evidence_strength="documented") is False
+    assert can_pressure_npc(progress, evidence_strength="contradiction_chain") is False
+
+    stronger, _ = apply_progress_change(
+        progress,
+        track="leverage",
+        amount=40,
+        reason="Secured debts, favors, and a clean contradiction file.",
+        updated_at=TURN_ONE,
+    )
+
+    assert can_pressure_npc(stronger, evidence_strength="documented") is True
+    assert can_pressure_npc(stronger, evidence_strength="contradiction_chain", institutional=True) is False
+
+    connected, _ = apply_progress_change(
+        stronger,
+        track="access",
+        amount=35,
+        reason="Can now bring pressure through formal institutional channels.",
+        updated_at="turn_2",
+    )
+
+    assert can_pressure_npc(connected, evidence_strength="contradiction_chain", institutional=True) is True
+
+
+def test_reputation_and_leverage_can_reopen_blocked_conversations_in_explicit_ways() -> None:
+    progress = starting_progress_state(
+        progress_id="progress_08",
+        created_at=TURN_ZERO,
+        updated_at=TURN_ZERO,
+    )
+
+    assert can_reopen_blocked_conversation(progress, has_contradiction_chain=False) is False
+    assert can_reopen_blocked_conversation(progress, has_contradiction_chain=True) is False
+
+    trusted, _ = apply_progress_change(
+        progress,
+        track="reputation",
+        amount=55,
+        reason="Built citywide trust with repeat witnesses and fixers.",
+        updated_at=TURN_ONE,
+    )
+    useful, _ = apply_progress_change(
+        progress,
+        track="leverage",
+        amount=35,
+        reason="Collected enough debts and proof to press the issue.",
+        updated_at=TURN_ONE,
+    )
+
+    assert can_reopen_blocked_conversation(trusted, has_contradiction_chain=False) is True
+    assert can_reopen_blocked_conversation(useful, has_contradiction_chain=False) is False
+    assert can_reopen_blocked_conversation(useful, has_contradiction_chain=True) is True

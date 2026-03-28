@@ -100,6 +100,17 @@ _CITY_SCOPE_REQUIREMENTS = {
     "citywide": {"city_impact": 4, "access": 4},
     "structural": {"city_impact": 5, "access": 5},
 }
+_INFORMAL_ACCESS_REQUIREMENTS = {
+    "public": 1,
+    "restricted": 2,
+    "trusted": 3,
+}
+_PRESSURE_EVIDENCE_REQUIREMENTS = {
+    "rumor": 4,
+    "documented": 3,
+    "contradiction_chain": 3,
+    "hard_proof": 2,
+}
 
 
 @dataclass(frozen=True)
@@ -235,6 +246,53 @@ def can_pursue_city_impact_opportunity(
         _track_tier(progress, "city_impact") >= requirements["city_impact"]
         and _track_tier(progress, "access") >= requirements["access"]
     )
+
+
+def can_use_informal_access(
+    progress: PlayerProgressState,
+    *,
+    required_access: Literal["public", "restricted", "trusted"],
+    district_or_faction_familiar: bool = False,
+) -> bool:
+    required_tier = _INFORMAL_ACCESS_REQUIREMENTS[required_access]
+    access_tier = _track_tier(progress, "access")
+    reputation_tier = _track_tier(progress, "reputation")
+    if access_tier >= required_tier:
+        return True
+    if required_access == "restricted":
+        if district_or_faction_familiar and reputation_tier >= 1:
+            return True
+        return reputation_tier >= 3
+    if required_access == "trusted":
+        return district_or_faction_familiar and reputation_tier >= 4
+    return False
+
+
+def can_pressure_npc(
+    progress: PlayerProgressState,
+    *,
+    evidence_strength: Literal["rumor", "documented", "contradiction_chain", "hard_proof"],
+    institutional: bool = False,
+) -> bool:
+    leverage_tier = _track_tier(progress, "leverage")
+    required_tier = _PRESSURE_EVIDENCE_REQUIREMENTS[evidence_strength]
+    if leverage_tier < required_tier:
+        return False
+    if institutional:
+        return evidence_strength in {"contradiction_chain", "hard_proof"} and _track_tier(progress, "access") >= 3
+    return True
+
+
+def can_reopen_blocked_conversation(
+    progress: PlayerProgressState,
+    *,
+    has_contradiction_chain: bool,
+) -> bool:
+    reputation_tier = _track_tier(progress, "reputation")
+    leverage_tier = _track_tier(progress, "leverage")
+    if reputation_tier >= 4:
+        return True
+    return leverage_tier >= 3 and has_contradiction_chain
 
 
 def _track_tier(progress: PlayerProgressState, track: str) -> int:
