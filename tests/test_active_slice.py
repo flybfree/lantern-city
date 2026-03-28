@@ -232,7 +232,7 @@ def test_build_active_slice_for_district_entry(populated_store: SQLiteStore) -> 
     assert active_slice.case is not None
     assert active_slice.case.id == CASE_MAIN
     assert [npc.id for npc in active_slice.npcs] == [NPC_CLERK, NPC_KEEPER]
-    assert [clue.id for clue in active_slice.clues] == [CLUE_BRACKET, CLUE_LEDGER]
+    assert [clue.id for clue in active_slice.clues] == [CLUE_LEDGER, CLUE_BRACKET]
 
 
 def test_build_active_slice_for_npc_conversation(populated_store: SQLiteStore) -> None:
