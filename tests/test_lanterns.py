@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import pytest
+
+from pydantic import ValidationError
+
 from lantern_city.clues import create_clue
 from lantern_city.lanterns import (
     LanternRuleProfile,
@@ -30,6 +34,47 @@ def test_extinguished_lantern_blocks_formal_access_but_unofficial_routes_can_sti
 
     assert formal == "blocked"
     assert unofficial == "contested"
+
+
+def test_bright_lantern_does_not_grant_universal_secret_access() -> None:
+    profile = LanternRuleProfile(state="bright", missingness="none")
+
+    public_formal = assess_access(profile, required_access="public", formal=True)
+    restricted_formal = assess_access(profile, required_access="restricted", formal=True)
+    trusted_formal = assess_access(
+        profile,
+        required_access="trusted",
+        formal=True,
+        reputation_tier=1,
+    )
+    secret_formal = assess_access(
+        profile,
+        required_access="secret",
+        formal=True,
+        reputation_tier=3,
+        leverage_tier=1,
+    )
+
+    assert public_formal == "open"
+    assert restricted_formal == "open"
+    assert trusted_formal == "contested"
+    assert secret_formal == "blocked"
+
+
+def test_altered_lantern_requires_documented_fields() -> None:
+    with pytest.raises(ValidationError, match="altered_target_domain"):
+        LanternRuleProfile(state="altered", missingness="medium")
+
+
+def test_altered_lantern_rejects_unknown_mvp_values() -> None:
+    with pytest.raises(ValidationError, match="altered_effect_mode"):
+        LanternRuleProfile(
+            state="altered",
+            missingness="medium",
+            altered_target_domain="records",
+            altered_effect_mode="warp",
+            altered_scope="route",
+        )
 
 
 def test_flickering_lantern_and_pressure_degrade_testimony_more_than_physical_evidence() -> None:
@@ -64,7 +109,7 @@ def test_altered_lantern_only_penalizes_the_target_domain() -> None:
         missingness="medium",
         altered_target_domain="records",
         altered_effect_mode="suppress",
-        altered_scope="archive steps",
+        altered_scope="route",
     )
     record_clue = create_clue(
         clue_id="clue_record",

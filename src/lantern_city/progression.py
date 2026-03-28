@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Literal
 
 from lantern_city.models import PlayerProgressState, ScoreTier
 
@@ -84,6 +85,20 @@ _UNLOCKS = {
         4: ["Interpret layered clue webs insightfully."],
         5: ["Operate at near-forensic reliability."],
     },
+}
+_CLUE_INTERPRETATION_REQUIREMENTS = {
+    "credible": 1,
+    "solid": 1,
+    "uncertain": 3,
+    "distorted": 4,
+    "unstable": 4,
+    "contradicted": 1,
+}
+_CITY_SCOPE_REQUIREMENTS = {
+    "local": {"city_impact": 1, "access": 1},
+    "district": {"city_impact": 3, "access": 3},
+    "citywide": {"city_impact": 4, "access": 4},
+    "structural": {"city_impact": 5, "access": 5},
 }
 
 
@@ -182,6 +197,48 @@ def describe_track(progress: PlayerProgressState, track: str) -> str:
     unlock_preview = current_unlocks(track, score_tier.score)[-1]
     name = track.replace("_", " ").title()
     return f"{name}: {score_tier.score} ({score_tier.tier}) - {unlock_preview}"
+
+
+def can_interpret_lantern_clue(
+    progress: PlayerProgressState,
+    *,
+    clue_reliability: Literal["solid", "credible", "uncertain", "distorted", "unstable", "contradicted"],
+    requires_location_comparison: bool = False,
+) -> bool:
+    required_tier = _CLUE_INTERPRETATION_REQUIREMENTS[clue_reliability]
+    if requires_location_comparison:
+        required_tier = max(required_tier, 3)
+    return _track_tier(progress, "lantern_understanding") >= required_tier
+
+
+def can_convert_clues_to_leverage(
+    progress: PlayerProgressState,
+    *,
+    contradiction_count: int,
+    target_kind: Literal["person", "institution"] = "person",
+) -> bool:
+    clue_mastery_tier = _track_tier(progress, "clue_mastery")
+    if contradiction_count < 2 or clue_mastery_tier < 2:
+        return False
+    if target_kind == "institution":
+        return _track_tier(progress, "access") >= 3
+    return True
+
+
+def can_pursue_city_impact_opportunity(
+    progress: PlayerProgressState,
+    *,
+    scope: Literal["local", "district", "citywide", "structural"],
+) -> bool:
+    requirements = _CITY_SCOPE_REQUIREMENTS[scope]
+    return (
+        _track_tier(progress, "city_impact") >= requirements["city_impact"]
+        and _track_tier(progress, "access") >= requirements["access"]
+    )
+
+
+def _track_tier(progress: PlayerProgressState, track: str) -> int:
+    return get_tier(getattr(progress, track).score)
 
 
 def _clamp(score: int) -> int:

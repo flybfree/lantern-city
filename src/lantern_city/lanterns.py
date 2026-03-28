@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+from typing import Literal
+
+from pydantic import model_validator
+
 from lantern_city.models import ClueState, LanternCityModel
 
 _WITNESS_STEPS = ("unusable", "unstable", "uncertain", "credible", "strong")
@@ -17,15 +21,44 @@ _SOURCE_DOMAIN_MAP = {
     "testimony": "testimony",
     "composite": "composite",
 }
+_ACCESS_LEVELS = ("public", "restricted", "trusted", "cleared", "secret")
 
 
 class LanternRuleProfile(LanternCityModel):
-    state: str
-    missingness: str = "none"
-    altered_target_domain: str | None = None
-    altered_effect_mode: str | None = None
-    altered_scope: str | None = None
+    state: Literal["bright", "dim", "flickering", "extinguished", "altered"]
+    missingness: Literal["none", "low", "medium", "high"] = "none"
+    altered_target_domain: Literal["physical", "records", "testimony", "composite", "access"] | None = None
+    altered_effect_mode: Literal["distort", "suppress"] | None = None
+    altered_scope: Literal["site", "route", "district", "network"] | None = None
     altered_owner_or_suspected_controller: str | None = None
+
+    @model_validator(mode="after")
+    def validate_altered_requirements(self) -> LanternRuleProfile:
+        altered_fields = (
+            self.altered_target_domain,
+            self.altered_effect_mode,
+            self.altered_scope,
+        )
+        if self.state == "altered":
+            missing_fields = [
+                field_name
+                for field_name, value in (
+                    ("altered_target_domain", self.altered_target_domain),
+                    ("altered_effect_mode", self.altered_effect_mode),
+                    ("altered_scope", self.altered_scope),
+                )
+                if value is None
+            ]
+            if missing_fields:
+                joined = ", ".join(missing_fields)
+                raise ValueError(f"Altered lanterns require: {joined}")
+            if self.altered_target_domain == "access" and self.altered_effect_mode != "suppress":
+                raise ValueError("altered_effect_mode must be suppress when altered_target_domain is access")
+            return self
+
+        if any(value is not None for value in altered_fields):
+            raise ValueError("Only altered lanterns may define altered_target_domain, altered_effect_mode, or altered_scope")
+        return self
 
 
 def assess_witness_confidence(
@@ -76,15 +109,21 @@ def assess_access(
     leverage_tier: int = 1,
     reputation_tier: int = 1,
 ) -> str:
+    access_index = _access_index(required_access)
     if profile.state == "bright":
-        return "open"
+        return _assess_bright_access(
+            access_index,
+            formal=formal,
+            leverage_tier=leverage_tier,
+            reputation_tier=reputation_tier,
+        )
     if profile.state == "dim":
         if formal:
-            return "open" if required_access == "public" else "contested"
+            return "open" if access_index == 0 else "contested"
         return "open" if leverage_tier >= 2 or reputation_tier >= 2 else "contested"
     if profile.state == "flickering":
         if formal:
-            return "contested" if required_access == "public" else "blocked"
+            return "contested" if access_index == 0 else "blocked"
         return "contested" if leverage_tier >= 2 else "blocked"
     if profile.state == "extinguished":
         if formal:
@@ -151,6 +190,39 @@ def _base_witness_step(profile: LanternRuleProfile, *, domain: str) -> int:
     if profile.state == "altered":
         return 1 if profile.altered_target_domain == domain else 3
     raise ValueError(f"Unsupported lantern state: {profile.state}")
+
+
+def _assess_bright_access(
+    access_index: int,
+    *,
+    formal: bool,
+    leverage_tier: int,
+    reputation_tier: int,
+) -> str:
+    if access_index <= 1:
+        return "open"
+
+    if formal:
+        if access_index == 2:
+            return "open" if reputation_tier >= 2 else "contested"
+        if access_index == 3:
+            return "contested" if reputation_tier >= 3 else "blocked"
+        return "contested" if reputation_tier >= 4 and leverage_tier >= 2 else "blocked"
+
+    if access_index == 2:
+        if leverage_tier >= 2 or reputation_tier >= 3:
+            return "contested"
+        return "blocked"
+    if access_index == 3:
+        return "contested" if leverage_tier >= 3 and reputation_tier >= 2 else "blocked"
+    return "contested" if leverage_tier >= 4 and reputation_tier >= 3 else "blocked"
+
+
+def _access_index(required_access: str) -> int:
+    try:
+        return _ACCESS_LEVELS.index(required_access)
+    except ValueError as exc:
+        raise ValueError(f"Unsupported access level: {required_access}") from exc
 
 
 def _degrade(reliability: str, steps: int) -> str:

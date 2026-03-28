@@ -6,6 +6,9 @@ from lantern_city.progression import (
     DEFAULT_STARTING_SCORES,
     LEARNING_TRACKS,
     apply_progress_change,
+    can_convert_clues_to_leverage,
+    can_interpret_lantern_clue,
+    can_pursue_city_impact_opportunity,
     current_unlocks,
     describe_track,
     get_tier,
@@ -86,3 +89,87 @@ def test_current_unlocks_returns_useful_mvp_unlock_text() -> None:
 
     assert any("Compare witness reliability by location" in unlock for unlock in unlocks)
     assert any("likely lantern-distorted" in unlock for unlock in unlocks)
+
+
+def test_lantern_understanding_gates_uncertain_and_distorted_clue_interpretation() -> None:
+    novice = starting_progress_state(
+        progress_id="progress_novice",
+        created_at=TURN_ZERO,
+        updated_at=TURN_ZERO,
+    )
+    expert, _ = apply_progress_change(
+        novice,
+        track="lantern_understanding",
+        amount=50,
+        reason="Studied lantern failure patterns across districts.",
+        updated_at=TURN_ONE,
+    )
+
+    assert can_interpret_lantern_clue(novice, clue_reliability="credible") is True
+    assert can_interpret_lantern_clue(novice, clue_reliability="uncertain") is False
+    assert can_interpret_lantern_clue(expert, clue_reliability="uncertain") is True
+    assert can_interpret_lantern_clue(expert, clue_reliability="distorted") is True
+
+
+def test_clue_mastery_and_access_gate_leverage_conversion() -> None:
+    progress = starting_progress_state(
+        progress_id="progress_04",
+        created_at=TURN_ZERO,
+        updated_at=TURN_ZERO,
+    )
+
+    assert can_convert_clues_to_leverage(
+        progress,
+        contradiction_count=2,
+        target_kind="institution",
+    ) is False
+
+    sharper, _ = apply_progress_change(
+        progress,
+        track="clue_mastery",
+        amount=25,
+        reason="Built a tighter contradiction chain.",
+        updated_at=TURN_ONE,
+    )
+    connected, _ = apply_progress_change(
+        sharper,
+        track="access",
+        amount=35,
+        reason="Gained institutional access to present the case.",
+        updated_at="turn_2",
+    )
+
+    assert can_convert_clues_to_leverage(
+        connected,
+        contradiction_count=2,
+        target_kind="institution",
+    ) is True
+
+
+def test_city_impact_opportunities_require_matching_access_for_larger_scopes() -> None:
+    progress = starting_progress_state(
+        progress_id="progress_05",
+        created_at=TURN_ZERO,
+        updated_at=TURN_ZERO,
+    )
+
+    assert can_pursue_city_impact_opportunity(progress, scope="local") is True
+    assert can_pursue_city_impact_opportunity(progress, scope="district") is False
+
+    elevated, _ = apply_progress_change(
+        progress,
+        track="city_impact",
+        amount=40,
+        reason="Resolved a dispute that now affects the whole district.",
+        updated_at=TURN_ONE,
+    )
+    connected, _ = apply_progress_change(
+        elevated,
+        track="access",
+        amount=40,
+        reason="Now has the channels to act on district outcomes.",
+        updated_at="turn_2",
+    )
+
+    assert can_pursue_city_impact_opportunity(connected, scope="district") is True
+    assert can_pursue_city_impact_opportunity(connected, scope="citywide") is False
