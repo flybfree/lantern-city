@@ -15,6 +15,10 @@ class NPCResponseGenerationError(RuntimeError):
     pass
 
 
+RELATIONSHIP_DELTA_MIN = -1.0
+RELATIONSHIP_DELTA_MAX = 1.0
+
+
 def _require_bounded_text(value: str, *, field_name: str, max_length: int) -> str:
     value = value.strip()
     if not value:
@@ -53,9 +57,24 @@ class SupportsJSONGeneration(Protocol):
 
 
 class RelationshipShift(LanternCityModel):
-    trust_delta: float = 0.0
-    suspicion_delta: float = 0.0
-    fear_delta: float = 0.0
+    trust_delta: float = Field(
+        default=0.0,
+        ge=RELATIONSHIP_DELTA_MIN,
+        le=RELATIONSHIP_DELTA_MAX,
+        description="Single-turn trust change, bounded to a narrow per-response range.",
+    )
+    suspicion_delta: float = Field(
+        default=0.0,
+        ge=RELATIONSHIP_DELTA_MIN,
+        le=RELATIONSHIP_DELTA_MAX,
+        description="Single-turn suspicion change, bounded to a narrow per-response range.",
+    )
+    fear_delta: float = Field(
+        default=0.0,
+        ge=RELATIONSHIP_DELTA_MIN,
+        le=RELATIONSHIP_DELTA_MAX,
+        description="Single-turn fear change, bounded to a narrow per-response range.",
+    )
     tag: str | None = None
 
     @field_validator("tag")
@@ -210,13 +229,20 @@ class NPCResponseGenerationRequest:
             raise ValueError("request_id must be a non-empty string")
         if not self.active_slice.npcs:
             raise ValueError("npc response generation requires at least one npc in the active slice")
-        npc_id = self.npc_id or self.player_request.target_id or self.active_slice.npcs[0].id
-        if npc_id not in {npc.id for npc in self.active_slice.npcs}:
-            raise ValueError("npc response generation requires the target npc to be present in the active slice")
+        self._target_npc()
+
+    def _target_npc_id(self) -> str:
+        return self.npc_id or self.player_request.target_id or self.active_slice.npcs[0].id
+
+    def _target_npc(self) -> Any:
+        target_npc_id = self._target_npc_id()
+        for npc in self.active_slice.npcs:
+            if npc.id == target_npc_id:
+                return npc
+        raise ValueError("npc response generation requires the target npc to be present in the active slice")
 
     def to_payload(self) -> dict[str, object]:
-        npc_id = self.npc_id or self.player_request.target_id or self.active_slice.npcs[0].id
-        npc = next(npc for npc in self.active_slice.npcs if npc.id == npc_id)
+        npc = self._target_npc()
         scene_payload: dict[str, object] | None = None
         if self.active_slice.scene is not None:
             scene_payload = {

@@ -11,6 +11,7 @@ from lantern_city.generation.npc_response import (
     NPCResponseGenerationRequest,
     NPCResponseGenerationResult,
     NPCResponseGenerator,
+    RelationshipShift,
 )
 from lantern_city.models import (
     ActiveWorkingSet,
@@ -259,6 +260,33 @@ def test_npc_response_generation_result_requires_exact_task_type() -> None:
 
     with pytest.raises(ValidationError, match="task_type"):
         NPCResponseGenerationResult.model_validate(payload)
+
+
+def test_relationship_shift_accepts_single_turn_boundary_deltas() -> None:
+    shift = RelationshipShift.model_validate(
+        {
+            "trust_delta": 1.0,
+            "suspicion_delta": -1.0,
+            "fear_delta": 0.0,
+            "tag": "steady",
+        }
+    )
+
+    assert shift.trust_delta == 1.0
+    assert shift.suspicion_delta == -1.0
+
+
+@pytest.mark.parametrize("field_name", ["trust_delta", "suspicion_delta", "fear_delta"])
+@pytest.mark.parametrize("value", [-1.01, 1.01])
+def test_relationship_shift_rejects_out_of_bounds_single_turn_deltas(
+    field_name: str,
+    value: float,
+) -> None:
+    payload = {"trust_delta": 0.0, "suspicion_delta": 0.0, "fear_delta": 0.0, "tag": "steady"}
+    payload[field_name] = value
+
+    with pytest.raises(ValidationError, match=field_name):
+        RelationshipShift.model_validate(payload)
 
 
 @pytest.mark.parametrize(
