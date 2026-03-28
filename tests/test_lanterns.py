@@ -133,3 +133,18 @@ def test_altered_lantern_only_penalizes_the_target_domain() -> None:
 
     assert altered_record.reliability == "distorted"
     assert altered_testimony.reliability == "credible"
+
+
+def test_apply_lantern_to_clue_rejects_unsupported_reliability() -> None:
+    profile = LanternRuleProfile(state="dim", missingness="low")
+    clue = create_clue(
+        clue_id="clue_bad_reliability",
+        source_type="testimony",
+        source_id="npc_03",
+        clue_text="Someone swears the door was already open.",
+        reliability="credible",
+        created_at=TURN_ONE,
+    ).model_copy(update={"reliability": "mystery"})
+
+    with pytest.raises(ValueError, match="Unsupported clue reliability: mystery"):
+        apply_lantern_to_clue(clue, profile, updated_at="turn_2")

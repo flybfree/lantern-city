@@ -107,3 +107,21 @@ def test_set_clue_status_validates_allowed_statuses() -> None:
 
     with pytest.raises(ValueError, match="Invalid clue status"):
         set_clue_status(clue, "solved", updated_at=TURN_TWO)
+
+
+def test_clarify_clue_rejects_unsupported_reliability() -> None:
+    clue = create_clue(
+        clue_id="clue_bad_reliability",
+        source_type="document",
+        source_id="ledger_13",
+        clue_text="The margin note is half-burned away.",
+        reliability="credible",
+        created_at=TURN_ONE,
+    ).model_copy(update={"reliability": "mystery"})
+
+    with pytest.raises(ValueError, match="Unsupported clue reliability: mystery"):
+        clarify_clue(
+            clue,
+            clarification_text="The handwriting matches the registrar.",
+            updated_at=TURN_TWO,
+        )

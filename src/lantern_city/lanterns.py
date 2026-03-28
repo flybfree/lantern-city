@@ -228,7 +228,10 @@ def _access_index(required_access: str) -> int:
 def _degrade(reliability: str, steps: int) -> str:
     current = reliability
     for _ in range(steps):
-        current = _CLUE_DEGRADATION[current]
+        try:
+            current = _CLUE_DEGRADATION[current]
+        except KeyError as exc:
+            raise ValueError(f"Unsupported clue reliability: {current}") from exc
     return current
 
 

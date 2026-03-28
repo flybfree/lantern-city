@@ -60,7 +60,10 @@ def create_clue(
 
 
 def clarify_clue(clue: ClueState, *, clarification_text: str, updated_at: str) -> ClueState:
-    next_reliability = _CLARIFICATION_UPGRADES[clue.reliability]
+    try:
+        next_reliability = _CLARIFICATION_UPGRADES[clue.reliability]
+    except KeyError as exc:
+        raise ValueError(f"Unsupported clue reliability: {clue.reliability}") from exc
     next_status = clue.status
     if next_reliability in {"credible", "solid"} and clue.status != "contradicted":
         next_status = "confirmed"
