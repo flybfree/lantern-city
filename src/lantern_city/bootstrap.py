@@ -52,26 +52,29 @@ def bootstrap_city(seed: CitySeedDocument, store: SQLiteStore) -> BootstrapResul
     npc_ids = sorted(npc.id for npc in seed.npc_configuration.npcs)
     lantern_ids = [f"lantern_{district_id}" for district_id in district_ids]
 
-    store.save_object(_build_city_seed(seed, city_seed_id, district_ids, faction_ids, case_ids, npc_ids))
+    objects_to_save = [
+        _build_city_seed(seed, city_seed_id, district_ids, faction_ids, case_ids, npc_ids)
+    ]
 
     for district in seed.district_configuration.districts:
-        store.save_object(_build_district_state(seed, district.id))
-        store.save_object(_build_lantern_state(seed, district.id))
+        objects_to_save.append(_build_district_state(seed, district.id))
+        objects_to_save.append(_build_lantern_state(seed, district.id))
 
     for faction in seed.faction_configuration.factions:
-        store.save_object(_build_faction_state(seed, faction.id))
+        objects_to_save.append(_build_faction_state(seed, faction.id))
 
     for case in seed.case_configuration.cases:
-        store.save_object(_build_case_state(seed, case.id))
+        objects_to_save.append(_build_case_state(seed, case.id))
 
     for npc in seed.npc_configuration.npcs:
-        store.save_object(_build_npc_state(seed, npc.id))
+        objects_to_save.append(_build_npc_state(seed, npc.id))
 
-    player_progress = _build_player_progress_state(seed, player_progress_id)
-    city_state = _build_city_state(seed, city_id, city_seed_id, district_ids, faction_ids, case_ids)
+    objects_to_save.append(_build_player_progress_state(seed, player_progress_id))
+    objects_to_save.append(
+        _build_city_state(seed, city_id, city_seed_id, district_ids, faction_ids, case_ids)
+    )
 
-    store.save_object(player_progress)
-    store.save_object(city_state)
+    store.save_objects_atomically(objects_to_save)
 
     return BootstrapResult(
         city_seed_id=city_seed_id,
@@ -290,7 +293,7 @@ def _initial_civic_trust(seed: CitySeedDocument) -> float:
 
 
 def _governing_faction_id(seed: CitySeedDocument, district_id: str) -> str | None:
-    highest_influence = -1.0
+    highest_influence = 0.0
     governing_faction_id: str | None = None
     for faction in sorted(seed.faction_configuration.factions, key=lambda item: item.id):
         influence = faction.influence_by_district.get(district_id, 0.0)

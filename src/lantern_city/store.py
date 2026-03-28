@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from collections.abc import Iterable
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -22,37 +23,12 @@ class SQLiteStore:
 
     def save_object(self, obj: RuntimeModel) -> None:
         with self._connect() as connection:
-            stored_created_at = self._load_object_created_at(connection, obj.type, obj.id)
-            object_to_store = obj.model_copy(
-                update={"created_at": stored_created_at or obj.created_at}
-            )
-            payload = to_json_string(object_to_store)
-            connection.execute(
-                """
-                INSERT INTO world_objects (
-                    id,
-                    type,
-                    version,
-                    created_at,
-                    updated_at,
-                    payload
-                )
-                VALUES (?, ?, ?, ?, ?, ?)
-                ON CONFLICT(type, id) DO UPDATE SET
-                    version = excluded.version,
-                    created_at = world_objects.created_at,
-                    updated_at = excluded.updated_at,
-                    payload = excluded.payload
-                """,
-                (
-                    object_to_store.id,
-                    object_to_store.type,
-                    object_to_store.version,
-                    object_to_store.created_at,
-                    object_to_store.updated_at,
-                    payload,
-                ),
-            )
+            self._save_object(connection, obj)
+
+    def save_objects_atomically(self, objects: Iterable[RuntimeModel]) -> None:
+        with self._connect() as connection:
+            for obj in objects:
+                self._save_object(connection, obj)
 
     def load_object(self, object_type: str, object_id: str) -> RuntimeModel | None:
         with self._connect() as connection:
@@ -243,6 +219,37 @@ class SQLiteStore:
         connection = sqlite3.connect(self.database_path)
         connection.row_factory = sqlite3.Row
         return connection
+
+    def _save_object(self, connection: sqlite3.Connection, obj: RuntimeModel) -> None:
+        stored_created_at = self._load_object_created_at(connection, obj.type, obj.id)
+        object_to_store = obj.model_copy(update={"created_at": stored_created_at or obj.created_at})
+        payload = to_json_string(object_to_store)
+        connection.execute(
+            """
+            INSERT INTO world_objects (
+                id,
+                type,
+                version,
+                created_at,
+                updated_at,
+                payload
+            )
+            VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(type, id) DO UPDATE SET
+                version = excluded.version,
+                created_at = world_objects.created_at,
+                updated_at = excluded.updated_at,
+                payload = excluded.payload
+            """,
+            (
+                object_to_store.id,
+                object_to_store.type,
+                object_to_store.version,
+                object_to_store.created_at,
+                object_to_store.updated_at,
+                payload,
+            ),
+        )
 
     def _load_object_created_at(
         self, connection: sqlite3.Connection, object_type: str, object_id: str

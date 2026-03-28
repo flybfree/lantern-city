@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from lantern_city.bootstrap import BootstrapResult, bootstrap_city
 from lantern_city.models import (
     CaseState,
@@ -243,6 +245,52 @@ def test_bootstrap_city_initializes_player_progress_from_seed(tmp_path) -> None:
     assert progress.leverage.score == 5
     assert progress.city_impact.score == 2
     assert progress.clue_mastery.score == 20
+
+
+def test_bootstrap_city_is_atomic_on_save_failure(tmp_path, monkeypatch) -> None:
+    store = SQLiteStore(tmp_path / "lantern-city.sqlite3")
+    original_save_object = store._save_object
+    save_attempts = 0
+
+    def failing_save_object(connection, obj) -> None:
+        nonlocal save_attempts
+        save_attempts += 1
+        if save_attempts == 3:
+            raise RuntimeError("simulated bootstrap write failure")
+        original_save_object(connection, obj)
+
+    monkeypatch.setattr(store, "_save_object", failing_save_object)
+
+    with pytest.raises(RuntimeError, match="simulated bootstrap write failure"):
+        bootstrap_city(make_valid_seed_document(), store)
+
+    assert store.list_objects("CitySeed") == []
+    assert store.list_objects("CityState") == []
+    assert store.list_objects("PlayerProgressState") == []
+    assert store.list_objects("DistrictState") == []
+    assert store.list_objects("FactionState") == []
+    assert store.list_objects("LanternState") == []
+    assert store.list_objects("CaseState") == []
+    assert store.list_objects("NPCState") == []
+
+
+def test_bootstrap_city_uses_no_governing_faction_when_influence_is_absent(tmp_path) -> None:
+    store = SQLiteStore(tmp_path / "lantern-city.sqlite3")
+    seed_payload = make_valid_seed_payload()
+    factions = seed_payload["faction_configuration"]["factions"]
+    for faction in factions:
+        faction["influence_by_district"].pop("district_lantern_ward", None)
+
+    result = bootstrap_city(validate_city_seed(seed_payload), store)
+
+    lantern_ward = store.load_object("DistrictState", "district_lantern_ward")
+    lantern = store.load_object("LanternState", "lantern_district_lantern_ward")
+
+    assert result.city_id == "city_lantern_city"
+    assert isinstance(lantern_ward, DistrictState)
+    assert isinstance(lantern, LanternState)
+    assert lantern_ward.governing_power is None
+    assert lantern.owner_faction is None
 
 
 def test_bootstrap_city_loads_back_usable_runtime_models(tmp_path) -> None:
