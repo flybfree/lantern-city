@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
-from typing import Any, Protocol, runtime_checkable
+from typing import Any, Literal, Protocol, runtime_checkable
 
-from pydantic import Field
+from pydantic import Field, field_validator, model_validator
 
 from lantern_city.active_slice import ActiveSlice
 from lantern_city.models import LanternCityModel
@@ -33,12 +33,74 @@ class DistrictLocation(LanternCityModel):
     short_description: str
     playable_hook: str
 
+    @field_validator("location_id", "name", "location_type", "short_description", "playable_hook")
+    @classmethod
+    def _require_non_empty_text(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("district location fields must be non-empty strings")
+        return value
+
+    @field_validator("location_type")
+    @classmethod
+    def _bound_location_type(cls, value: str) -> str:
+        if len(value) > 60:
+            raise ValueError("location_type must stay compact")
+        return value
+
+    @field_validator("short_description", "playable_hook")
+    @classmethod
+    def _bound_local_text(cls, value: str) -> str:
+        if len(value) > 180:
+            raise ValueError("district location text must stay compact and local")
+        return value
+
 
 class NPCAnchorSpec(LanternCityModel):
     npc_id: str | None = None
     name: str
     role: str
     local_relevance: str
+
+    @field_validator("name", "role", "local_relevance")
+    @classmethod
+    def _require_non_empty_text(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("npc anchor fields must be non-empty strings")
+        return value
+
+    @field_validator("npc_id")
+    @classmethod
+    def _validate_npc_id(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        value = value.strip()
+        if not value:
+            return None
+        if not value.startswith("npc_"):
+            raise ValueError("npc anchor ids must look like local npc ids")
+        return value
+
+    @field_validator("name", "role")
+    @classmethod
+    def _bound_short_text(cls, value: str) -> str:
+        if len(value) > 80:
+            raise ValueError("npc anchor names and roles must stay compact")
+        return value
+
+    @field_validator("local_relevance")
+    @classmethod
+    def _bound_local_relevance(cls, value: str) -> str:
+        if len(value) > 160:
+            raise ValueError("npc anchor relevance must stay compact and local")
+        return value
+
+    @model_validator(mode="after")
+    def _require_local_anchor_reference(self) -> NPCAnchorSpec:
+        if self.npc_id is None and (not self.name or not self.role or not self.local_relevance):
+            raise ValueError("npc anchor specs must provide either an npc_id or a complete local spec")
+        return self
 
 
 class DistrictStructuredUpdates(LanternCityModel):
@@ -55,7 +117,7 @@ class DistrictCacheableText(LanternCityModel):
 
 
 class DistrictGenerationResult(LanternCityModel):
-    task_type: str = "district_expand"
+    task_type: Literal["district_expand"] = "district_expand"
     request_id: str
     summary_text: str
     structured_updates: DistrictStructuredUpdates

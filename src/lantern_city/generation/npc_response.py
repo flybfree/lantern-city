@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass
-from typing import Any, Protocol, runtime_checkable
+from typing import Any, Literal, Protocol, runtime_checkable
 
-from pydantic import Field
+from pydantic import Field, field_validator
 
 from lantern_city.active_slice import ActiveSlice
 from lantern_city.models import LanternCityModel, PlayerRequest
@@ -65,9 +66,23 @@ class NPCResponseCacheableText(LanternCityModel):
     follow_up_suggestions: list[str] = Field(min_length=1, max_length=4)
     exit_line_if_needed: str | None = None
 
+    @field_validator("npc_line")
+    @classmethod
+    def _validate_npc_line(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("npc_line must be a non-empty string")
+        if len(value) > 280:
+            raise ValueError("npc_line must stay bounded to one compact turn")
+        if "\n" in value or "\r" in value:
+            raise ValueError("npc_line must be a single reply turn")
+        if re.search(r"(?:^|\s)(?:player|npc|you|detective|investigator):", value, flags=re.IGNORECASE):
+            raise ValueError("npc_line must not look like a transcript")
+        return value
+
 
 class NPCResponseGenerationResult(LanternCityModel):
-    task_type: str = "npc_response"
+    task_type: Literal["npc_response"] = "npc_response"
     request_id: str
     summary_text: str
     structured_updates: NPCResponseStructuredUpdates

@@ -9,6 +9,7 @@ from lantern_city.active_slice import ActiveSlice
 from lantern_city.generation.npc_response import (
     NPCResponseGenerationError,
     NPCResponseGenerationRequest,
+    NPCResponseGenerationResult,
     NPCResponseGenerator,
 )
 from lantern_city.models import (
@@ -249,6 +250,30 @@ def test_npc_response_generator_rejects_malformed_output() -> None:
                 player_request=make_player_request(),
             )
         )
+
+
+def test_npc_response_generation_result_requires_exact_task_type() -> None:
+    payload = copy.deepcopy(make_valid_payload())
+    payload["task_type"] = "npc_dialogue"
+
+    with pytest.raises(ValidationError, match="task_type"):
+        NPCResponseGenerationResult.model_validate(payload)
+
+
+def test_npc_response_generation_result_rejects_transcript_like_npc_line() -> None:
+    payload = copy.deepcopy(make_valid_payload())
+    payload["cacheable_text"]["npc_line"] = "NPC: Ask the annex.\nPlayer: Why?"
+
+    with pytest.raises(ValidationError, match="npc_line"):
+        NPCResponseGenerationResult.model_validate(payload)
+
+
+def test_npc_response_generation_result_rejects_overlong_npc_line() -> None:
+    payload = copy.deepcopy(make_valid_payload())
+    payload["cacheable_text"]["npc_line"] = "X" * 281
+
+    with pytest.raises(ValidationError, match="npc_line"):
+        NPCResponseGenerationResult.model_validate(payload)
 
 
 def test_npc_response_request_requires_target_npc_in_slice() -> None:

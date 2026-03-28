@@ -9,6 +9,7 @@ from lantern_city.active_slice import ActiveSlice
 from lantern_city.generation.district import (
     DistrictGenerationError,
     DistrictGenerationRequest,
+    DistrictGenerationResult,
     DistrictGenerator,
 )
 from lantern_city.models import (
@@ -239,6 +240,39 @@ def test_district_generator_rejects_malformed_output() -> None:
                 city_identity_summary="A wet civic maze where lantern light makes memory arguable.",
             )
         )
+
+
+def test_district_generation_result_requires_exact_task_type() -> None:
+    payload = copy.deepcopy(make_valid_payload())
+    payload["task_type"] = "district_summary"
+
+    with pytest.raises(ValidationError, match="task_type"):
+        DistrictGenerationResult.model_validate(payload)
+
+
+def test_district_generation_result_rejects_unbounded_location_text() -> None:
+    payload = copy.deepcopy(make_valid_payload())
+    payload["structured_updates"]["major_locations"][0]["short_description"] = "X" * 181
+
+    with pytest.raises(ValidationError, match="short_description"):
+        DistrictGenerationResult.model_validate(payload)
+
+
+def test_district_generation_result_rejects_non_local_npc_anchor_id_shape() -> None:
+    payload = copy.deepcopy(make_valid_payload())
+    payload["structured_updates"]["npc_anchor_ids_or_specs"][0]["npc_id"] = "citizen_ila_venn"
+
+    with pytest.raises(ValidationError, match="npc_id"):
+        DistrictGenerationResult.model_validate(payload)
+
+
+def test_district_generation_result_rejects_blank_npc_anchor_local_spec() -> None:
+    payload = copy.deepcopy(make_valid_payload())
+    payload["structured_updates"]["npc_anchor_ids_or_specs"][0]["npc_id"] = None
+    payload["structured_updates"]["npc_anchor_ids_or_specs"][0]["local_relevance"] = "   "
+
+    with pytest.raises(ValidationError, match="local_relevance"):
+        DistrictGenerationResult.model_validate(payload)
 
 
 def test_district_generation_request_requires_active_district() -> None:
