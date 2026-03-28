@@ -255,7 +255,7 @@ def test_invalidate_cache_by_key_prefix_treats_wildcards_as_literal_text(tmp_pat
     assert store.load_cache(other_key) is not None
 
 
-def test_invalidate_cache_by_object_id_can_target_multiple_entries(tmp_path) -> None:
+def test_invalidate_cache_by_object_identity_targets_only_matching_type_and_id(tmp_path) -> None:
     store = SQLiteStore(tmp_path / "lantern-city.sqlite3")
     store.save_cache(
         "district:district_old_quarter:summary",
@@ -266,14 +266,130 @@ def test_invalidate_cache_by_object_id_can_target_multiple_entries(tmp_path) -> 
     )
     store.save_cache(
         "location:district_old_quarter:archive_steps",
-        {"summary": "also stale"},
+        {"summary": "keep me"},
         version=1,
         object_type="LocationState",
         object_id="district_old_quarter",
     )
+    store.save_cache(
+        "district:district_old_quarter:scene",
+        {"scene": "also stale"},
+        version=1,
+        object_type="DistrictState",
+        object_id="district_old_quarter",
+    )
 
-    invalidated = store.invalidate_cache_by_object_id("district_old_quarter")
+    invalidated = store.invalidate_cache_by_object("DistrictState", "district_old_quarter")
 
     assert invalidated == 2
     assert store.load_cache("district:district_old_quarter:summary") is None
-    assert store.load_cache("location:district_old_quarter:archive_steps") is None
+    assert store.load_cache("district:district_old_quarter:scene") is None
+    assert store.load_cache("location:district_old_quarter:archive_steps") is not None
+
+
+def test_invalidate_cache_by_object_identity_requires_matching_id(tmp_path) -> None:
+    store = SQLiteStore(tmp_path / "lantern-city.sqlite3")
+    store.save_cache(
+        "district:district_old_quarter:summary",
+        {"summary": "remove me"},
+        version=1,
+        object_type="DistrictState",
+        object_id="district_old_quarter",
+    )
+    store.save_cache(
+        "district:district_river_gate:summary",
+        {"summary": "keep me"},
+        version=1,
+        object_type="DistrictState",
+        object_id="district_river_gate",
+    )
+
+    invalidated = store.invalidate_cache_by_object("DistrictState", "district_old_quarter")
+
+    assert invalidated == 1
+    assert store.load_cache("district:district_old_quarter:summary") is None
+    assert store.load_cache("district:district_river_gate:summary") is not None
+
+
+def test_store_migrates_legacy_cache_entries_schema_to_typed_identity(tmp_path) -> None:
+    db_path = tmp_path / "lantern-city.sqlite3"
+    connection = sqlite3.connect(db_path)
+    try:
+        connection.execute(
+            """
+            CREATE TABLE cache_entries (
+                cache_key TEXT PRIMARY KEY,
+                object_id TEXT,
+                version INTEGER NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                payload TEXT NOT NULL,
+                ttl_seconds INTEGER
+            )
+            """
+        )
+        connection.execute(
+            """
+            INSERT INTO cache_entries (
+                cache_key,
+                object_id,
+                version,
+                created_at,
+                updated_at,
+                payload,
+                ttl_seconds
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "district:district_old_quarter:summary",
+                "district_old_quarter",
+                1,
+                "turn_0",
+                "turn_0",
+                '{"summary": "legacy"}',
+                600,
+            ),
+        )
+        connection.commit()
+    finally:
+        connection.close()
+
+    store = SQLiteStore(db_path)
+    loaded = store.load_cache("district:district_old_quarter:summary")
+
+    assert loaded is not None
+    assert loaded["object_type"] == "Unknown"
+    assert loaded["object_id"] == "district_old_quarter"
+    assert loaded["payload"] == {"summary": "legacy"}
+
+    migrated_connection = sqlite3.connect(db_path)
+    try:
+        columns = {
+            row[1]: row
+            for row in migrated_connection.execute("PRAGMA table_info(cache_entries)")
+        }
+    finally:
+        migrated_connection.close()
+
+    assert "object_type" in columns
+    assert columns["object_type"][3] == 1
+
+
+def test_save_cache_defaults_timestamps_to_persisted_current_time(tmp_path) -> None:
+    store = SQLiteStore(tmp_path / "lantern-city.sqlite3")
+
+    store.save_cache(
+        "district:district_old_quarter:summary",
+        {"summary": "stale"},
+        version=1,
+        object_type="DistrictState",
+        object_id="district_old_quarter",
+    )
+
+    loaded = store.load_cache("district:district_old_quarter:summary")
+
+    assert loaded is not None
+    assert loaded["created_at"] != "now"
+    assert loaded["updated_at"] != "now"
+    assert loaded["created_at"] == loaded["updated_at"]

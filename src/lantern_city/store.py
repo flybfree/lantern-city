@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -10,6 +11,7 @@ from lantern_city.serialization import deserialize_model, to_json_string
 
 type CachePayload = dict[str, Any]
 type CacheEntry = dict[str, Any]
+LEGACY_CACHE_OBJECT_TYPE = "Unknown"
 
 
 class SQLiteStore:
@@ -104,8 +106,9 @@ class SQLiteStore:
         created_at: str | None = None,
         updated_at: str | None = None,
     ) -> None:
-        stored_created_at = created_at or updated_at or "now"
-        stored_updated_at = updated_at or created_at or "now"
+        timestamp = self._current_timestamp()
+        stored_created_at = created_at or updated_at or timestamp
+        stored_updated_at = updated_at or created_at or timestamp
 
         with self._connect() as connection:
             persisted_created_at = self._load_cache_created_at(connection, cache_key)
@@ -184,17 +187,18 @@ class SQLiteStore:
             )
         return cursor.rowcount
 
-    def invalidate_cache_by_object_id(self, object_id: str) -> int:
+    def invalidate_cache_by_object(self, object_type: str, object_id: str) -> int:
         with self._connect() as connection:
             cursor = connection.execute(
-                "DELETE FROM cache_entries WHERE object_id = ?",
-                (object_id,),
+                "DELETE FROM cache_entries WHERE object_type = ? AND object_id = ?",
+                (object_type, object_id),
             )
         return cursor.rowcount
 
     def _initialize(self) -> None:
         with self._connect() as connection:
             self._migrate_world_objects_schema(connection)
+            self._migrate_cache_entries_schema(connection)
             connection.execute(
                 """
                 CREATE TABLE IF NOT EXISTS world_objects (
@@ -228,6 +232,12 @@ class SQLiteStore:
             connection.execute(
                 "CREATE INDEX IF NOT EXISTS idx_cache_entries_object_id ON cache_entries(object_id)"
             )
+            connection.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_cache_entries_object_identity
+                ON cache_entries(object_type, object_id)
+                """
+            )
 
     def _connect(self) -> sqlite3.Connection:
         connection = sqlite3.connect(self.database_path)
@@ -249,6 +259,9 @@ class SQLiteStore:
             (cache_key,),
         ).fetchone()
         return None if row is None else str(row["created_at"])
+
+    def _current_timestamp(self) -> str:
+        return datetime.now(UTC).isoformat()
 
     def _migrate_world_objects_schema(self, connection: sqlite3.Connection) -> None:
         table_info = connection.execute("PRAGMA table_info(world_objects)").fetchall()
@@ -283,6 +296,65 @@ class SQLiteStore:
             """
         )
         connection.execute("DROP TABLE world_objects_legacy")
+
+    def _migrate_cache_entries_schema(self, connection: sqlite3.Connection) -> None:
+        table_info = connection.execute("PRAGMA table_info(cache_entries)").fetchall()
+        if not table_info:
+            return
+
+        has_object_type = any(row["name"] == "object_type" for row in table_info)
+        object_type_not_null = any(
+            row["name"] == "object_type" and row["notnull"] == 1 for row in table_info
+        )
+        if has_object_type and object_type_not_null:
+            return
+
+        connection.execute("ALTER TABLE cache_entries RENAME TO cache_entries_legacy")
+        connection.execute(
+            """
+            CREATE TABLE cache_entries (
+                cache_key TEXT PRIMARY KEY,
+                object_type TEXT NOT NULL,
+                object_id TEXT,
+                version INTEGER NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                payload TEXT NOT NULL,
+                ttl_seconds INTEGER
+            )
+            """
+        )
+
+        if has_object_type:
+            object_type_expression = f"COALESCE(object_type, '{LEGACY_CACHE_OBJECT_TYPE}')"
+        else:
+            object_type_expression = f"'{LEGACY_CACHE_OBJECT_TYPE}'"
+
+        connection.execute(
+            f"""
+            INSERT INTO cache_entries (
+                cache_key,
+                object_type,
+                object_id,
+                version,
+                created_at,
+                updated_at,
+                payload,
+                ttl_seconds
+            )
+            SELECT
+                cache_key,
+                {object_type_expression},
+                object_id,
+                version,
+                created_at,
+                updated_at,
+                payload,
+                ttl_seconds
+            FROM cache_entries_legacy
+            """
+        )
+        connection.execute("DROP TABLE cache_entries_legacy")
 
 
 __all__ = ["SQLiteStore"]
