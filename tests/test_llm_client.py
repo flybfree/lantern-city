@@ -68,9 +68,60 @@ def test_openai_compatible_client_posts_to_v1_chat_completions(
         "messages": sample_messages,
         "temperature": 0.2,
         "max_tokens": 700,
-        "response_format": {"type": "json_object"},
+        "response_format": {"type": "text"},
     }
     assert response.content == '{"schema_version": "1.0"}'
+
+
+def test_generate_json_uses_json_schema_response_format_when_schema_is_provided(
+    sample_messages: list[dict[str, str]],
+) -> None:
+    captured: dict[str, object] = {}
+    schema = {
+        "type": "object",
+        "properties": {"schema_version": {"type": "string"}},
+        "required": ["schema_version"],
+        "additionalProperties": False,
+    }
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["json"] = json.loads(request.content.decode("utf-8"))
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "message": {
+                            "content": '{"schema_version": "1.0"}',
+                        }
+                    }
+                ]
+            },
+        )
+
+    transport = httpx.MockTransport(handler)
+    http_client = httpx.Client(transport=transport)
+    client = OpenAICompatibleLLMClient(
+        OpenAICompatibleConfig(base_url="http://127.0.0.1:8080", model="demo-model"),
+        http_client=http_client,
+    )
+
+    parsed = client.generate_json(messages=sample_messages, schema=schema)
+
+    assert parsed == {"schema_version": "1.0"}
+    assert captured["json"] == {
+        "model": "demo-model",
+        "messages": sample_messages,
+        "temperature": 0.2,
+        "max_tokens": 2400,
+        "response_format": {
+            "type": "json_schema",
+            "json_schema": {
+                "name": "structured_output",
+                "schema": schema,
+            },
+        },
+    }
 
 
 def test_openai_compatible_client_includes_bearer_auth_when_api_key_is_present(

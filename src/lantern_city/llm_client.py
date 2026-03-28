@@ -57,13 +57,14 @@ class OpenAICompatibleLLMClient:
         messages: list[dict[str, str]],
         temperature: float = 0.2,
         max_tokens: int = 2400,
+        response_format: dict[str, Any] | None = None,
     ) -> ChatCompletionResult:
         payload = {
             "model": self.config.model,
             "messages": messages,
             "temperature": temperature,
             "max_tokens": max_tokens,
-            "response_format": {"type": "json_object"},
+            "response_format": response_format or {"type": "text"},
         }
 
         try:
@@ -96,13 +97,26 @@ class OpenAICompatibleLLMClient:
         messages: list[dict[str, str]],
         temperature: float = 0.2,
         max_tokens: int = 2400,
+        schema: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         response = self.create_chat_completion(
             messages=messages,
             temperature=temperature,
             max_tokens=max_tokens,
+            response_format=self._build_response_format(schema=schema),
         )
         return self.parse_json_content(response.raw_response)
+
+    def _build_response_format(self, *, schema: dict[str, Any] | None) -> dict[str, Any]:
+        if schema is None:
+            return {"type": "text"}
+        return {
+            "type": "json_schema",
+            "json_schema": {
+                "name": "structured_output",
+                "schema": schema,
+            },
+        }
 
     def parse_json_content(self, response_payload: dict[str, Any]) -> dict[str, Any]:
         content = self.extract_content(response_payload)

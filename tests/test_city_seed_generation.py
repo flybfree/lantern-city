@@ -30,12 +30,14 @@ class StubLLMClient:
         messages: list[dict[str, str]],
         temperature: float,
         max_tokens: int,
+        schema: dict[str, object] | None = None,
     ) -> dict[str, object]:
         self.calls.append(
             {
                 "messages": messages,
                 "temperature": temperature,
                 "max_tokens": max_tokens,
+                "schema": schema,
             }
         )
         if self.error is not None:
@@ -219,6 +221,9 @@ def test_city_seed_generator_builds_narrow_request_and_returns_validated_seed() 
     call = client.calls[0]
     assert call["temperature"] == 0.2
     assert call["max_tokens"] == 2400
+    assert call["schema"] is not None
+    assert call["schema"]["type"] == "object"
+    assert "properties" in call["schema"]
     messages = call["messages"]
     assert messages[0]["role"] == "system"
     assert "engine owns all persistent state" in messages[0]["content"].lower()

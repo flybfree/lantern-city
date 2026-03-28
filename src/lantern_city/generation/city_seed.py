@@ -22,6 +22,7 @@ class SupportsJSONGeneration(Protocol):
         messages: list[dict[str, str]],
         temperature: float = 0.2,
         max_tokens: int = 2400,
+        schema: dict[str, Any] | None = None,
     ) -> dict[str, Any]: ...
 
 
@@ -94,11 +95,13 @@ class CitySeedGenerator:
 
     def generate(self, request: CitySeedGenerationRequest) -> CitySeedDocument:
         messages = self._build_messages(request)
+        schema = CitySeedDocument.model_json_schema()
         try:
             payload = self._llm_client.generate_json(
                 messages=messages,
                 temperature=0.2,
                 max_tokens=2400,
+                schema=schema,
             )
         except Exception as exc:
             raise CitySeedGenerationError(str(exc)) from exc
