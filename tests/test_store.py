@@ -24,12 +24,18 @@ def make_city_state(*, version: int = 1, updated_at: str = "turn_0") -> CityStat
     )
 
 
-def make_district_state() -> DistrictState:
+def make_district_state(
+    *,
+    id: str = "district_old_quarter",
+    created_at: str = "turn_0",
+    updated_at: str = "turn_0",
+    version: int = 1,
+) -> DistrictState:
     return DistrictState(
-        id="district_old_quarter",
-        created_at="turn_0",
-        updated_at="turn_0",
-        version=1,
+        id=id,
+        created_at=created_at,
+        updated_at=updated_at,
+        version=version,
         name="Old Quarter",
         tone="ancient, damp",
         stability=0.47,
@@ -80,6 +86,37 @@ def test_save_object_replaces_existing_record_for_same_id_and_type(tmp_path) -> 
     assert loaded.updated_at == "turn_1"
 
 
+def test_save_object_preserves_created_at_on_update(tmp_path) -> None:
+    store = SQLiteStore(tmp_path / "lantern-city.sqlite3")
+
+    store.save_object(make_city_state())
+    store.save_object(
+        make_city_state(version=2, updated_at="turn_1").model_copy(
+            update={"created_at": "turn_99"}
+        )
+    )
+
+    loaded = store.load_object("CityState", "city_001")
+
+    assert loaded is not None
+    assert loaded.created_at == "turn_0"
+    assert loaded.updated_at == "turn_1"
+
+
+def test_save_object_allows_same_id_for_different_types(tmp_path) -> None:
+    store = SQLiteStore(tmp_path / "lantern-city.sqlite3")
+    city_state = make_city_state()
+    district_state = make_district_state(id=city_state.id)
+
+    store.save_object(city_state)
+    store.save_object(district_state)
+
+    assert store.load_object("CityState", city_state.id) == city_state
+    assert store.load_object("DistrictState", district_state.id) == district_state
+    assert store.list_objects("CityState") == [city_state]
+    assert store.list_objects("DistrictState") == [district_state]
+
+
 def test_list_objects_filters_by_type_and_returns_models(tmp_path) -> None:
     store = SQLiteStore(tmp_path / "lantern-city.sqlite3")
     city_state = make_city_state()
@@ -127,7 +164,39 @@ def test_save_and_load_cache_round_trip(tmp_path) -> None:
     assert loaded["ttl_seconds"] == 600
 
 
-def test_invalidate_cache_removes_matching_prefix_and_object_id_entries(tmp_path) -> None:
+def test_save_cache_preserves_created_at_on_update(tmp_path) -> None:
+    store = SQLiteStore(tmp_path / "lantern-city.sqlite3")
+    cache_key = "district:district_old_quarter:summary"
+
+    store.save_cache(
+        cache_key,
+        {"summary": "stale"},
+        version=1,
+        object_type="DistrictState",
+        object_id="district_old_quarter",
+        created_at="turn_0",
+        updated_at="turn_0",
+    )
+    store.save_cache(
+        cache_key,
+        {"summary": "fresh"},
+        version=2,
+        object_type="DistrictState",
+        object_id="district_old_quarter",
+        created_at="turn_99",
+        updated_at="turn_1",
+    )
+
+    loaded = store.load_cache(cache_key)
+
+    assert loaded is not None
+    assert loaded["created_at"] == "turn_0"
+    assert loaded["updated_at"] == "turn_1"
+    assert loaded["version"] == 2
+    assert loaded["payload"] == {"summary": "fresh"}
+
+
+def test_invalidate_cache_by_key_prefix_removes_matching_entries(tmp_path) -> None:
     store = SQLiteStore(tmp_path / "lantern-city.sqlite3")
     store.save_cache(
         "district:district_old_quarter:summary",
@@ -151,7 +220,7 @@ def test_invalidate_cache_removes_matching_prefix_and_object_id_entries(tmp_path
         object_id="npc_shrine_keeper",
     )
 
-    invalidated = store.invalidate_cache("district:district_old_quarter")
+    invalidated = store.invalidate_cache_by_key_prefix("district:district_old_quarter")
 
     assert invalidated == 2
     assert store.load_cache("district:district_old_quarter:summary") is None
@@ -159,7 +228,34 @@ def test_invalidate_cache_removes_matching_prefix_and_object_id_entries(tmp_path
     assert store.load_cache("npc:npc_shrine_keeper:summary") is not None
 
 
-def test_invalidate_cache_can_target_object_id(tmp_path) -> None:
+def test_invalidate_cache_by_key_prefix_treats_wildcards_as_literal_text(tmp_path) -> None:
+    store = SQLiteStore(tmp_path / "lantern-city.sqlite3")
+    wildcard_prefix = "district:%"
+    matching_key = "district:%:summary"
+    other_key = "district:district_old_quarter:summary"
+    store.save_cache(
+        matching_key,
+        {"summary": "remove me"},
+        version=1,
+        object_type="DistrictState",
+        object_id="district_percent",
+    )
+    store.save_cache(
+        other_key,
+        {"summary": "keep me"},
+        version=1,
+        object_type="DistrictState",
+        object_id="district_old_quarter",
+    )
+
+    invalidated = store.invalidate_cache_by_key_prefix(wildcard_prefix)
+
+    assert invalidated == 1
+    assert store.load_cache(matching_key) is None
+    assert store.load_cache(other_key) is not None
+
+
+def test_invalidate_cache_by_object_id_can_target_multiple_entries(tmp_path) -> None:
     store = SQLiteStore(tmp_path / "lantern-city.sqlite3")
     store.save_cache(
         "district:district_old_quarter:summary",
@@ -176,7 +272,7 @@ def test_invalidate_cache_can_target_object_id(tmp_path) -> None:
         object_id="district_old_quarter",
     )
 
-    invalidated = store.invalidate_cache("district_old_quarter")
+    invalidated = store.invalidate_cache_by_object_id("district_old_quarter")
 
     assert invalidated == 2
     assert store.load_cache("district:district_old_quarter:summary") is None
