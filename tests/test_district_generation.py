@@ -258,6 +258,56 @@ def test_district_generation_result_rejects_unbounded_location_text() -> None:
         DistrictGenerationResult.model_validate(payload)
 
 
+def test_district_generation_result_requires_three_to_five_major_locations() -> None:
+    payload = copy.deepcopy(make_valid_payload())
+    payload["structured_updates"]["major_locations"] = payload["structured_updates"]["major_locations"][:2]
+
+    with pytest.raises(ValidationError, match="major_locations"):
+        DistrictGenerationResult.model_validate(payload)
+
+
+@pytest.mark.parametrize(
+    ("field_name", "value"),
+    [
+        ("district_summary", "   "),
+        ("district_summary", "X" * 241),
+        ("local_problems", ["   "]),
+        ("local_problems", ["X" * 141]),
+        ("rumor_lines", ["   "]),
+        ("rumor_lines", ["X" * 141]),
+    ],
+)
+def test_district_generation_result_rejects_unbounded_structured_text(
+    field_name: str,
+    value: object,
+) -> None:
+    payload = copy.deepcopy(make_valid_payload())
+    payload["structured_updates"][field_name] = value
+
+    with pytest.raises(ValidationError, match=field_name):
+        DistrictGenerationResult.model_validate(payload)
+
+
+@pytest.mark.parametrize(
+    ("field_name", "value"),
+    [
+        ("entry_text", "   "),
+        ("entry_text", "X" * 321),
+        ("short_summary", "   "),
+        ("short_summary", "X" * 161),
+    ],
+)
+def test_district_generation_result_rejects_unbounded_cacheable_text(
+    field_name: str,
+    value: str,
+) -> None:
+    payload = copy.deepcopy(make_valid_payload())
+    payload["cacheable_text"][field_name] = value
+
+    with pytest.raises(ValidationError, match=field_name):
+        DistrictGenerationResult.model_validate(payload)
+
+
 def test_district_generation_result_rejects_non_local_npc_anchor_id_shape() -> None:
     payload = copy.deepcopy(make_valid_payload())
     payload["structured_updates"]["npc_anchor_ids_or_specs"][0]["npc_id"] = "citizen_ila_venn"

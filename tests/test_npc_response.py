@@ -276,6 +276,69 @@ def test_npc_response_generation_result_rejects_overlong_npc_line() -> None:
         NPCResponseGenerationResult.model_validate(payload)
 
 
+@pytest.mark.parametrize(
+    ("field_name", "value"),
+    [
+        ("dialogue_act", "   "),
+        ("dialogue_act", "X" * 61),
+        ("npc_stance", "   "),
+        ("npc_stance", "X" * 81),
+    ],
+)
+def test_npc_response_generation_result_rejects_unbounded_structured_text(
+    field_name: str,
+    value: str,
+) -> None:
+    payload = copy.deepcopy(make_valid_payload())
+    payload["structured_updates"][field_name] = value
+
+    with pytest.raises(ValidationError, match=field_name):
+        NPCResponseGenerationResult.model_validate(payload)
+
+
+@pytest.mark.parametrize(
+    ("field_name", "value"),
+    [
+        ("follow_up_suggestions", ["   "]),
+        ("follow_up_suggestions", ["X" * 121]),
+        ("exit_line_if_needed", "   "),
+        ("exit_line_if_needed", "X" * 161),
+    ],
+)
+def test_npc_response_generation_result_rejects_unbounded_cacheable_text(
+    field_name: str,
+    value: object,
+) -> None:
+    payload = copy.deepcopy(make_valid_payload())
+    payload["cacheable_text"][field_name] = value
+
+    with pytest.raises(ValidationError, match=field_name):
+        NPCResponseGenerationResult.model_validate(payload)
+
+
+@pytest.mark.parametrize(
+    ("collection_name", "field_name", "value"),
+    [
+        ("clue_effects", "note", "   "),
+        ("clue_effects", "note", "X" * 161),
+        ("access_effects", "note", "   "),
+        ("access_effects", "note", "X" * 161),
+        ("redirect_targets", "reason", "   "),
+        ("redirect_targets", "reason", "X" * 161),
+    ],
+)
+def test_npc_response_generation_result_rejects_unbounded_effect_text(
+    collection_name: str,
+    field_name: str,
+    value: str,
+) -> None:
+    payload = copy.deepcopy(make_valid_payload())
+    payload["structured_updates"][collection_name][0][field_name] = value
+
+    with pytest.raises(ValidationError, match=field_name):
+        NPCResponseGenerationResult.model_validate(payload)
+
+
 def test_npc_response_request_requires_target_npc_in_slice() -> None:
     with pytest.raises(ValueError, match="npc"):
         NPCResponseGenerationRequest(

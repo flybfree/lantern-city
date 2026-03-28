@@ -15,6 +15,15 @@ class NPCResponseGenerationError(RuntimeError):
     pass
 
 
+def _require_bounded_text(value: str, *, field_name: str, max_length: int) -> str:
+    value = value.strip()
+    if not value:
+        raise ValueError(f"{field_name} must be a non-empty string")
+    if len(value) > max_length:
+        raise ValueError(f"{field_name} must stay under {max_length} characters")
+    return value
+
+
 @runtime_checkable
 class SupportsJSONGeneration(Protocol):
     def generate_json(
@@ -39,17 +48,32 @@ class ClueEffect(LanternCityModel):
     clue_id: str | None = None
     note: str
 
+    @field_validator("note")
+    @classmethod
+    def _validate_note(cls, value: str) -> str:
+        return _require_bounded_text(value, field_name="note", max_length=160)
+
 
 class AccessEffect(LanternCityModel):
     effect_type: str
     target_id: str | None = None
     note: str
 
+    @field_validator("note")
+    @classmethod
+    def _validate_note(cls, value: str) -> str:
+        return _require_bounded_text(value, field_name="note", max_length=160)
+
 
 class RedirectTarget(LanternCityModel):
     target_type: str
     target_id: str
     reason: str
+
+    @field_validator("reason")
+    @classmethod
+    def _validate_reason(cls, value: str) -> str:
+        return _require_bounded_text(value, field_name="reason", max_length=160)
 
 
 class NPCResponseStructuredUpdates(LanternCityModel):
@@ -60,6 +84,16 @@ class NPCResponseStructuredUpdates(LanternCityModel):
     access_effects: list[AccessEffect] = Field(default_factory=list, max_length=3)
     redirect_targets: list[RedirectTarget] = Field(default_factory=list, max_length=3)
 
+    @field_validator("dialogue_act")
+    @classmethod
+    def _validate_dialogue_act(cls, value: str) -> str:
+        return _require_bounded_text(value, field_name="dialogue_act", max_length=60)
+
+    @field_validator("npc_stance")
+    @classmethod
+    def _validate_npc_stance(cls, value: str) -> str:
+        return _require_bounded_text(value, field_name="npc_stance", max_length=80)
+
 
 class NPCResponseCacheableText(LanternCityModel):
     npc_line: str
@@ -69,16 +103,27 @@ class NPCResponseCacheableText(LanternCityModel):
     @field_validator("npc_line")
     @classmethod
     def _validate_npc_line(cls, value: str) -> str:
-        value = value.strip()
-        if not value:
-            raise ValueError("npc_line must be a non-empty string")
-        if len(value) > 280:
-            raise ValueError("npc_line must stay bounded to one compact turn")
+        value = _require_bounded_text(value, field_name="npc_line", max_length=280)
         if "\n" in value or "\r" in value:
             raise ValueError("npc_line must be a single reply turn")
         if re.search(r"(?:^|\s)(?:player|npc|you|detective|investigator):", value, flags=re.IGNORECASE):
             raise ValueError("npc_line must not look like a transcript")
         return value
+
+    @field_validator("follow_up_suggestions")
+    @classmethod
+    def _validate_follow_up_suggestions(cls, value: list[str]) -> list[str]:
+        return [
+            _require_bounded_text(item, field_name="follow_up_suggestions", max_length=120)
+            for item in value
+        ]
+
+    @field_validator("exit_line_if_needed")
+    @classmethod
+    def _validate_exit_line_if_needed(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        return _require_bounded_text(value, field_name="exit_line_if_needed", max_length=160)
 
 
 class NPCResponseGenerationResult(LanternCityModel):

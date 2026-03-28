@@ -14,6 +14,15 @@ class DistrictGenerationError(RuntimeError):
     pass
 
 
+def _require_bounded_text(value: str, *, field_name: str, max_length: int) -> str:
+    value = value.strip()
+    if not value:
+        raise ValueError(f"{field_name} must be a non-empty string")
+    if len(value) > max_length:
+        raise ValueError(f"{field_name} must stay under {max_length} characters")
+    return value
+
+
 @runtime_checkable
 class SupportsJSONGeneration(Protocol):
     def generate_json(
@@ -105,15 +114,46 @@ class NPCAnchorSpec(LanternCityModel):
 
 class DistrictStructuredUpdates(LanternCityModel):
     district_summary: str
-    major_locations: list[DistrictLocation] = Field(min_length=1, max_length=5)
+    major_locations: list[DistrictLocation] = Field(min_length=3, max_length=5)
     local_problems: list[str] = Field(min_length=1, max_length=4)
     rumor_lines: list[str] = Field(min_length=1, max_length=5)
     npc_anchor_ids_or_specs: list[NPCAnchorSpec] = Field(max_length=5)
+
+    @field_validator("district_summary")
+    @classmethod
+    def _validate_district_summary(cls, value: str) -> str:
+        return _require_bounded_text(value, field_name="district_summary", max_length=240)
+
+    @field_validator("local_problems")
+    @classmethod
+    def _validate_local_problems(cls, value: list[str]) -> list[str]:
+        return [
+            _require_bounded_text(item, field_name="local_problems", max_length=140)
+            for item in value
+        ]
+
+    @field_validator("rumor_lines")
+    @classmethod
+    def _validate_rumor_lines(cls, value: list[str]) -> list[str]:
+        return [
+            _require_bounded_text(item, field_name="rumor_lines", max_length=140)
+            for item in value
+        ]
 
 
 class DistrictCacheableText(LanternCityModel):
     entry_text: str
     short_summary: str
+
+    @field_validator("entry_text")
+    @classmethod
+    def _validate_entry_text(cls, value: str) -> str:
+        return _require_bounded_text(value, field_name="entry_text", max_length=320)
+
+    @field_validator("short_summary")
+    @classmethod
+    def _validate_short_summary(cls, value: str) -> str:
+        return _require_bounded_text(value, field_name="short_summary", max_length=160)
 
 
 class DistrictGenerationResult(LanternCityModel):
@@ -186,6 +226,7 @@ class DistrictGenerationRequest:
             "active_case": case_payload,
             "constraints": {
                 "current_district_slice_only": True,
+                "min_major_locations": 3,
                 "max_major_locations": 5,
                 "short_rumors_only": True,
                 "cacheable_text_required": ["entry_text", "short_summary"],
