@@ -1,4 +1,5 @@
 import json
+from datetime import datetime
 
 from pydantic import ValidationError
 
@@ -341,3 +342,76 @@ def test_models_forbid_unknown_fields() -> None:
         assert "impossible_field" in str(exc)
     else:
         raise AssertionError("Expected validation error for unknown field")
+
+
+def test_json_typed_fields_reject_non_json_serializable_values() -> None:
+    invalid_value = datetime.now()
+
+    invalid_cases = [
+        (
+            NPCState,
+            {
+                "id": "npc_001",
+                "created_at": "turn_0",
+                "updated_at": "turn_0",
+                "name": "Ila Venn",
+                "role_category": "informant",
+                "memory_log": [{"turn": 1, "event": invalid_value}],
+            },
+            "memory_log",
+        ),
+        (
+            PlayerRequest,
+            {
+                "id": "req_001",
+                "created_at": "turn_0",
+                "updated_at": "turn_0",
+                "player_id": "player_001",
+                "intent": "inspect",
+                "context_refs": {"seen_at": invalid_value},
+            },
+            "context_refs",
+        ),
+        (
+            GenerationJob,
+            {
+                "id": "job_001",
+                "created_at": "turn_0",
+                "updated_at": "turn_0",
+                "job_kind": "npc_response",
+                "input_refs": {"seen_at": invalid_value},
+            },
+            "input_refs",
+        ),
+        (
+            GeneratedOutput,
+            {
+                "id": "out_001",
+                "created_at": "turn_0",
+                "updated_at": "turn_0",
+                "source_job_id": "job_001",
+                "output_kind": "npc_response",
+                "structured_updates": {"seen_at": invalid_value},
+            },
+            "structured_updates",
+        ),
+        (
+            PlayerResponse,
+            {
+                "id": "resp_001",
+                "created_at": "turn_0",
+                "updated_at": "turn_0",
+                "request_id": "req_001",
+                "state_changes": [{"type": "noted", "seen_at": invalid_value}],
+            },
+            "state_changes",
+        ),
+    ]
+
+    for model_cls, payload, field_name in invalid_cases:
+        try:
+            model_cls(**payload)
+        except ValidationError as exc:
+            assert field_name in str(exc)
+        else:
+            raise AssertionError(f"Expected validation error for {model_cls.__name__}.{field_name}")

@@ -1,8 +1,12 @@
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
+
+type JSONScalar = str | int | float | bool | None
+type JSONValue = JSONScalar | list[JSONValue] | dict[str, JSONValue]
+type JSONObject = dict[str, JSONValue]
 
 
 class LanternCityModel(BaseModel):
@@ -93,7 +97,7 @@ class NPCState(RuntimeModel):
     known_clue_ids: list[str] = Field(default_factory=list)
     known_promises: list[str] = Field(default_factory=list)
     relationship_flags: list[str] = Field(default_factory=list)
-    memory_log: list[dict[str, Any]] = Field(default_factory=list)
+    memory_log: list[JSONObject] = Field(default_factory=list)
     relevance_rating: float = 0.0
 
 
@@ -185,7 +189,7 @@ class PlayerRequest(RuntimeModel):
     case_id: str | None = None
     scene_id: str | None = None
     input_text: str = ""
-    context_refs: dict[str, Any] = Field(default_factory=dict)
+    context_refs: JSONObject = Field(default_factory=dict)
 
 
 class GenerationJob(RuntimeModel):
@@ -193,7 +197,7 @@ class GenerationJob(RuntimeModel):
     job_kind: str
     priority: str = "normal"
     status: str = "queued"
-    input_refs: dict[str, Any] = Field(default_factory=dict)
+    input_refs: JSONObject = Field(default_factory=dict)
     required_outputs: list[str] = Field(default_factory=list)
     cached_output_id: str | None = None
 
@@ -203,14 +207,14 @@ class GeneratedOutput(RuntimeModel):
     source_job_id: str
     output_kind: str
     text: str = ""
-    structured_updates: dict[str, Any] = Field(default_factory=dict)
+    structured_updates: JSONObject = Field(default_factory=dict)
 
 
 class PlayerResponse(RuntimeModel):
     type: Literal["PlayerResponse"] = "PlayerResponse"
     request_id: str
     narrative_text: str = ""
-    state_changes: list[dict[str, Any]] = Field(default_factory=list)
+    state_changes: list[JSONObject] = Field(default_factory=list)
     next_actions: list[str] = Field(default_factory=list)
 
 
