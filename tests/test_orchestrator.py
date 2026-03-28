@@ -139,6 +139,7 @@ def test_orchestrate_request_builds_active_slice_for_npc_conversation(populated_
 
     assert orchestrated.request == request
     assert orchestrated.intent == "talk_to_npc"
+    assert orchestrated.active_slice.city.id == CITY_ID
     assert orchestrated.active_slice.working_set.city_id == CITY_ID
     assert orchestrated.active_slice.district is not None
     assert orchestrated.active_slice.district.id == DISTRICT_ID

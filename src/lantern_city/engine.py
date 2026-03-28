@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from lantern_city.active_slice import ActiveSlice, RequestIntent
-from lantern_city.models import CityState, ClueState, DistrictState, NPCState, PlayerRequest, RuntimeModel
+from lantern_city.models import ClueState, DistrictState, NPCState, PlayerRequest, RuntimeModel
 from lantern_city.orchestrator import orchestrate_request
 from lantern_city.response import ResponsePayload, compose_response
 from lantern_city.store import SQLiteStore
@@ -35,13 +35,11 @@ def handle_player_request(
     request: PlayerRequest,
 ) -> EngineOutcome:
     orchestrated = orchestrate_request(store, city_id=city_id, request=request)
-    city = _load_city(store, city_id)
     state_update_engine = StateUpdateEngine(store)
 
     if orchestrated.intent == "district_entry":
         response, changed_objects = _handle_district_entry(
             state_update_engine,
-            city,
             orchestrated.active_slice,
             request,
         )
@@ -74,10 +72,10 @@ def handle_player_request(
 
 def _handle_district_entry(
     state_update_engine: StateUpdateEngine,
-    city: CityState,
     active_slice: ActiveSlice,
     request: PlayerRequest,
 ) -> tuple[ResponsePayload, list[str]]:
+    city = active_slice.city
     district = _require_district(active_slice)
     case_title = None if active_slice.case is None else active_slice.case.title
 
@@ -100,15 +98,6 @@ def _handle_district_entry(
         }
     )
     changed_objects = state_update_engine.apply_updates(updated_city)
-    _cache_response(
-        state_update_engine.store,
-        cache_key=f"response:district_entry:{district.id}",
-        object_type="DistrictState",
-        object_id=district.id,
-        version=district.version,
-        request=request,
-        response=response,
-    )
     return response, changed_objects
 
 
@@ -149,15 +138,6 @@ def _handle_npc_conversation(
         }
     )
     changed_objects = state_update_engine.apply_updates(updated_npc)
-    _cache_response(
-        state_update_engine.store,
-        cache_key=f"response:talk_to_npc:{npc.id}:{_normalize_cache_fragment(request.input_text)}",
-        object_type="NPCState",
-        object_id=npc.id,
-        version=updated_npc.version,
-        request=request,
-        response=response,
-    )
     return response, changed_objects
 
 
@@ -224,34 +204,6 @@ def _conversation_next_actions(case_title: str | None) -> list[str]:
     return next_actions
 
 
-def _cache_response(
-    store: SQLiteStore,
-    *,
-    cache_key: str,
-    object_type: str,
-    object_id: str,
-    version: int,
-    request: PlayerRequest,
-    response: ResponsePayload,
-) -> None:
-    store.save_cache(
-        cache_key,
-        response.model_dump(),
-        version=version,
-        object_type=object_type,
-        object_id=object_id,
-        created_at=request.created_at,
-        updated_at=request.updated_at,
-    )
-
-
-def _load_city(store: SQLiteStore, city_id: str) -> CityState:
-    loaded = store.load_object("CityState", city_id)
-    if not isinstance(loaded, CityState):
-        raise LookupError(f"Missing required world object CityState:{city_id}")
-    return loaded
-
-
 def _require_district(active_slice: ActiveSlice) -> DistrictState:
     if active_slice.district is None:
         raise LookupError("District request requires an active district slice")
@@ -268,11 +220,6 @@ def _first_clue(clues: list[ClueState]) -> ClueState | None:
     if not clues:
         return None
     return clues[0]
-
-
-def _normalize_cache_fragment(value: str) -> str:
-    normalized = " ".join(value.strip().lower().split())
-    return normalized.replace(".", "") or "default"
 
 
 def _display_name(identifier: str) -> str:

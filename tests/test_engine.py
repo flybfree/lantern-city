@@ -160,6 +160,15 @@ def _district_entry_slice(request: PlayerRequest) -> ActiveSlice:
         known_clue_ids=[CLUE_ID],
     )
     return ActiveSlice(
+        city=CityState(
+            id=CITY_ID,
+            created_at=TURN_ZERO,
+            updated_at=TURN_ZERO,
+            city_seed_id="cityseed_001",
+            active_case_ids=[CASE_ID],
+            district_ids=[DISTRICT_ID],
+            faction_ids=[],
+        ),
         working_set=ActiveWorkingSet(
             id=f"synthetic_active_working_set_{CITY_ID}_{request.id}",
             created_at=f"synthetic_active_slice_request_{request.id}",
@@ -208,6 +217,7 @@ def test_handle_player_request_uses_orchestrator_to_build_the_active_slice(
     assert calls == [(populated_store, CITY_ID, request)]
     assert outcome.intent == "district_entry"
     assert outcome.active_slice == expected_slice
+    assert outcome.active_slice.city.id == CITY_ID
 
 
 def test_handle_player_request_routes_district_entry_updates_through_state_update_engine(
@@ -247,7 +257,6 @@ def test_handle_player_request_returns_district_entry_response_and_persists_city
     outcome = handle_player_request(populated_store, city_id=CITY_ID, request=request)
     city = populated_store.load_object("CityState", CITY_ID)
     district = populated_store.load_object("DistrictState", DISTRICT_ID)
-    cached = populated_store.load_cache(f"response:district_entry:{DISTRICT_ID}")
 
     assert outcome.response.narrative_text == (
         "You enter Old Quarter. The district feels wet and watchful, "
@@ -266,8 +275,7 @@ def test_handle_player_request_returns_district_entry_response_and_persists_city
     assert isinstance(district, DistrictState)
     assert district.version == 1
     assert district.updated_at == TURN_ZERO
-    assert cached is not None
-    assert cached["payload"]["narrative_text"] == outcome.response.narrative_text
+    assert populated_store.load_cache(f"response:district_entry:{DISTRICT_ID}") is None
 
 
 def test_handle_player_request_returns_npc_conversation_response_and_only_mutates_npc(
@@ -285,7 +293,6 @@ def test_handle_player_request_returns_npc_conversation_response_and_only_mutate
     city = populated_store.load_object("CityState", CITY_ID)
     district = populated_store.load_object("DistrictState", DISTRICT_ID)
     npc = populated_store.load_object("NPCState", NPC_ID)
-    cached = populated_store.load_cache(f"response:talk_to_npc:{NPC_ID}:ask about the outage")
 
     assert outcome.intent == "talk_to_npc"
     assert outcome.response.narrative_text == (
@@ -315,8 +322,4 @@ def test_handle_player_request_returns_npc_conversation_response_and_only_mutate
             "input_text": "Ask about the outage.",
         }
     ]
-    assert cached is not None
-    assert cached["payload"]["next_actions"] == [
-        "Ask a narrower question",
-        "Review The Missing Clerk",
-    ]
+    assert populated_store.load_cache(f"response:talk_to_npc:{NPC_ID}:ask about the outage") is None

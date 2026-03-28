@@ -61,6 +61,7 @@ class MissingWorldObjectError(LookupError):
 
 @dataclass(frozen=True, slots=True)
 class ActiveSlice:
+    city: CityState
     working_set: ActiveWorkingSet
     district: DistrictState | None
     location: LocationState | None
@@ -116,7 +117,7 @@ def build_active_slice(
     ):
         return _build_slice(
             request_id=request.id,
-            city_id=city.id,
+            city=city,
             district=None,
             location=None,
             scene=None,
@@ -158,7 +159,7 @@ def build_active_slice(
 
     return _build_slice(
         request_id=request.id,
-        city_id=city.id,
+        city=city,
         district=district,
         location=location,
         scene=scene,
@@ -171,7 +172,7 @@ def build_active_slice(
 def _build_slice(
     *,
     request_id: str,
-    city_id: str,
+    city: CityState,
     district: DistrictState | None,
     location: LocationState | None,
     scene: SceneState | None,
@@ -183,10 +184,10 @@ def _build_slice(
     clue_ids = [clue.id for clue in clues]
     metadata_token = f"synthetic_active_slice_request_{request_id}"
     working_set = ActiveWorkingSet(
-        id=f"synthetic_active_working_set_{city_id}_{request_id}",
+        id=f"synthetic_active_working_set_{city.id}_{request_id}",
         created_at=metadata_token,
         updated_at=metadata_token,
-        city_id=city_id,
+        city_id=city.id,
         district_id=None if district is None else district.id,
         location_id=None if location is None else location.id,
         case_id=None if case is None else case.id,
@@ -195,6 +196,7 @@ def _build_slice(
         clue_ids=clue_ids,
     )
     return ActiveSlice(
+        city=city,
         working_set=working_set,
         district=district,
         location=location,

@@ -224,6 +224,7 @@ def test_build_active_slice_for_district_entry(populated_store: SQLiteStore) -> 
     active_slice = build_active_slice(populated_store, city_id=CITY_ID, request=request)
 
     assert isinstance(active_slice, ActiveSlice)
+    assert active_slice.city.id == CITY_ID
     assert active_slice.district is not None
     assert active_slice.district.id == DISTRICT_OLD
     assert active_slice.location is None
