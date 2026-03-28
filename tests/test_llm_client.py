@@ -5,7 +5,12 @@ import json
 import httpx
 import pytest
 
-from lantern_city.llm_client import LLMClientResponseError, OpenAICompatibleConfig, OpenAICompatibleLLMClient
+from lantern_city.llm_client import (
+    LLMClientError,
+    LLMClientResponseError,
+    OpenAICompatibleConfig,
+    OpenAICompatibleLLMClient,
+)
 
 
 @pytest.fixture
@@ -16,7 +21,9 @@ def sample_messages() -> list[dict[str, str]]:
     ]
 
 
-def test_openai_compatible_client_posts_to_v1_chat_completions(sample_messages: list[dict[str, str]]) -> None:
+def test_openai_compatible_client_posts_to_v1_chat_completions(
+    sample_messages: list[dict[str, str]],
+) -> None:
     captured: dict[str, object] = {}
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -40,11 +47,18 @@ def test_openai_compatible_client_posts_to_v1_chat_completions(sample_messages: 
     transport = httpx.MockTransport(handler)
     http_client = httpx.Client(transport=transport)
     client = OpenAICompatibleLLMClient(
-        OpenAICompatibleConfig(base_url="http://192.168.3.181:1234", model="nvidia/nemotron-3-nano-4b"),
+        OpenAICompatibleConfig(
+            base_url="http://192.168.3.181:1234",
+            model="nvidia/nemotron-3-nano-4b",
+        ),
         http_client=http_client,
     )
 
-    response = client.create_chat_completion(messages=sample_messages, temperature=0.2, max_tokens=700)
+    response = client.create_chat_completion(
+        messages=sample_messages,
+        temperature=0.2,
+        max_tokens=700,
+    )
 
     assert captured["url"] == "http://192.168.3.181:1234/v1/chat/completions"
     normalized_headers = {key.lower() for key in captured["headers"]}
@@ -140,3 +154,54 @@ def test_parse_json_content_raises_clear_error_for_invalid_json() -> None:
 
     with pytest.raises(LLMClientResponseError, match="invalid JSON"):
         client.parse_json_content({"choices": [{"message": {"content": "not json"}}]})
+
+
+def test_parse_json_content_rejects_non_object_json() -> None:
+    client = OpenAICompatibleLLMClient(
+        OpenAICompatibleConfig(base_url="http://127.0.0.1:8080", model="demo-model")
+    )
+
+    with pytest.raises(LLMClientResponseError, match="must be an object"):
+        client.parse_json_content(
+            {"choices": [{"message": {"content": '["not", "an", "object"]'}}]}
+        )
+
+
+@pytest.mark.parametrize(
+    "response_payload",
+    [
+        pytest.param({}, id="missing-choices"),
+        pytest.param({"choices": []}, id="empty-choices"),
+        pytest.param({"choices": [{"message": {"content": None}}]}, id="missing-text-content"),
+    ],
+)
+def test_extract_content_rejects_malformed_response_shapes(
+    response_payload: dict[str, object],
+) -> None:
+    client = OpenAICompatibleLLMClient(
+        OpenAICompatibleConfig(base_url="http://127.0.0.1:8080", model="demo-model")
+    )
+
+    with pytest.raises(LLMClientResponseError):
+        client.extract_content(response_payload)
+
+
+def test_openai_compatible_client_wraps_http_status_errors(
+    sample_messages: list[dict[str, str]],
+) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            503,
+            json={"error": {"message": "upstream unavailable"}},
+            request=request,
+        )
+
+    transport = httpx.MockTransport(handler)
+    http_client = httpx.Client(transport=transport)
+    client = OpenAICompatibleLLMClient(
+        OpenAICompatibleConfig(base_url="http://127.0.0.1:8080", model="demo-model"),
+        http_client=http_client,
+    )
+
+    with pytest.raises(LLMClientError, match="503"):
+        client.create_chat_completion(messages=sample_messages)

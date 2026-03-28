@@ -66,14 +66,26 @@ class OpenAICompatibleLLMClient:
             "response_format": {"type": "json_object"},
         }
 
-        response = self._http_client.post(
-            f"{self.config.normalized_base_url}/chat/completions",
-            headers=self._build_headers(),
-            json=payload,
-        )
-        response.raise_for_status()
+        try:
+            response = self._http_client.post(
+                f"{self.config.normalized_base_url}/chat/completions",
+                headers=self._build_headers(),
+                json=payload,
+            )
+            response.raise_for_status()
+        except httpx.HTTPStatusError as exc:
+            status_code = exc.response.status_code
+            raise LLMClientError(
+                f"LLM request failed with status {status_code}"
+            ) from exc
+        except httpx.HTTPError as exc:
+            raise LLMClientError(f"LLM request failed: {exc}") from exc
+
         raw_response = response.json()
-        return ChatCompletionResult(raw_response=raw_response, content=self.extract_content(raw_response))
+        return ChatCompletionResult(
+            raw_response=raw_response,
+            content=self.extract_content(raw_response),
+        )
 
     def generate_json(
         self,
@@ -103,7 +115,9 @@ class OpenAICompatibleLLMClient:
         try:
             message = response_payload["choices"][0]["message"]
         except (KeyError, IndexError, TypeError) as exc:
-            raise LLMClientResponseError("Model response is missing choices[0].message content") from exc
+            raise LLMClientResponseError(
+                "Model response is missing choices[0].message content"
+            ) from exc
 
         content = message.get("content")
         if isinstance(content, str):

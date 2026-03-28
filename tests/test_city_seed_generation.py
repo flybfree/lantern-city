@@ -1,20 +1,36 @@
 from __future__ import annotations
 
 import copy
+import json
 
 import pytest
 from pydantic import ValidationError
 
-from lantern_city.generation.city_seed import CitySeedGenerationError, CitySeedGenerationRequest, CitySeedGenerator
+from lantern_city.generation.city_seed import (
+    CitySeedGenerationError,
+    CitySeedGenerationRequest,
+    CitySeedGenerator,
+)
 
 
 class StubLLMClient:
-    def __init__(self, payload: dict[str, object] | None = None, *, error: Exception | None = None) -> None:
+    def __init__(
+        self,
+        payload: dict[str, object] | None = None,
+        *,
+        error: Exception | None = None,
+    ) -> None:
         self.payload = payload
         self.error = error
         self.calls: list[dict[str, object]] = []
 
-    def generate_json(self, *, messages: list[dict[str, str]], temperature: float, max_tokens: int) -> dict[str, object]:
+    def generate_json(
+        self,
+        *,
+        messages: list[dict[str, str]],
+        temperature: float,
+        max_tokens: int,
+    ) -> dict[str, object]:
         self.calls.append(
             {
                 "messages": messages,
@@ -209,6 +225,9 @@ def test_city_seed_generator_builds_narrow_request_and_returns_validated_seed() 
     assert "task_type\": \"city_seed\"" in messages[1]["content"]
     assert "request_id\": \"req_city_seed_001\"" in messages[1]["content"]
     assert "district_count" in messages[1]["content"]
+    assert "JSON Schema" in messages[1]["content"]
+    assert '"city_identity"' in messages[1]["content"]
+    assert '"district_configuration"' in messages[1]["content"]
 
 
 def test_city_seed_generator_wraps_invalid_json_errors() -> None:
@@ -227,3 +246,49 @@ def test_city_seed_generator_propagates_schema_validation_failure() -> None:
 
     with pytest.raises(ValidationError, match="district_count"):
         generator.generate(CitySeedGenerationRequest(request_id="req_city_seed_003"))
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "expected_message"),
+    [
+        pytest.param(
+            {"request_id": "   "},
+            "request_id must be a non-empty string",
+            id="blank-request-id",
+        ),
+        pytest.param(
+            {"request_id": "req_city_seed_004", "seed_parameters": {"bad": object()}},
+            "seed_parameters must be JSON-serializable",
+            id="non-serializable-seed-parameters",
+        ),
+        pytest.param(
+            {"request_id": "req_city_seed_005", "seed_parameters": {1: "bad key"}},
+            "seed_parameters keys must be strings",
+            id="non-string-seed-parameter-key",
+        ),
+    ],
+)
+def test_city_seed_generation_request_rejects_invalid_inputs(
+    kwargs: dict[str, object], expected_message: str
+) -> None:
+    with pytest.raises(ValueError, match=expected_message):
+        CitySeedGenerationRequest(**kwargs)
+
+
+def test_city_seed_generation_request_preserves_json_safe_payload() -> None:
+    request = CitySeedGenerationRequest(
+        request_id="req_city_seed_006",
+        seed_parameters={"district_count": 2, "tags": ["wet", "noir"]},
+    )
+
+    assert json.loads(request.to_json()) == {
+        "city_scale": "mvp",
+        "request_id": "req_city_seed_006",
+        "schema_version": "1.0",
+        "seed_parameters": {"district_count": 2, "tags": ["wet", "noir"]},
+    }
+
+
+def test_city_seed_generator_rejects_client_without_generate_json() -> None:
+    with pytest.raises(TypeError, match="generate_json"):
+        CitySeedGenerator(object())
