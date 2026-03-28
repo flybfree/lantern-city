@@ -31,6 +31,15 @@ def _require_prefixed_id(value: str, *, field_name: str, prefix: str, max_length
     return value
 
 
+def _require_single_turn_text(value: str, *, field_name: str, max_length: int) -> str:
+    value = _require_bounded_text(value, field_name=field_name, max_length=max_length)
+    if "\n" in value or "\r" in value:
+        raise ValueError(f"{field_name} must be a single reply turn")
+    if re.search(r"(?:^|\s)(?:player|npc|you|detective|investigator):", value, flags=re.IGNORECASE):
+        raise ValueError(f"{field_name} must not look like a transcript")
+    return value
+
+
 @runtime_checkable
 class SupportsJSONGeneration(Protocol):
     def generate_json(
@@ -151,12 +160,7 @@ class NPCResponseCacheableText(LanternCityModel):
     @field_validator("npc_line")
     @classmethod
     def _validate_npc_line(cls, value: str) -> str:
-        value = _require_bounded_text(value, field_name="npc_line", max_length=280)
-        if "\n" in value or "\r" in value:
-            raise ValueError("npc_line must be a single reply turn")
-        if re.search(r"(?:^|\s)(?:player|npc|you|detective|investigator):", value, flags=re.IGNORECASE):
-            raise ValueError("npc_line must not look like a transcript")
-        return value
+        return _require_single_turn_text(value, field_name="npc_line", max_length=280)
 
     @field_validator("follow_up_suggestions")
     @classmethod
@@ -171,7 +175,7 @@ class NPCResponseCacheableText(LanternCityModel):
     def _validate_exit_line_if_needed(cls, value: str | None) -> str | None:
         if value is None:
             return None
-        return _require_bounded_text(value, field_name="exit_line_if_needed", max_length=160)
+        return _require_single_turn_text(value, field_name="exit_line_if_needed", max_length=160)
 
 
 class NPCResponseGenerationResult(LanternCityModel):
@@ -305,6 +309,7 @@ class NPCResponseGenerator:
         result: NPCResponseGenerationResult,
         request: NPCResponseGenerationRequest,
     ) -> None:
+        active_clue_ids = {clue.id for clue in request.active_slice.clues}
         visible_location_ids: set[str] = set()
         district = request.active_slice.district
         if district is not None:
@@ -313,6 +318,15 @@ class NPCResponseGenerator:
             visible_location_ids.add(request.active_slice.location.id)
         if request.active_slice.scene is not None and request.active_slice.scene.location_id is not None:
             visible_location_ids.add(request.active_slice.scene.location_id)
+
+        for clue_effect in result.structured_updates.clue_effects:
+            if clue_effect.clue_id is None:
+                continue
+            if clue_effect.clue_id not in active_clue_ids:
+                raise NPCResponseGenerationError(
+                    "structured_updates.clue_effects contains clue_id outside the active slice: "
+                    f"{clue_effect.clue_id}"
+                )
 
         for access_effect in result.structured_updates.access_effects:
             if access_effect.target_id is None:

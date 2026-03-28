@@ -289,6 +289,22 @@ def test_npc_response_generation_result_rejects_transcript_like_npc_line() -> No
         NPCResponseGenerationResult.model_validate(payload)
 
 
+def test_npc_response_generation_result_rejects_multiline_exit_line() -> None:
+    payload = copy.deepcopy(make_valid_payload())
+    payload["cacheable_text"]["exit_line_if_needed"] = "NPC: That's enough.\nPlayer: Wait."
+
+    with pytest.raises(ValidationError, match="exit_line_if_needed"):
+        NPCResponseGenerationResult.model_validate(payload)
+
+
+def test_npc_response_generation_result_rejects_transcript_like_exit_line() -> None:
+    payload = copy.deepcopy(make_valid_payload())
+    payload["cacheable_text"]["exit_line_if_needed"] = "Detective: One more thing."
+
+    with pytest.raises(ValidationError, match="exit_line_if_needed"):
+        NPCResponseGenerationResult.model_validate(payload)
+
+
 def test_npc_response_generation_result_rejects_overlong_npc_line() -> None:
     payload = copy.deepcopy(make_valid_payload())
     payload["cacheable_text"]["npc_line"] = "X" * 281
@@ -436,6 +452,22 @@ def test_npc_response_generator_rejects_access_target_outside_visible_slice() ->
     generator = NPCResponseGenerator(client)
 
     with pytest.raises(NPCResponseGenerationError, match="access_effects"):
+        generator.generate(
+            NPCResponseGenerationRequest(
+                request_id="req_npc_001",
+                active_slice=make_active_slice(),
+                player_request=make_player_request(),
+            )
+        )
+
+
+def test_npc_response_generator_rejects_clue_effect_outside_active_slice() -> None:
+    payload = copy.deepcopy(make_valid_payload())
+    payload["structured_updates"]["clue_effects"][0]["clue_id"] = "clue_hidden_archive"
+    client = StubLLMClient(payload)
+    generator = NPCResponseGenerator(client)
+
+    with pytest.raises(NPCResponseGenerationError, match="clue_effects"):
         generator.generate(
             NPCResponseGenerationRequest(
                 request_id="req_npc_001",
