@@ -103,6 +103,7 @@ def build_active_slice(
     resolved_intent = intent or classify_request_intent(request)
     city = _load_required(store, "CityState", city_id, CityState)
     request_target = _resolve_request_target(request, resolved_intent)
+    _raise_for_unresolved_explicit_target(request, request_target)
 
     if resolved_intent == "generic_action" and not any(
         [
@@ -114,6 +115,7 @@ def build_active_slice(
         ]
     ):
         return _build_slice(
+            request_id=request.id,
             city_id=city.id,
             district=None,
             location=None,
@@ -155,6 +157,7 @@ def build_active_slice(
     clues = _load_unique_required(store, "ClueState", clue_ids, ClueState)
 
     return _build_slice(
+        request_id=request.id,
         city_id=city.id,
         district=district,
         location=location,
@@ -167,6 +170,7 @@ def build_active_slice(
 
 def _build_slice(
     *,
+    request_id: str,
     city_id: str,
     district: DistrictState | None,
     location: LocationState | None,
@@ -177,10 +181,11 @@ def _build_slice(
 ) -> ActiveSlice:
     npc_ids = [npc.id for npc in npcs]
     clue_ids = [clue.id for clue in clues]
+    metadata_token = f"synthetic_active_slice_request_{request_id}"
     working_set = ActiveWorkingSet(
-        id=f"active_working_set_{city_id}",
-        created_at="turn_0",
-        updated_at="turn_0",
+        id=f"synthetic_active_working_set_{city_id}_{request_id}",
+        created_at=metadata_token,
+        updated_at=metadata_token,
         city_id=city_id,
         district_id=None if district is None else district.id,
         location_id=None if location is None else location.id,
@@ -345,6 +350,24 @@ def _resolve_request_target(
         if request.target_id.startswith(prefix):
             return RequestTarget(target_type=target_type, target_id=request.target_id)
     return None
+
+
+def _raise_for_unresolved_explicit_target(
+    request: PlayerRequest,
+    request_target: RequestTarget | None,
+) -> None:
+    if request.target_id is None or request_target is not None:
+        return
+
+    raw_target_type = request.context_refs.get("target_type")
+    target_type_suffix = ""
+    if raw_target_type is not None:
+        target_type_suffix = f", target_type={raw_target_type!r}"
+    raise ValueError(
+        "Unable to resolve request target "
+        f"for request {request.id}: target_id={request.target_id!r}{target_type_suffix}"
+    )
+
 
 
 def _request_target_type(request: PlayerRequest) -> TargetObjectType | None:

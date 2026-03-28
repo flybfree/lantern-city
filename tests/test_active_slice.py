@@ -247,6 +247,9 @@ def test_build_active_slice_for_npc_conversation(populated_store: SQLiteStore) -
     assert active_slice.scene.id == SCENE_TALK
     assert active_slice.case is not None
     assert active_slice.case.id == CASE_MAIN
+    assert active_slice.working_set.id == f"synthetic_active_working_set_{CITY_ID}_{request.id}"
+    assert active_slice.working_set.created_at == f"synthetic_active_slice_request_{request.id}"
+    assert active_slice.working_set.updated_at == f"synthetic_active_slice_request_{request.id}"
     assert [npc.id for npc in active_slice.npcs] == [NPC_KEEPER]
     assert [clue.id for clue in active_slice.clues] == [CLUE_BRACKET]
 
@@ -328,6 +331,20 @@ def test_build_active_slice_raises_clear_error_for_missing_required_reference(
         build_active_slice(populated_store, city_id=CITY_ID, request=request)
 
 
+def test_build_active_slice_raises_clear_error_for_unresolved_explicit_target_id(
+    populated_store: SQLiteStore,
+) -> None:
+    request = make_request(
+        intent="wait",
+        target_id="mystery_object_001",
+        context_refs={"target_type": "artifact"},
+    )
+
+    with pytest.raises(ValueError, match="Unable to resolve request target"):
+        build_active_slice(populated_store, city_id=CITY_ID, request=request)
+
+
+
 def test_build_active_slice_returns_controlled_empty_slice_for_generic_action_without_context(
     populated_store: SQLiteStore,
 ) -> None:
@@ -342,5 +359,8 @@ def test_build_active_slice_returns_controlled_empty_slice_for_generic_action_wi
     assert active_slice.npcs == []
     assert active_slice.clues == []
     assert active_slice.working_set.city_id == CITY_ID
+    assert active_slice.working_set.id == f"synthetic_active_working_set_{CITY_ID}_{request.id}"
+    assert active_slice.working_set.created_at == f"synthetic_active_slice_request_{request.id}"
+    assert active_slice.working_set.updated_at == f"synthetic_active_slice_request_{request.id}"
     assert active_slice.working_set.npc_ids == []
     assert active_slice.working_set.clue_ids == []
