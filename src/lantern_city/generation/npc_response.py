@@ -24,6 +24,13 @@ def _require_bounded_text(value: str, *, field_name: str, max_length: int) -> st
     return value
 
 
+def _require_prefixed_id(value: str, *, field_name: str, prefix: str, max_length: int) -> str:
+    value = _require_bounded_text(value, field_name=field_name, max_length=max_length)
+    if not value.startswith(prefix):
+        raise ValueError(f"{field_name} must start with {prefix}")
+    return value
+
+
 @runtime_checkable
 class SupportsJSONGeneration(Protocol):
     def generate_json(
@@ -42,11 +49,30 @@ class RelationshipShift(LanternCityModel):
     fear_delta: float = 0.0
     tag: str | None = None
 
+    @field_validator("tag")
+    @classmethod
+    def _validate_tag(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        return _require_bounded_text(value, field_name="tag", max_length=80)
+
 
 class ClueEffect(LanternCityModel):
     effect_type: str
     clue_id: str | None = None
     note: str
+
+    @field_validator("effect_type")
+    @classmethod
+    def _validate_effect_type(cls, value: str) -> str:
+        return _require_bounded_text(value, field_name="effect_type", max_length=40)
+
+    @field_validator("clue_id")
+    @classmethod
+    def _validate_clue_id(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        return _require_prefixed_id(value, field_name="clue_id", prefix="clue_", max_length=80)
 
     @field_validator("note")
     @classmethod
@@ -59,6 +85,18 @@ class AccessEffect(LanternCityModel):
     target_id: str | None = None
     note: str
 
+    @field_validator("effect_type")
+    @classmethod
+    def _validate_effect_type(cls, value: str) -> str:
+        return _require_bounded_text(value, field_name="effect_type", max_length=40)
+
+    @field_validator("target_id")
+    @classmethod
+    def _validate_target_id(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        return _require_prefixed_id(value, field_name="target_id", prefix="location_", max_length=80)
+
     @field_validator("note")
     @classmethod
     def _validate_note(cls, value: str) -> str:
@@ -69,6 +107,16 @@ class RedirectTarget(LanternCityModel):
     target_type: str
     target_id: str
     reason: str
+
+    @field_validator("target_type")
+    @classmethod
+    def _validate_target_type(cls, value: str) -> str:
+        return _require_bounded_text(value, field_name="target_type", max_length=40)
+
+    @field_validator("target_id")
+    @classmethod
+    def _validate_target_id(cls, value: str) -> str:
+        return _require_prefixed_id(value, field_name="target_id", prefix="location_", max_length=80)
 
     @field_validator("reason")
     @classmethod
@@ -134,6 +182,16 @@ class NPCResponseGenerationResult(LanternCityModel):
     cacheable_text: NPCResponseCacheableText
     confidence: float = Field(ge=0.0, le=1.0)
     warnings: list[str] = Field(default_factory=list)
+
+    @field_validator("summary_text")
+    @classmethod
+    def _validate_summary_text(cls, value: str) -> str:
+        return _require_bounded_text(value, field_name="summary_text", max_length=160)
+
+    @field_validator("warnings")
+    @classmethod
+    def _validate_warnings(cls, value: list[str]) -> list[str]:
+        return [_require_bounded_text(item, field_name="warnings", max_length=120) for item in value]
 
 
 @dataclass(frozen=True, slots=True)

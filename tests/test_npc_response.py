@@ -260,6 +260,26 @@ def test_npc_response_generation_result_requires_exact_task_type() -> None:
         NPCResponseGenerationResult.model_validate(payload)
 
 
+@pytest.mark.parametrize(
+    ("field_name", "value"),
+    [
+        ("summary_text", "   "),
+        ("summary_text", "X" * 161),
+        ("warnings", ["   "]),
+        ("warnings", ["X" * 121]),
+    ],
+)
+def test_npc_response_generation_result_rejects_unbounded_top_level_text(
+    field_name: str,
+    value: object,
+) -> None:
+    payload = copy.deepcopy(make_valid_payload())
+    payload[field_name] = value
+
+    with pytest.raises(ValidationError, match=field_name):
+        NPCResponseGenerationResult.model_validate(payload)
+
+
 def test_npc_response_generation_result_rejects_transcript_like_npc_line() -> None:
     payload = copy.deepcopy(make_valid_payload())
     payload["cacheable_text"]["npc_line"] = "NPC: Ask the annex.\nPlayer: Why?"
@@ -336,6 +356,43 @@ def test_npc_response_generation_result_rejects_unbounded_effect_text(
     payload["structured_updates"][collection_name][0][field_name] = value
 
     with pytest.raises(ValidationError, match=field_name):
+        NPCResponseGenerationResult.model_validate(payload)
+
+
+@pytest.mark.parametrize(
+    ("path", "value", "match"),
+    [
+        (("structured_updates", "relationship_shift", "tag"), "   ", "tag"),
+        (("structured_updates", "relationship_shift", "tag"), "X" * 81, "tag"),
+        (("structured_updates", "clue_effects", 0, "effect_type"), "   ", "effect_type"),
+        (("structured_updates", "clue_effects", 0, "effect_type"), "X" * 41, "effect_type"),
+        (("structured_updates", "clue_effects", 0, "clue_id"), "   ", "clue_id"),
+        (("structured_updates", "clue_effects", 0, "clue_id"), "mystery_001", "clue_id"),
+        (("structured_updates", "clue_effects", 0, "clue_id"), "clue_" + "x" * 76, "clue_id"),
+        (("structured_updates", "access_effects", 0, "effect_type"), "   ", "effect_type"),
+        (("structured_updates", "access_effects", 0, "effect_type"), "X" * 41, "effect_type"),
+        (("structured_updates", "access_effects", 0, "target_id"), "   ", "target_id"),
+        (("structured_updates", "access_effects", 0, "target_id"), "district_old_quarter", "target_id"),
+        (("structured_updates", "access_effects", 0, "target_id"), "location_" + "x" * 72, "target_id"),
+        (("structured_updates", "redirect_targets", 0, "target_type"), "   ", "target_type"),
+        (("structured_updates", "redirect_targets", 0, "target_type"), "X" * 41, "target_type"),
+        (("structured_updates", "redirect_targets", 0, "target_id"), "   ", "target_id"),
+        (("structured_updates", "redirect_targets", 0, "target_id"), "annex_001", "target_id"),
+        (("structured_updates", "redirect_targets", 0, "target_id"), "location_" + "x" * 72, "target_id"),
+    ],
+)
+def test_npc_response_generation_result_rejects_invalid_metadata_fields(
+    path: tuple[object, ...],
+    value: str,
+    match: str,
+) -> None:
+    payload = copy.deepcopy(make_valid_payload())
+    target = payload
+    for key in path[:-1]:
+        target = target[key]
+    target[path[-1]] = value
+
+    with pytest.raises(ValidationError, match=match):
         NPCResponseGenerationResult.model_validate(payload)
 
 

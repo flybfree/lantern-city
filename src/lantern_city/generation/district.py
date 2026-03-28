@@ -23,6 +23,13 @@ def _require_bounded_text(value: str, *, field_name: str, max_length: int) -> st
     return value
 
 
+def _require_prefixed_id(value: str, *, field_name: str, prefix: str, max_length: int) -> str:
+    value = _require_bounded_text(value, field_name=field_name, max_length=max_length)
+    if not value.startswith(prefix):
+        raise ValueError(f"{field_name} must start with {prefix}")
+    return value
+
+
 @runtime_checkable
 class SupportsJSONGeneration(Protocol):
     def generate_json(
@@ -42,13 +49,23 @@ class DistrictLocation(LanternCityModel):
     short_description: str
     playable_hook: str
 
-    @field_validator("location_id", "name", "location_type", "short_description", "playable_hook")
+    @field_validator("location_type", "short_description", "playable_hook")
     @classmethod
     def _require_non_empty_text(cls, value: str) -> str:
         value = value.strip()
         if not value:
             raise ValueError("district location fields must be non-empty strings")
         return value
+
+    @field_validator("location_id")
+    @classmethod
+    def _validate_location_id(cls, value: str) -> str:
+        return _require_prefixed_id(value, field_name="location_id", prefix="location_", max_length=80)
+
+    @field_validator("name")
+    @classmethod
+    def _validate_name(cls, value: str) -> str:
+        return _require_bounded_text(value, field_name="name", max_length=80)
 
     @field_validator("location_type")
     @classmethod
@@ -87,9 +104,7 @@ class NPCAnchorSpec(LanternCityModel):
         value = value.strip()
         if not value:
             return None
-        if not value.startswith("npc_"):
-            raise ValueError("npc anchor ids must look like local npc ids")
-        return value
+        return _require_prefixed_id(value, field_name="npc_id", prefix="npc_", max_length=80)
 
     @field_validator("name", "role")
     @classmethod
@@ -164,6 +179,16 @@ class DistrictGenerationResult(LanternCityModel):
     cacheable_text: DistrictCacheableText
     confidence: float = Field(ge=0.0, le=1.0)
     warnings: list[str] = Field(default_factory=list)
+
+    @field_validator("summary_text")
+    @classmethod
+    def _validate_summary_text(cls, value: str) -> str:
+        return _require_bounded_text(value, field_name="summary_text", max_length=160)
+
+    @field_validator("warnings")
+    @classmethod
+    def _validate_warnings(cls, value: list[str]) -> list[str]:
+        return [_require_bounded_text(item, field_name="warnings", max_length=120) for item in value]
 
 
 @dataclass(frozen=True, slots=True)

@@ -250,11 +250,51 @@ def test_district_generation_result_requires_exact_task_type() -> None:
         DistrictGenerationResult.model_validate(payload)
 
 
+@pytest.mark.parametrize(
+    ("field_name", "value"),
+    [
+        ("summary_text", "   "),
+        ("summary_text", "X" * 161),
+        ("warnings", ["   "]),
+        ("warnings", ["X" * 121]),
+    ],
+)
+def test_district_generation_result_rejects_unbounded_top_level_text(
+    field_name: str,
+    value: object,
+) -> None:
+    payload = copy.deepcopy(make_valid_payload())
+    payload[field_name] = value
+
+    with pytest.raises(ValidationError, match=field_name):
+        DistrictGenerationResult.model_validate(payload)
+
+
 def test_district_generation_result_rejects_unbounded_location_text() -> None:
     payload = copy.deepcopy(make_valid_payload())
     payload["structured_updates"]["major_locations"][0]["short_description"] = "X" * 181
 
     with pytest.raises(ValidationError, match="short_description"):
+        DistrictGenerationResult.model_validate(payload)
+
+
+@pytest.mark.parametrize(
+    ("field_name", "value"),
+    [
+        ("location_id", "   "),
+        ("location_id", "X" * 81),
+        ("name", "   "),
+        ("name", "X" * 81),
+    ],
+)
+def test_district_generation_result_rejects_unbounded_location_identity_fields(
+    field_name: str,
+    value: str,
+) -> None:
+    payload = copy.deepcopy(make_valid_payload())
+    payload["structured_updates"]["major_locations"][0][field_name] = value
+
+    with pytest.raises(ValidationError, match=field_name):
         DistrictGenerationResult.model_validate(payload)
 
 
@@ -311,6 +351,14 @@ def test_district_generation_result_rejects_unbounded_cacheable_text(
 def test_district_generation_result_rejects_non_local_npc_anchor_id_shape() -> None:
     payload = copy.deepcopy(make_valid_payload())
     payload["structured_updates"]["npc_anchor_ids_or_specs"][0]["npc_id"] = "citizen_ila_venn"
+
+    with pytest.raises(ValidationError, match="npc_id"):
+        DistrictGenerationResult.model_validate(payload)
+
+
+def test_district_generation_result_rejects_overlong_npc_anchor_id() -> None:
+    payload = copy.deepcopy(make_valid_payload())
+    payload["structured_updates"]["npc_anchor_ids_or_specs"][0]["npc_id"] = "npc_" + "x" * 77
 
     with pytest.raises(ValidationError, match="npc_id"):
         DistrictGenerationResult.model_validate(payload)
