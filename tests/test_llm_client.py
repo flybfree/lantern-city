@@ -47,7 +47,8 @@ def test_openai_compatible_client_posts_to_v1_chat_completions(sample_messages: 
     response = client.create_chat_completion(messages=sample_messages, temperature=0.2, max_tokens=700)
 
     assert captured["url"] == "http://192.168.3.181:1234/v1/chat/completions"
-    assert "authorization" not in {key.lower() for key in captured["headers"]}
+    normalized_headers = {key.lower() for key in captured["headers"]}
+    assert "authorization" not in normalized_headers
     assert captured["json"] == {
         "model": "nvidia/nemotron-3-nano-4b",
         "messages": sample_messages,
