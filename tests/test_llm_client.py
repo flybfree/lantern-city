@@ -205,3 +205,34 @@ def test_openai_compatible_client_wraps_http_status_errors(
 
     with pytest.raises(LLMClientError, match="503"):
         client.create_chat_completion(messages=sample_messages)
+
+
+@pytest.mark.parametrize(
+    ("content_type", "body"),
+    [
+        pytest.param("application/json", b'{"choices": [', id="truncated-json"),
+        pytest.param("text/plain", b"plain text error", id="plain-text"),
+        pytest.param("text/html", b"<html>bad gateway</html>", id="html"),
+    ],
+)
+def test_openai_compatible_client_wraps_malformed_top_level_response_body(
+    sample_messages: list[dict[str, str]],
+    content_type: str,
+    body: bytes,
+) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            headers={"content-type": content_type},
+            content=body,
+        )
+
+    transport = httpx.MockTransport(handler)
+    http_client = httpx.Client(transport=transport)
+    client = OpenAICompatibleLLMClient(
+        OpenAICompatibleConfig(base_url="http://127.0.0.1:8080", model="demo-model"),
+        http_client=http_client,
+    )
+
+    with pytest.raises(LLMClientResponseError, match="valid JSON"):
+        client.create_chat_completion(messages=sample_messages)

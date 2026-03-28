@@ -81,7 +81,10 @@ class OpenAICompatibleLLMClient:
         except httpx.HTTPError as exc:
             raise LLMClientError(f"LLM request failed: {exc}") from exc
 
-        raw_response = response.json()
+        try:
+            raw_response = response.json()
+        except ValueError as exc:
+            raise LLMClientResponseError("LLM response body was not valid JSON") from exc
         return ChatCompletionResult(
             raw_response=raw_response,
             content=self.extract_content(raw_response),
