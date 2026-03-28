@@ -84,13 +84,15 @@ class DistrictLocation(LanternCityModel):
 
 class NPCAnchorSpec(LanternCityModel):
     npc_id: str | None = None
-    name: str
-    role: str
-    local_relevance: str
+    name: str | None = None
+    role: str | None = None
+    local_relevance: str | None = None
 
     @field_validator("name", "role", "local_relevance")
     @classmethod
-    def _require_non_empty_text(cls, value: str) -> str:
+    def _require_non_empty_text(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
         value = value.strip()
         if not value:
             raise ValueError("npc anchor fields must be non-empty strings")
@@ -108,21 +110,27 @@ class NPCAnchorSpec(LanternCityModel):
 
     @field_validator("name", "role")
     @classmethod
-    def _bound_short_text(cls, value: str) -> str:
+    def _bound_short_text(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
         if len(value) > 80:
             raise ValueError("npc anchor names and roles must stay compact")
         return value
 
     @field_validator("local_relevance")
     @classmethod
-    def _bound_local_relevance(cls, value: str) -> str:
+    def _bound_local_relevance(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
         if len(value) > 160:
             raise ValueError("npc anchor relevance must stay compact and local")
         return value
 
     @model_validator(mode="after")
     def _require_local_anchor_reference(self) -> NPCAnchorSpec:
-        if self.npc_id is None and (not self.name or not self.role or not self.local_relevance):
+        if self.npc_id is not None:
+            return self
+        if not self.name or not self.role or not self.local_relevance:
             raise ValueError("npc anchor specs must provide either an npc_id or a complete local spec")
         return self
 
@@ -275,7 +283,40 @@ class DistrictGenerator:
             )
         except Exception as exc:
             raise DistrictGenerationError(str(exc)) from exc
-        return DistrictGenerationResult.model_validate(payload)
+        result = DistrictGenerationResult.model_validate(payload)
+        self._validate_request_id(result, request)
+        self._validate_npc_anchor_ids(result, request)
+        return result
+
+    def _validate_request_id(
+        self,
+        result: DistrictGenerationResult,
+        request: DistrictGenerationRequest,
+    ) -> None:
+        if result.request_id != request.request_id:
+            raise DistrictGenerationError(
+                "district generation returned a mismatched request_id: "
+                f"expected {request.request_id}, got {result.request_id}"
+            )
+
+    def _validate_npc_anchor_ids(
+        self,
+        result: DistrictGenerationResult,
+        request: DistrictGenerationRequest,
+    ) -> None:
+        district = request.active_slice.district
+        known_npc_ids = {npc.id for npc in request.active_slice.npcs}
+        if district is not None:
+            known_npc_ids.update(district.relevant_npc_ids)
+
+        for anchor in result.structured_updates.npc_anchor_ids_or_specs:
+            if anchor.npc_id is None:
+                continue
+            if anchor.npc_id not in known_npc_ids:
+                raise DistrictGenerationError(
+                    "structured_updates.npc_anchor_ids_or_specs contains npc_id "
+                    f"outside the current district slice: {anchor.npc_id}"
+                )
 
     def _build_messages(self, request: DistrictGenerationRequest) -> list[dict[str, str]]:
         system_prompt = (

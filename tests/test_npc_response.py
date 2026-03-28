@@ -70,6 +70,7 @@ def make_active_slice() -> ActiveSlice:
         name="Old Quarter",
         tone="hushed and procedural",
         lantern_condition="flickering",
+        visible_locations=["location_archive_steps", "location_registry_annex"],
     )
     scene = SceneState(
         id="scene_archive_talk",
@@ -394,6 +395,54 @@ def test_npc_response_generation_result_rejects_invalid_metadata_fields(
 
     with pytest.raises(ValidationError, match=match):
         NPCResponseGenerationResult.model_validate(payload)
+
+
+def test_npc_response_generator_rejects_mismatched_request_id() -> None:
+    payload = copy.deepcopy(make_valid_payload())
+    payload["request_id"] = "req_npc_other"
+    client = StubLLMClient(payload)
+    generator = NPCResponseGenerator(client)
+
+    with pytest.raises(NPCResponseGenerationError, match="request_id"):
+        generator.generate(
+            NPCResponseGenerationRequest(
+                request_id="req_npc_001",
+                active_slice=make_active_slice(),
+                player_request=make_player_request(),
+            )
+        )
+
+
+def test_npc_response_generator_rejects_redirect_target_outside_visible_slice() -> None:
+    payload = copy.deepcopy(make_valid_payload())
+    payload["structured_updates"]["redirect_targets"][0]["target_id"] = "location_far_docks"
+    client = StubLLMClient(payload)
+    generator = NPCResponseGenerator(client)
+
+    with pytest.raises(NPCResponseGenerationError, match="redirect_targets"):
+        generator.generate(
+            NPCResponseGenerationRequest(
+                request_id="req_npc_001",
+                active_slice=make_active_slice(),
+                player_request=make_player_request(),
+            )
+        )
+
+
+def test_npc_response_generator_rejects_access_target_outside_visible_slice() -> None:
+    payload = copy.deepcopy(make_valid_payload())
+    payload["structured_updates"]["access_effects"][0]["target_id"] = "location_far_docks"
+    client = StubLLMClient(payload)
+    generator = NPCResponseGenerator(client)
+
+    with pytest.raises(NPCResponseGenerationError, match="access_effects"):
+        generator.generate(
+            NPCResponseGenerationRequest(
+                request_id="req_npc_001",
+                active_slice=make_active_slice(),
+                player_request=make_player_request(),
+            )
+        )
 
 
 def test_npc_response_request_requires_target_npc_in_slice() -> None:

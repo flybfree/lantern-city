@@ -284,7 +284,51 @@ class NPCResponseGenerator:
             )
         except Exception as exc:
             raise NPCResponseGenerationError(str(exc)) from exc
-        return NPCResponseGenerationResult.model_validate(payload)
+        result = NPCResponseGenerationResult.model_validate(payload)
+        self._validate_request_id(result, request)
+        self._validate_slice_bounded_targets(result, request)
+        return result
+
+    def _validate_request_id(
+        self,
+        result: NPCResponseGenerationResult,
+        request: NPCResponseGenerationRequest,
+    ) -> None:
+        if result.request_id != request.request_id:
+            raise NPCResponseGenerationError(
+                "npc response generation returned a mismatched request_id: "
+                f"expected {request.request_id}, got {result.request_id}"
+            )
+
+    def _validate_slice_bounded_targets(
+        self,
+        result: NPCResponseGenerationResult,
+        request: NPCResponseGenerationRequest,
+    ) -> None:
+        visible_location_ids: set[str] = set()
+        district = request.active_slice.district
+        if district is not None:
+            visible_location_ids.update(district.visible_locations)
+        if request.active_slice.location is not None:
+            visible_location_ids.add(request.active_slice.location.id)
+        if request.active_slice.scene is not None and request.active_slice.scene.location_id is not None:
+            visible_location_ids.add(request.active_slice.scene.location_id)
+
+        for access_effect in result.structured_updates.access_effects:
+            if access_effect.target_id is None:
+                continue
+            if access_effect.target_id not in visible_location_ids:
+                raise NPCResponseGenerationError(
+                    "structured_updates.access_effects contains target_id outside the active slice: "
+                    f"{access_effect.target_id}"
+                )
+
+        for redirect_target in result.structured_updates.redirect_targets:
+            if redirect_target.target_id not in visible_location_ids:
+                raise NPCResponseGenerationError(
+                    "structured_updates.redirect_targets contains target_id outside the active slice: "
+                    f"{redirect_target.target_id}"
+                )
 
     def _build_messages(self, request: NPCResponseGenerationRequest) -> list[dict[str, str]]:
         system_prompt = (

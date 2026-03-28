@@ -373,6 +373,48 @@ def test_district_generation_result_rejects_blank_npc_anchor_local_spec() -> Non
         DistrictGenerationResult.model_validate(payload)
 
 
+def test_district_generation_result_accepts_id_only_npc_anchor() -> None:
+    payload = copy.deepcopy(make_valid_payload())
+    payload["structured_updates"]["npc_anchor_ids_or_specs"] = [{"npc_id": "npc_ila_venn"}]
+
+    result = DistrictGenerationResult.model_validate(payload)
+
+    assert result.structured_updates.npc_anchor_ids_or_specs[0].npc_id == "npc_ila_venn"
+    assert result.structured_updates.npc_anchor_ids_or_specs[0].name is None
+
+
+def test_district_generator_rejects_mismatched_request_id() -> None:
+    payload = copy.deepcopy(make_valid_payload())
+    payload["request_id"] = "req_district_other"
+    client = StubLLMClient(payload)
+    generator = DistrictGenerator(client)
+
+    with pytest.raises(DistrictGenerationError, match="request_id"):
+        generator.generate(
+            DistrictGenerationRequest(
+                request_id="req_district_001",
+                active_slice=make_active_slice(),
+                city_identity_summary="A wet civic maze where lantern light makes memory arguable.",
+            )
+        )
+
+
+def test_district_generator_rejects_npc_anchor_id_outside_slice() -> None:
+    payload = copy.deepcopy(make_valid_payload())
+    payload["structured_updates"]["npc_anchor_ids_or_specs"] = [{"npc_id": "npc_outside_slice"}]
+    client = StubLLMClient(payload)
+    generator = DistrictGenerator(client)
+
+    with pytest.raises(DistrictGenerationError, match="npc_anchor_ids_or_specs"):
+        generator.generate(
+            DistrictGenerationRequest(
+                request_id="req_district_001",
+                active_slice=make_active_slice(),
+                city_identity_summary="A wet civic maze where lantern light makes memory arguable.",
+            )
+        )
+
+
 def test_district_generation_request_requires_active_district() -> None:
     active_slice = make_active_slice()
     active_slice = ActiveSlice(
