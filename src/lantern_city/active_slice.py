@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Literal, cast
+from typing import Final, Literal, cast
 
 from lantern_city.models import (
     ActiveWorkingSet,
@@ -24,6 +24,36 @@ RequestIntent = Literal[
     "generic_action",
 ]
 
+_DISTRICT_ENTRY_INTENTS: Final[set[str]] = {
+    "district entry",
+    "district_entry",
+    "enter district",
+    "enter_district",
+}
+_TALK_TO_NPC_INTENTS: Final[set[str]] = {
+    "talk to npc",
+    "talk_to_npc",
+    "talk",
+    "speak",
+    "conversation",
+}
+_INSPECT_LOCATION_INTENTS: Final[set[str]] = {
+    "inspect location",
+    "inspect_location",
+    "inspect",
+    "investigate",
+    "observe",
+}
+_CASE_PROGRESSION_INTENTS: Final[set[str]] = {
+    "case progression",
+    "case_progression",
+    "advance case",
+    "advance_case",
+    "review case",
+    "review_case",
+    "case",
+}
+
 
 class MissingWorldObjectError(LookupError):
     pass
@@ -40,6 +70,20 @@ class ActiveSlice:
     case: CaseState | None
 
 
+def classify_request_intent(request: PlayerRequest) -> RequestIntent:
+    normalized_intent = _normalize_intent(request.intent)
+
+    if normalized_intent in _DISTRICT_ENTRY_INTENTS:
+        return "district_entry"
+    if normalized_intent in _TALK_TO_NPC_INTENTS:
+        return "talk_to_npc"
+    if normalized_intent in _INSPECT_LOCATION_INTENTS:
+        return "inspect_location"
+    if normalized_intent in _CASE_PROGRESSION_INTENTS:
+        return "case_progression"
+    return "generic_action"
+
+
 def build_active_slice(
     store: SQLiteStore,
     *,
@@ -47,7 +91,7 @@ def build_active_slice(
     request: PlayerRequest,
     intent: RequestIntent | None = None,
 ) -> ActiveSlice:
-    resolved_intent = intent or _classify_request_intent(request)
+    resolved_intent = intent or classify_request_intent(request)
     city = _load_required(store, "CityState", city_id, CityState)
 
     if resolved_intent == "generic_action" and not any(
@@ -261,17 +305,8 @@ def _reference_from_request(request: PlayerRequest, key: str) -> str | None:
     return str(from_context)
 
 
-def _classify_request_intent(request: PlayerRequest) -> RequestIntent:
-    normalized_intent = " ".join(request.intent.strip().lower().replace("_", " ").split())
-    if normalized_intent in {"district entry", "enter district"}:
-        return "district_entry"
-    if normalized_intent in {"talk to npc", "talk", "speak", "conversation"}:
-        return "talk_to_npc"
-    if normalized_intent in {"inspect location", "inspect", "investigate", "observe"}:
-        return "inspect_location"
-    if normalized_intent in {"case progression", "advance case", "review case", "case"}:
-        return "case_progression"
-    return "generic_action"
+def _normalize_intent(raw_intent: str) -> str:
+    return " ".join(raw_intent.strip().lower().replace("_", " ").split())
 
 
 def _dedupe_preserve_order(values: list[str]) -> list[str]:
@@ -325,4 +360,10 @@ def _load_unique_required[T](
     ]
 
 
-__all__ = ["ActiveSlice", "MissingWorldObjectError", "build_active_slice"]
+__all__ = [
+    "ActiveSlice",
+    "MissingWorldObjectError",
+    "RequestIntent",
+    "build_active_slice",
+    "classify_request_intent",
+]
