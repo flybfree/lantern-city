@@ -15,6 +15,11 @@ from lantern_city.generation.case_generation import (
     CaseGenerationError,
     CaseGenerator,
 )
+from lantern_city.generation.transient_response import (
+    TransientGenerationError,
+    generate_transient_encounter,
+)
+from lantern_city.transients import roll_encounter
 from lantern_city.lanterns import LanternRuleProfile, apply_lantern_to_clue, is_corroborated
 from lantern_city.llm_client import OpenAICompatibleConfig, OpenAICompatibleLLMClient
 from lantern_city.models import (
@@ -132,6 +137,9 @@ class LanternCityApp:
         lead = self._check_case_discovery(district_id, updated_at=TURN_ONE)
         if lead:
             lines.append(f"\nNew lead: {lead}")
+        transient_text = self._maybe_transient_encounter(district_id, district, updated_at=TURN_ONE)
+        if transient_text:
+            lines.append(f"\n{transient_text}")
         return "\n".join(lines)
 
     def talk_to_npc(self, npc_id: str, prompt: str) -> str:
@@ -406,6 +414,52 @@ class LanternCityApp:
             self.store.save_object(updated_city)
 
         return notices
+
+    def _maybe_transient_encounter(
+        self,
+        district_id: str,
+        district: DistrictState,
+        *,
+        updated_at: str,
+    ) -> str | None:
+        """Roll for a transient NPC encounter; return formatted text or None."""
+        encounter = roll_encounter(district_id)
+        if encounter is None:
+            return None
+
+        # Apply any mechanical effect
+        if encounter.effect_track and encounter.effect_amount != 0:
+            progress = self._require_progress()
+            progress, _ = apply_progress_change(
+                progress,
+                track=encounter.effect_track,
+                amount=encounter.effect_amount,
+                reason=encounter.effect_reason,
+                updated_at=updated_at,
+            )
+            self.store.save_object(progress)
+
+        # Enrich narrative with LLM when available
+        if self.llm_config is not None:
+            city = self._require_city()
+            llm_client = OpenAICompatibleLLMClient(self.llm_config)
+            try:
+                result = generate_transient_encounter(
+                    archetype=encounter.archetype,
+                    district_name=district.name,
+                    lantern_condition=district.lantern_condition,
+                    global_tension=city.global_tension,
+                    llm_client=llm_client,
+                )
+                narrative = result.narrative
+                if result.spoken_line:
+                    narrative = f"{narrative}\n  \"{result.spoken_line}\""
+            except TransientGenerationError:
+                narrative = encounter.narrative
+        else:
+            narrative = encounter.narrative
+
+        return f"[Passing: {encounter.archetype}]\n{narrative}"
 
     def _check_case_discovery(self, district_id: str, *, updated_at: str) -> str | None:
         """Transition any latent case to active when the player enters one of its districts."""
