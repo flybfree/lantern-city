@@ -19,6 +19,8 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import datetime
+import json
 from pathlib import Path
 
 from rich.markup import escape
@@ -102,6 +104,46 @@ _HELP_TEXT = """\
   [bold]help[/bold]                         show this panel
 
 [dim]Ctrl+G — toggle GM / CMD mode  |  Ctrl+C — quit  |  ↑↓ history[/dim]"""
+
+
+class TurnLogger:
+    """Writes a rolling log of the last N turns to a JSON file beside the database.
+
+    Log file: <database_stem>.log.json  (e.g. lantern-city.log.json)
+    Each entry records timestamp, mode, input, and response.
+    Only the most recent MAX_ENTRIES are kept.
+    """
+
+    MAX_ENTRIES = 5
+
+    def __init__(self, database_path: str) -> None:
+        self._path = Path(database_path).with_suffix(".log.json")
+
+    def record(self, *, mode: str, player_input: str, response: str) -> None:
+        entries: list[dict] = self._load()
+        entries.append({
+            "ts": datetime.datetime.now().isoformat(timespec="seconds"),
+            "mode": mode,
+            "input": player_input,
+            "response": response,
+        })
+        entries = entries[-self.MAX_ENTRIES:]
+        try:
+            self._path.write_text(
+                json.dumps(entries, indent=2, ensure_ascii=False),
+                encoding="utf-8",
+            )
+        except OSError:
+            pass
+
+    def _load(self) -> list[dict]:
+        try:
+            data = json.loads(self._path.read_text(encoding="utf-8"))
+            if isinstance(data, list):
+                return data
+        except (OSError, json.JSONDecodeError):
+            pass
+        return []
 
 
 class SettingsScreen(ModalScreen[tuple[str, str] | None]):
@@ -246,6 +288,8 @@ class LanternCityTUI(App[None]):
         self._history: list[str] = []
         self._history_idx: int = 0
         self._visited_districts: set[str] = set()
+        self._logger = TurnLogger(database_path)
+        self._last_input: str = ""
 
     # ------------------------------------------------------------------
     # Layout
@@ -373,6 +417,7 @@ class LanternCityTUI(App[None]):
     # ------------------------------------------------------------------
 
     def _dispatch(self, raw: str) -> None:
+        self._last_input = raw
         narrative = self.query_one("#narrative", RichLog)
         narrative.write(Text.from_markup(f"[dim]> {escape(raw)}[/dim]"))
 
@@ -429,15 +474,16 @@ class LanternCityTUI(App[None]):
         if event.state == WorkerState.SUCCESS:
             if name == "gm":
                 prose = event.worker.result  # type: ignore[assignment]
-                narrative = self.query_one("#narrative", RichLog)
-                narrative.write(escape(prose))
+                self.query_one("#narrative", RichLog).write(escape(prose))
+                self._logger.record(mode="GM", player_input=self._last_input, response=prose)
             else:
-                verb = name[4:]  # strip "cmd:"
                 result: str = event.worker.result  # type: ignore[assignment]
                 self.query_one("#narrative", RichLog).write(escape(result))
+                self._logger.record(mode="CMD", player_input=self._last_input, response=result)
         elif event.state == WorkerState.ERROR:
-            narrative = self.query_one("#narrative", RichLog)
-            narrative.write(Text(f"Error: {event.worker.error}", style="bold red"))
+            err_text = f"Error: {event.worker.error}"
+            self.query_one("#narrative", RichLog).write(Text(err_text, style="bold red"))
+            self._logger.record(mode="ERR", player_input=self._last_input, response=err_text)
 
         cmd_input.disabled = False
         cmd_input.focus()

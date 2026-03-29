@@ -157,26 +157,28 @@ class GameMaster:
         if city is None:
             return "No active game. The player must type 'start' to begin."
 
-        if pos is not None and pos.district_id:
-            district = self.app._district(pos.district_id)
+        current_district_id = pos.district_id if pos is not None else None
+
+        if current_district_id:
+            district = self.app._district(current_district_id)
             if district is not None:
                 lines.append(
-                    f"Current district: {district.name} ({pos.district_id})"
+                    f"Current district: {district.name} ({current_district_id})"
                     f"  lanterns: {district.lantern_condition}"
                 )
             else:
-                lines.append(f"Current district: ({pos.district_id})")
+                lines.append(f"Current district: ({current_district_id})")
 
-            if pos.location_id:
+            if pos is not None and pos.location_id:
                 loc = self.app.store.load_object("LocationState", pos.location_id)
                 if isinstance(loc, LocationState):
                     lines.append(f"Current location: {loc.name} ({pos.location_id})")
             else:
                 lines.append("Current location: — (not yet moved to a specific location)")
 
-            # Available locations and their NPCs
+            # Locations available in the current district
             if district is not None and district.visible_locations:
-                lines.append("\nAvailable locations:")
+                lines.append("\nLocations in this district:")
                 for loc_id in district.visible_locations:
                     loc = self.app.store.load_object("LocationState", loc_id)
                     if isinstance(loc, LocationState):
@@ -189,11 +191,17 @@ class GameMaster:
                         lines.append(f"  {loc.name} ({loc_id})  NPCs: {npc_str}")
         else:
             lines.append("Current district: — (player has not entered a district yet)")
-            lines.append("\nKnown districts:")
-            for did in city.district_ids:
-                district = self.app._district(did)
-                if district is not None:
-                    lines.append(f"  {district.name} ({did})")
+
+        # Always list ALL districts so the GM can generate enter commands for any of them
+        lines.append("\nAll city districts (use district_id with 'enter' command):")
+        for did in city.district_ids:
+            district = self.app._district(did)
+            if district is not None:
+                marker = " [CURRENT]" if did == current_district_id else ""
+                lines.append(
+                    f"  {district.name} ({did})"
+                    f"  lanterns: {district.lantern_condition}{marker}"
+                )
 
         # Cases
         active_cases = [
