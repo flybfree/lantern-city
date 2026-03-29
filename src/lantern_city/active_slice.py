@@ -308,7 +308,7 @@ def _resolve_clue_ids(
         clue_ids.extend(npc.known_clue_ids)
     if not clue_ids and case is not None:
         clue_ids.extend(case.known_clue_ids)
-    return sorted(_dedupe_preserve_order(clue_ids))
+    return _dedupe_preserve_order(clue_ids)
 
 
 def _reference_from_request(request: PlayerRequest, key: str) -> str | None:
