@@ -23,6 +23,7 @@ from lantern_city.transients import roll_encounter
 from lantern_city.lanterns import LanternRuleProfile, apply_lantern_to_clue, is_corroborated
 from lantern_city.llm_client import OpenAICompatibleConfig, OpenAICompatibleLLMClient
 from lantern_city.models import (
+    ActiveWorkingSet,
     CaseState,
     ClueState,
     DistrictState,
@@ -41,6 +42,8 @@ TURN_ONE = "turn_1"
 TURN_TWO = "turn_2"
 TURN_THREE = "turn_3"
 TURN_FOUR = "turn_4"
+
+_AWS_ID = "aws_player_001"
 
 
 @dataclass(slots=True)
@@ -88,8 +91,12 @@ class LanternCityApp:
             return self.start_new_game()
         if verb == "overview":
             return self.overview()
-        if verb == "look" and len(parts) >= 2:
-            return self.look(parts[1])
+        if verb == "clues":
+            return self.clues()
+        if verb == "go" and len(parts) >= 2:
+            return self.go(parts[1])
+        if verb == "look":
+            return self.look(parts[1] if len(parts) >= 2 else None)
         if verb == "enter" and len(parts) >= 2:
             return self.enter_district(parts[1])
         if verb == "talk" and len(parts) >= 3:
@@ -111,6 +118,7 @@ class LanternCityApp:
         district = outcome.active_slice.district
         if district is None:
             raise LookupError(f"District not found: {district_id}")
+        self._save_position(district_id=district_id, location_id=None, npc_ids=[])
         visible_npc = "None"
         preferred_npc = next(
             (npc for npc in outcome.active_slice.npcs if npc.id == "npc_shrine_keeper"),
@@ -160,6 +168,7 @@ class LanternCityApp:
             llm_config=self.llm_config,
         )
         npc = outcome.active_slice.npcs[0]
+        self._save_position(npc_ids=[npc.id])
         clue = self._npc_clue(npc)
         progress = self._require_progress()
         updates = []
@@ -181,6 +190,8 @@ class LanternCityApp:
         )
         updates.append(progress)
         self.store.save_objects_atomically(updates)
+        if clue is not None:
+            self._acquire_clues([clue.id])
 
         district = outcome.active_slice.district
         propagation_notices = []
@@ -213,6 +224,7 @@ class LanternCityApp:
         district = outcome.active_slice.district
         if district is None:
             return outcome.response.narrative_text
+        self._save_position(location_id=location_id)
 
         lantern_profile = LanternRuleProfile(
             state=district.lantern_condition,
@@ -242,6 +254,7 @@ class LanternCityApp:
             updated_at=TURN_THREE,
         )
         self.store.save_objects_atomically([*updated_clues, progress])
+        self._acquire_clues([c.id for c in updated_clues])
 
         propagation_notices = self._propagate_missingness(city, district, updated_at=TURN_THREE)
 
@@ -336,7 +349,18 @@ class LanternCityApp:
 
     def overview(self) -> str:
         city = self._require_city()
+        pos = self._load_position()
         lines = ["=== Lantern City ==="]
+        if pos and pos.district_id:
+            district = self._district(pos.district_id)
+            loc_label = ""
+            if pos.location_id:
+                loc = self.store.load_object("LocationState", pos.location_id)
+                if isinstance(loc, LocationState):
+                    loc_label = f" / {loc.name}"
+            d_name = district.name if district else pos.district_id
+            lines.append(f"You are in: {d_name}{loc_label}")
+            lines.append("")
         for did in city.district_ids:
             district = self._district(did)
             if district is None:
@@ -361,7 +385,57 @@ class LanternCityApp:
             lines.append("  None")
         return "\n".join(lines)
 
-    def look(self, district_id: str) -> str:
+    def clues(self) -> str:
+        pos = self._load_position()
+        if pos is None or not pos.clue_ids:
+            return "No clues acquired yet."
+        lines = ["=== Acquired Clues ==="]
+        for clue_id in pos.clue_ids:
+            clue = self.store.load_object("ClueState", clue_id)
+            if not isinstance(clue, ClueState):
+                continue
+            label = _clue_label(clue_id)
+            lines.append(f"  [{clue.reliability}] {label}")
+            lines.append(f"    {clue.clue_text}")
+        return "\n".join(lines)
+
+    def go(self, location_id: str) -> str:
+        pos = self._load_position()
+        if pos is None or pos.district_id is None:
+            raise LookupError("No current district. Use 'enter <district_id>' first.")
+        district = self._district(pos.district_id)
+        if district is None:
+            raise LookupError(f"District not found: {pos.district_id}")
+        if location_id not in district.visible_locations:
+            raise LookupError(
+                f"{location_id} is not a known location in {district.name}. "
+                f"Available: {', '.join(district.visible_locations)}"
+            )
+        loc = self.store.load_object("LocationState", location_id)
+        if not isinstance(loc, LocationState):
+            raise LookupError(f"Location not found: {location_id}")
+        self._save_position(location_id=location_id, npc_ids=[nid for nid in loc.known_npc_ids])
+        lines = [f"→ {loc.name}  ({loc.location_type})"]
+        if loc.known_npc_ids:
+            npc_parts = []
+            for nid in loc.known_npc_ids:
+                npc = self._npc(nid)
+                npc_parts.append(f"{npc.name} ({nid})" if npc else nid)
+            lines.append(f"NPCs here: {', '.join(npc_parts)}")
+        else:
+            lines.append("NPCs here: —")
+        if loc.scene_objects:
+            lines.append(f"Objects: {', '.join(loc.scene_objects)}")
+        if loc.clue_ids:
+            lines.append(f"Clues present: {len(loc.clue_ids)}")
+        return "\n".join(lines)
+
+    def look(self, district_id: str | None = None) -> str:
+        if district_id is None:
+            pos = self._load_position()
+            if pos is None or pos.district_id is None:
+                raise LookupError("No current district. Use 'enter <district_id>' first.")
+            district_id = pos.district_id
         district = self._district(district_id)
         if district is None:
             raise LookupError(f"District not found: {district_id}")
@@ -1359,6 +1433,36 @@ class LanternCityApp:
                 updated_route_warden,
             ]
         )
+
+    def _acquire_clues(self, clue_ids: list[str]) -> None:
+        """Merge clue_ids into the player's ActiveWorkingSet without duplicates."""
+        if not clue_ids:
+            return
+        pos = self._load_position()
+        if pos is None:
+            return
+        existing = set(pos.clue_ids)
+        new_ids = [cid for cid in clue_ids if cid not in existing]
+        if new_ids:
+            self.store.save_object(
+                pos.model_copy(update={"clue_ids": [*pos.clue_ids, *new_ids], "updated_at": TURN_ONE})
+            )
+
+    def _load_position(self) -> ActiveWorkingSet | None:
+        obj = self.store.load_object("ActiveWorkingSet", _AWS_ID)
+        return obj if isinstance(obj, ActiveWorkingSet) else None
+
+    def _save_position(self, **updates: object) -> None:
+        city = self._require_city()
+        pos = self._load_position()
+        if pos is None:
+            pos = ActiveWorkingSet(
+                id=_AWS_ID,
+                created_at=TURN_ZERO,
+                updated_at=TURN_ONE,
+                city_id=city.id,
+            )
+        self.store.save_object(pos.model_copy(update={**updates, "updated_at": TURN_ONE}))
 
     def _request(
         self,
