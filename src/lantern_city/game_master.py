@@ -93,6 +93,55 @@ class GameMaster:
         self._append_history(player_input, narrative)
         return narrative
 
+    def status_update(self) -> str:
+        """Return a GM-narrated summary of the player's current situation.
+
+        No commands are executed — this is a pure narrative recap grounded in
+        current game state and recent history.
+        """
+        context = self._build_context()
+        system = (
+            _NARRATE_SYSTEM
+            + "\nWrite a 3–5 sentence recap of where the player is, what they have "
+            "learned so far, and what avenues remain open. Ground every detail in the "
+            "game state. Do not invent new facts. End with an atmospheric suggestion "
+            "of what to do next, without being prescriptive."
+        )
+        history_block = self._history_block()
+        user_content = (
+            f"{history_block}"
+            f"Current game state:\n{context}\n\n"
+            "The player has asked for a status update. "
+            "Summarise where things stand in the investigation."
+        )
+        schema = {
+            "type": "object",
+            "properties": {
+                "narrative": {
+                    "type": "string",
+                    "description": "3–5 sentence noir prose recap. No reasoning or headers.",
+                }
+            },
+            "required": ["narrative"],
+            "additionalProperties": False,
+        }
+        try:
+            result = self.llm.generate_json(
+                messages=[
+                    {"role": "system", "content": system},
+                    {"role": "user", "content": user_content},
+                ],
+                temperature=0.65,
+                max_tokens=500,
+                schema=schema,
+            )
+            prose = result.get("narrative", "")
+            if prose:
+                return _strip_thinking(str(prose))
+        except Exception:
+            pass
+        return context
+
     # ------------------------------------------------------------------
     # Context builder
     # ------------------------------------------------------------------
@@ -247,21 +296,36 @@ class GameMaster:
             f'Player said: "{player_input}"\n\n'
             "Write a brief atmospheric narrative response (2–5 sentences)."
         )
+        schema = {
+            "type": "object",
+            "properties": {
+                "narrative": {
+                    "type": "string",
+                    "description": "2–5 sentences of finished noir prose. No reasoning, no headers.",
+                }
+            },
+            "required": ["narrative"],
+            "additionalProperties": False,
+        }
         try:
-            result = self.llm.create_chat_completion(
+            result = self.llm.generate_json(
                 messages=[
                     {"role": "system", "content": _NARRATE_SYSTEM},
                     {"role": "user", "content": user_content},
                 ],
                 temperature=0.75,
-                max_tokens=350,
+                max_tokens=500,
+                schema=schema,
             )
-            return _strip_thinking(result.content)
-        except Exception as exc:
-            # Fallback: return raw results when narration is unavailable
-            if results:
-                return "\n\n".join(results)
-            return f"(Narration unavailable: {exc})"
+            prose = result.get("narrative", "")
+            if prose:
+                return _strip_thinking(str(prose))
+        except Exception:
+            pass
+        # Fallback: return raw game results when narration fails
+        if results:
+            return "\n\n".join(results)
+        return "(The city offers no response.)"
 
     # ------------------------------------------------------------------
     # History helpers

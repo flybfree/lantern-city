@@ -34,9 +34,58 @@ from lantern_city.app import LanternCityApp
 from lantern_city.cli import _load_llm_config, _save_llm_config
 from lantern_city.game_master import GameMaster
 from lantern_city.llm_client import OpenAICompatibleConfig, OpenAICompatibleLLMClient
+from lantern_city.models import CaseState, LocationState
 
-# Direct-command verbs whose output replaces the info pane
-_INFO_COMMANDS = frozenset({"clues", "look", "overview", "help"})
+# Direct-command verbs whose output goes to the narrative pane (not info pane)
+_NARRATIVE_INFO_COMMANDS = frozenset({"clues", "look", "overview"})
+
+_WELCOME_TEXT = """\
+[bold yellow]LANTERN CITY[/bold yellow]
+
+[italic]The city runs on lanterns. Not for light — for memory. Each district burns \
+a different kind, and what a lantern touches, it changes: testimony clarified or \
+corrupted, evidence preserved or dissolved, truth bent toward whoever controls \
+the flame.[/italic]
+
+You are an investigator. Cases find you — a missing clerk, a ledger that shouldn't \
+exist, a name spoken too carefully by someone who should not know it. You move \
+through the districts, talk to the people who live under the lanterns, and try to \
+separate what is solid from what the light has made uncertain.
+
+[bold]── How to play ─────────────────────────────────────[/bold]
+
+The Game Master understands natural language. Just describe what you want to do:
+
+  [italic]"go to the old quarter"[/italic]
+  [italic]"look around"[/italic]
+  [italic]"talk to the shrine keeper about the missing clerk"[/italic]
+  [italic]"examine the lantern post"[/italic]
+  [italic]"what clues do I have so far?"[/italic]
+  [italic]"where should I go next?"[/italic]  ← ask for a status update anytime
+
+[bold]── Navigation ──────────────────────────────────────[/bold]
+
+The city has six districts, each with its own lantern condition and locations. \
+The panel on the right shows all districts — [dim]unexplored[/dim] ones are waiting. \
+Within a district, locations hold objects, clues, and NPCs. Move between them \
+freely; inspect locations to gather evidence.
+
+[bold]── Investigation ────────────────────────────────────[/bold]
+
+Clues have a [bold]reliability[/bold] rating shaped by the lanterns around them. \
+A clue found under bright lanterns is solid. One found in a flickering or dim \
+district may be uncertain or contradicted. NPCs can clarify testimony — or \
+muddy it further. When you have enough solid evidence, you can attempt to \
+resolve a case.
+
+[bold]── Controls ─────────────────────────────────────────[/bold]
+
+  [dim]Ctrl+G[/dim]  toggle GM / direct command mode
+  [dim]Ctrl+S[/dim]  configure LLM connection
+  [dim]Ctrl+C[/dim]  quit
+  [dim]↑ ↓[/dim]     cycle input history
+  [dim]help[/dim]    show this screen again
+"""
 
 _HELP_TEXT = """\
 [bold yellow]Commands[/bold yellow]  [dim](Ctrl+S — LLM settings)[/dim]
@@ -52,21 +101,7 @@ _HELP_TEXT = """\
   [bold]clues[/bold]                        view acquired clues
   [bold]help[/bold]                         show this panel
 
-[dim]Ctrl+G — toggle GM / CMD mode  |  Ctrl+C — quit  |  ↑↓ command history[/dim]"""
-
-_GM_HINT = """\
-[bold yellow]GM Mode[/bold yellow]  [dim](Ctrl+G to switch to direct commands)[/dim]
-
-Type naturally — the Game Master will interpret your intent,
-take the appropriate actions, and narrate the results as prose.
-
-[dim]Examples:[/dim]
-  [italic]look around the district[/italic]
-  [italic]ask the shrine keeper about the missing clerk[/italic]
-  [italic]examine the lantern post[/italic]
-  [italic]what cases am I working on?[/italic]
-  [italic]show me my clues[/italic]
-"""
+[dim]Ctrl+G — toggle GM / CMD mode  |  Ctrl+C — quit  |  ↑↓ history[/dim]"""
 
 
 class SettingsScreen(ModalScreen[tuple[str, str] | None]):
@@ -207,9 +242,10 @@ class LanternCityTUI(App[None]):
         self._game = game
         self._gm = gm
         self._database_path = database_path
-        self._gm_mode: bool = gm is not None  # default on when LLM is available
+        self._gm_mode: bool = True  # always start in GM mode; falls back to CMD if no LLM
         self._history: list[str] = []
         self._history_idx: int = 0
+        self._visited_districts: set[str] = set()
 
     # ------------------------------------------------------------------
     # Layout
@@ -226,16 +262,16 @@ class LanternCityTUI(App[None]):
 
     def on_mount(self) -> None:
         narrative = self.query_one("#narrative", RichLog)
-        narrative.write(Text.from_markup(
-            "[bold yellow]Lantern City[/bold yellow]  — a text investigation game\n"
-        ))
+        narrative.write(Text.from_markup(_WELCOME_TEXT))
 
         try:
             pos = self._game._load_position()
             if pos is not None:
+                if pos.district_id:
+                    self._visited_districts.add(pos.district_id)
                 narrative.write(Text.from_markup(
                     "[dim]Existing game detected. "
-                    "Type [bold]overview[/bold] or [bold]look[/bold] to review state.[/dim]\n"
+                    "Just tell me what you want to do.[/dim]\n"
                 ))
             else:
                 narrative.write(Text.from_markup(
@@ -244,7 +280,7 @@ class LanternCityTUI(App[None]):
         except Exception:
             pass
 
-        self._update_info(_GM_HINT if self._gm_mode else _HELP_TEXT, markup=True)
+        self._refresh_surroundings()
         self._refresh_status()
         self._update_input_placeholder()
         self.query_one("#cmd", Input).focus()
@@ -295,7 +331,7 @@ class LanternCityTUI(App[None]):
             ))
             return
         self._gm_mode = not self._gm_mode
-        self._update_info(_GM_HINT if self._gm_mode else _HELP_TEXT, markup=True)
+        self._refresh_surroundings()
         self._refresh_status()
         self._update_input_placeholder()
         narrative = self.query_one("#narrative", RichLog)
@@ -323,7 +359,7 @@ class LanternCityTUI(App[None]):
         llm_client = OpenAICompatibleLLMClient(llm_config)
         self._gm = GameMaster(app=self._game, llm=llm_client)
         self._gm_mode = True
-        self._update_info(_GM_HINT, markup=True)
+        self._refresh_surroundings()
         self._refresh_status()
         self._update_input_placeholder()
         narrative = self.query_one("#narrative", RichLog)
@@ -342,19 +378,34 @@ class LanternCityTUI(App[None]):
 
         verb = raw.split()[0].lower() if raw.split() else ""
 
-        # help is always local
+        # help / welcome — always local
         if verb == "help":
-            self._update_info(_HELP_TEXT, markup=True)
+            narrative = self.query_one("#narrative", RichLog)
+            narrative.write(Text.from_markup(_WELCOME_TEXT))
             return
+
+        # status update — ask the GM for a narrative recap, no game actions
+        if verb in ("status", "update") or raw.lower().strip() in (
+            "where am i", "what's going on", "what is going on",
+            "catch me up", "what do i know", "recap",
+        ):
+            if self._gm is not None:
+                self.query_one("#cmd", Input).disabled = True
+                self._update_status_raw("processing…")
+
+                async def _run_status() -> str:
+                    return await asyncio.to_thread(self._gm.status_update)
+
+                self.run_worker(_run_status(), exclusive=True, name="gm")
+                return
+            # No GM — fall through to CMD handling
 
         self.query_one("#cmd", Input).disabled = True
         self._update_status_raw("processing…")
 
         if self._gm_mode and self._gm is not None:
-            async def _run_gm() -> tuple[str, str]:
-                result = await asyncio.to_thread(self._gm.process, raw)
-                clues = await asyncio.to_thread(self._game.clues)
-                return result, clues
+            async def _run_gm() -> str:
+                return await asyncio.to_thread(self._gm.process, raw)
 
             self.run_worker(_run_gm(), exclusive=True, name="gm")
         else:
@@ -377,15 +428,13 @@ class LanternCityTUI(App[None]):
 
         if event.state == WorkerState.SUCCESS:
             if name == "gm":
-                prose, clues_text = event.worker.result  # type: ignore[misc]
+                prose = event.worker.result  # type: ignore[assignment]
                 narrative = self.query_one("#narrative", RichLog)
                 narrative.write(escape(prose))
-                # Auto-refresh info pane with current clues after each GM turn
-                self._update_info(escape(clues_text), markup=True)
             else:
                 verb = name[4:]  # strip "cmd:"
                 result: str = event.worker.result  # type: ignore[assignment]
-                self._handle_cmd_result(verb, result)
+                self.query_one("#narrative", RichLog).write(escape(result))
         elif event.state == WorkerState.ERROR:
             narrative = self.query_one("#narrative", RichLog)
             narrative.write(Text(f"Error: {event.worker.error}", style="bold red"))
@@ -393,12 +442,7 @@ class LanternCityTUI(App[None]):
         cmd_input.disabled = False
         cmd_input.focus()
         self._refresh_status()
-
-    def _handle_cmd_result(self, verb: str, result: str) -> None:
-        if verb in _INFO_COMMANDS:
-            self._update_info(escape(result), markup=True)
-        else:
-            self.query_one("#narrative", RichLog).write(escape(result))
+        self._refresh_surroundings()
 
     # ------------------------------------------------------------------
     # Helpers
@@ -420,6 +464,111 @@ class LanternCityTUI(App[None]):
             cmd.placeholder = "What do you do?"
         else:
             cmd.placeholder = "enter command…"
+
+    def _refresh_surroundings(self) -> None:
+        panel = self._build_surroundings_panel()
+        self._update_info(panel, markup=True)
+
+    def _build_surroundings_panel(self) -> str:
+        try:
+            pos = self._game._load_position()
+            city = self._game._city()
+        except Exception:
+            return _HELP_TEXT
+
+        if city is None or pos is None:
+            return (
+                "[dim]Ctrl+G — toggle GM/CMD  |  Ctrl+S — LLM settings[/dim]\n\n"
+                "Type [bold]start[/bold] to begin a new game."
+            )
+
+        lines: list[str] = []
+
+        # Track visited districts
+        if pos.district_id:
+            self._visited_districts.add(pos.district_id)
+
+        # Mode indicator
+        mode = "[bold green]GM[/bold green]" if self._gm_mode else "[bold yellow]CMD[/bold yellow]"
+        lines.append(f"Mode: {mode}  [dim](Ctrl+G)[/dim]\n")
+
+        # ── Current location detail ──────────────────────────────────
+        if pos.district_id:
+            district = self._game._district(pos.district_id)
+            if district:
+                lc = district.lantern_condition
+                lantern_color = {
+                    "bright": "yellow", "dim": "grey50", "flickering": "orange1",
+                    "extinguished": "red", "altered": "magenta",
+                }.get(lc, "white")
+                lines.append(
+                    f"[bold]▶ {escape(district.name)}[/bold]\n"
+                    f"  [{lantern_color}]{escape(lc)} lanterns[/{lantern_color}]\n"
+                )
+                if district.visible_locations:
+                    lines.append("[bold]Locations here:[/bold]")
+                    for loc_id in district.visible_locations:
+                        loc = self._game.store.load_object("LocationState", loc_id)
+                        if not isinstance(loc, LocationState):
+                            continue
+                        is_here = loc_id == pos.location_id
+                        marker = "[bold cyan]▶[/bold cyan]" if is_here else " "
+                        lines.append(f"  {marker} [cyan]{escape(loc.name)}[/cyan]")
+                        for nid in loc.known_npc_ids:
+                            npc = self._game._npc(nid)
+                            if npc:
+                                lines.append(f"      · {escape(npc.name)}")
+                    lines.append("")
+
+        # ── All districts ────────────────────────────────────────────
+        lines.append("[bold]City Districts:[/bold]")
+        for did in city.district_ids:
+            district = self._game._district(did)
+            if not district:
+                continue
+            is_current = did == pos.district_id
+            was_visited = did in self._visited_districts
+            lc = district.lantern_condition
+            lantern_color = {
+                "bright": "yellow", "dim": "grey50", "flickering": "orange1",
+                "extinguished": "red", "altered": "magenta",
+            }.get(lc, "white")
+            lantern_icon = {
+                "bright": "◉", "dim": "◎", "flickering": "◌",
+                "extinguished": "○", "altered": "◈",
+            }.get(lc, "◎")
+
+            if is_current:
+                name_markup = f"[bold cyan]{escape(district.name)}[/bold cyan] [dim](here)[/dim]"
+            elif was_visited:
+                name_markup = f"{escape(district.name)} [dim](visited)[/dim]"
+            else:
+                name_markup = f"[dim]{escape(district.name)}[/dim] [dim]— unexplored[/dim]"
+
+            lines.append(f"  [{lantern_color}]{lantern_icon}[/{lantern_color}] {name_markup}")
+        lines.append("")
+
+        # ── Active cases ─────────────────────────────────────────────
+        active_cases = [
+            self._game.store.load_object("CaseState", cid)
+            for cid in city.active_case_ids
+        ]
+        active_cases = [c for c in active_cases if isinstance(c, CaseState)]
+        if active_cases:
+            lines.append("[bold]Cases:[/bold]")
+            for case in active_cases:
+                lines.append(f"  [yellow]{escape(case.title)}[/yellow]")
+                lines.append(f"  [dim]{escape(case.status)}[/dim]")
+            lines.append("")
+
+        # ── Clues ────────────────────────────────────────────────────
+        clue_count = len(pos.clue_ids)
+        clue_color = "green" if clue_count > 0 else "dim"
+        lines.append(f"[bold]Clues:[/bold] [{clue_color}]{clue_count} acquired[/{clue_color}]")
+        if clue_count > 0:
+            lines.append("  [dim]say 'show my clues'[/dim]")
+
+        return "\n".join(lines)
 
     def _refresh_status(self) -> None:
         mode = "[GM]" if self._gm_mode else "[CMD]"
