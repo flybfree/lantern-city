@@ -1,18 +1,27 @@
 from __future__ import annotations
 
 import shlex
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from lantern_city.bootstrap import bootstrap_city
+from lantern_city.case_bootstrap import bootstrap_generated_case
 from lantern_city.cases import transition_case
 from lantern_city.clues import clarify_clue
 from lantern_city.engine import handle_player_request
+from lantern_city.generation.case_generation import (
+    CaseGenerationRequest,
+    CaseGenerationError,
+    CaseGenerator,
+)
 from lantern_city.lanterns import LanternRuleProfile, apply_lantern_to_clue, is_corroborated
-from lantern_city.llm_client import OpenAICompatibleConfig
+from lantern_city.llm_client import OpenAICompatibleConfig, OpenAICompatibleLLMClient
 from lantern_city.models import (
+    CaseState,
     ClueState,
     DistrictState,
+    FactionState,
     LocationState,
     NPCState,
     PlayerProgressState,
@@ -52,6 +61,8 @@ class LanternCityApp:
         seed = validate_city_seed(_default_seed_payload())
         result = bootstrap_city(seed, self.store)
         self._seed_authored_scene_objects()
+        if self.llm_config is not None:
+            self._generate_latent_cases(count=2)
         city = self._require_city()
         case = self._active_case(city)
         case_title = "None" if case is None else self._display_case_title(case.title)
@@ -110,14 +121,18 @@ class LanternCityApp:
             if outcome.active_slice.district is not None and outcome.active_slice.district.visible_locations
             else "None"
         )
-        return (
-            f"District: {district.name}\n"
-            f"Lanterns: {district.lantern_condition}\n"
-            f"Notable NPC: {visible_npc}\n"
-            f"Available NPC IDs: {available_npcs}\n"
-            f"Available location IDs: {available_locations}\n"
-            f"Summary: {outcome.response.narrative_text}"
-        )
+        lines = [
+            f"District: {district.name}",
+            f"Lanterns: {district.lantern_condition}",
+            f"Notable NPC: {visible_npc}",
+            f"Available NPC IDs: {available_npcs}",
+            f"Available location IDs: {available_locations}",
+            f"Summary: {outcome.response.narrative_text}",
+        ]
+        lead = self._check_case_discovery(district_id, updated_at=TURN_ONE)
+        if lead:
+            lines.append(f"\nNew lead: {lead}")
+        return "\n".join(lines)
 
     def talk_to_npc(self, npc_id: str, prompt: str) -> str:
         city = self._require_city()
@@ -234,7 +249,8 @@ class LanternCityApp:
         clue_status = " | ".join(
             f"{_clue_label(c.id)}: {c.reliability}" for c in updated_clues
         )
-        lines.append(f"[Lantern: {district.lantern_condition} | {clue_status}]")
+        status_suffix = f" | {clue_status}" if clue_status else ""
+        lines.append(f"[Lantern: {district.lantern_condition}{status_suffix}]")
         lines.extend(propagation_notices)
         return "\n".join(lines)
 
@@ -246,14 +262,23 @@ class LanternCityApp:
             request=self._request("review case", target_id=case_id, updated_at=TURN_FOUR),
             llm_config=self.llm_config,
         )
-        case = self._active_case(city)
+        case_obj = self.store.load_object("CaseState", case_id)
+        if not isinstance(case_obj, CaseState):
+            raise LookupError(f"Case not found: {case_id}")
+        case = case_obj
         progress = self._require_progress()
-        if case is None:
-            raise LookupError("No active case found")
 
-        path, new_status, resolution_summary, fallout_summary = _assess_resolution(
-            self.store, progress
-        )
+        if case.id == "case_missing_clerk":
+            path, new_status, resolution_summary, fallout_summary = _assess_resolution(
+                self.store, progress
+            )
+            gains = _RESOLUTION_GAINS[path]
+        else:
+            new_status, resolution_summary, fallout_summary = _assess_generated_resolution(
+                case, self.store
+            )
+            path = new_status.replace(" ", "_")
+            gains = _gains_for_outcome(new_status)
 
         updated_case = transition_case(
             case,
@@ -265,7 +290,7 @@ class LanternCityApp:
         self.store.save_object(updated_case)
 
         progress = self._require_progress()
-        for track, amount, reason in _RESOLUTION_GAINS[path]:
+        for track, amount, reason in gains:
             progress, _ = apply_progress_change(
                 progress,
                 track=track,
@@ -274,6 +299,18 @@ class LanternCityApp:
                 updated_at=TURN_FOUR,
             )
         self.store.save_object(progress)
+
+        # Generate a new latent case if the pipeline is running low
+        if self.llm_config is not None:
+            city = self._require_city()
+            non_terminal = [
+                obj
+                for cid in city.active_case_ids
+                if isinstance(obj := self.store.load_object("CaseState", cid), CaseState)
+                and obj.status not in {"solved", "partially solved", "failed"}
+            ]
+            if len(non_terminal) < 2:
+                self._generate_latent_cases(count=1)
 
         lines = [
             f"Case status: {updated_case.status}",
@@ -370,20 +407,118 @@ class LanternCityApp:
 
         return notices
 
+    def _check_case_discovery(self, district_id: str, *, updated_at: str) -> str | None:
+        """Transition any latent case to active when the player enters one of its districts."""
+        city = self._require_city()
+        for case_id in city.active_case_ids:
+            case = self.store.load_object("CaseState", case_id)
+            if not isinstance(case, CaseState):
+                continue
+            if case.status != "latent":
+                continue
+            if district_id not in case.involved_district_ids:
+                continue
+            updated_case = transition_case(case, "active", updated_at=updated_at)
+            self.store.save_object(updated_case)
+            return case.discovery_hook or f"A new lead has emerged: {case.title}"
+        return None
+
+    def _generate_latent_cases(self, count: int = 2) -> None:
+        """Call the LLM to generate new latent cases and bootstrap them into the world."""
+        if self.llm_config is None:
+            return
+        city = self._require_city()
+        factions = [
+            obj
+            for fid in city.faction_ids
+            if isinstance(obj := self.store.load_object("FactionState", fid), FactionState)
+        ]
+        districts = [
+            obj
+            for did in city.district_ids
+            if isinstance(obj := self.store.load_object("DistrictState", did), DistrictState)
+        ]
+        progress = self._require_progress()
+        all_cases = self.store.list_objects("CaseState")
+        existing_cases = [c for c in all_cases if isinstance(c, CaseState)]
+        existing_case_types = [c.case_type for c in existing_cases]
+        all_npcs = self.store.list_objects("NPCState")
+        existing_npc_names = [npc.name for npc in all_npcs if isinstance(npc, NPCState)]
+        gen_case_count = sum(
+            1 for c in existing_cases if c.id.startswith("case_gen_")
+        )
+        llm_client = OpenAICompatibleLLMClient(self.llm_config)
+        generator = CaseGenerator(llm_client)
+        for i in range(count):
+            request = CaseGenerationRequest(
+                request_id=f"req_gen_{gen_case_count + i:04d}",
+                city=city,
+                factions=factions,
+                districts=districts,
+                progress=progress,
+                existing_case_types=existing_case_types,
+                existing_npc_names=existing_npc_names,
+            )
+            try:
+                result = generator.generate(request)
+            except CaseGenerationError:
+                continue
+            city = self._require_city()
+            bootstrap_result = bootstrap_generated_case(
+                result,
+                store=self.store,
+                city=city,
+                case_index=gen_case_count + i,
+                updated_at=TURN_ZERO,
+            )
+            self.store.save_objects_atomically(
+                [
+                    bootstrap_result.case,
+                    *bootstrap_result.npcs,
+                    *bootstrap_result.clues,
+                    *bootstrap_result.updated_locations,
+                    *bootstrap_result.updated_districts,
+                    bootstrap_result.updated_city,
+                ]
+            )
+            city = bootstrap_result.updated_city
+            existing_case_types.append(result.case_type)
+            existing_npc_names.extend(spec.name for spec in result.npc_specs)
+
     def _seed_authored_scene_objects(self) -> None:
         old_quarter = self._district("district_old_quarter")
         lantern_ward = self._district("district_lantern_ward")
+        the_docks = self._district("district_the_docks")
+        market_spires = self._district("district_market_spires")
+        salt_barrens = self._district("district_salt_barrens")
         shrine_keeper = self._npc("npc_shrine_keeper")
         archive_clerk = self._npc("npc_archive_clerk")
         brin_hesse = self._npc("npc_brin_hesse")
         tovin_vale = self._npc("npc_tovin_vale")
+        sister_calis = self._npc("npc_sister_calis")
+        watcher_pell = self._npc("npc_watcher_pell")
+        dockmaster = self._npc("npc_dockmaster")
+        dock_hauler = self._npc("npc_dock_hauler")
+        records_broker = self._npc("npc_records_broker")
+        guild_steward = self._npc("npc_guild_steward")
+        salvage_worker = self._npc("npc_salvage_worker")
         if (
             old_quarter is None
             or lantern_ward is None
+            or the_docks is None
+            or market_spires is None
+            or salt_barrens is None
             or shrine_keeper is None
             or archive_clerk is None
             or brin_hesse is None
             or tovin_vale is None
+            or sister_calis is None
+            or watcher_pell is None
+            or dockmaster is None
+            or dock_hauler is None
+            or records_broker is None
+            or guild_steward is None
+            or salvage_worker is None
         ):
             raise LookupError("Bootstrap did not create required authored objects")
 
@@ -459,7 +594,157 @@ class LanternCityApp:
             district_id=lantern_ward.id,
             name="Lantern Square",
             location_type="civic",
-            scene_objects=["public lantern post", "civic notice board"],
+            scene_objects=["public lantern post", "civic notice board", "marked paving stones"],
+        )
+        regulation_office = LocationState(
+            id="location_regulation_office",
+            created_at=TURN_ZERO,
+            updated_at=TURN_ZERO,
+            district_id=lantern_ward.id,
+            name="Office of Lantern Regulation",
+            location_type="administrative office",
+            scene_objects=["polished counter", "bright lamp array", "compliance ledger", "precise signage"],
+        )
+        ceremonial_walk = LocationState(
+            id="location_ceremonial_walk",
+            created_at=TURN_ZERO,
+            updated_at=TURN_ZERO,
+            district_id=lantern_ward.id,
+            name="Ceremonial Walk",
+            location_type="public thoroughfare",
+            scene_objects=["evenly spaced lantern post", "reflective paving stone", "civic banner", "marked observation post"],
+        )
+        shrine_liaison_hall = LocationState(
+            id="location_shrine_liaison_hall",
+            created_at=TURN_ZERO,
+            updated_at=TURN_ZERO,
+            district_id=lantern_ward.id,
+            name="Shrine Liaison Hall",
+            location_type="ritual annex",
+            known_npc_ids=[sister_calis.id],
+            clue_ids=["clue_ritual_authorization"],
+            scene_objects=["polished stone floor", "controlled incense stand", "ceremonial record case", "approval seal press"],
+        )
+        civic_watch_desk = LocationState(
+            id="location_civic_watch_desk",
+            created_at=TURN_ZERO,
+            updated_at=TURN_ZERO,
+            district_id=lantern_ward.id,
+            name="Civic Watch Desk",
+            location_type="complaint office",
+            known_npc_ids=[watcher_pell.id],
+            clue_ids=["clue_official_closure_order"],
+            scene_objects=["complaint ledger", "stamped forms", "orderly bench row", "case archive shelf"],
+        )
+
+        # --- The Docks locations ---
+        pier_landing = LocationState(
+            id="location_pier_landing",
+            created_at=TURN_ZERO,
+            updated_at=TURN_ZERO,
+            district_id=the_docks.id,
+            name="Pier Landing",
+            location_type="transit dock",
+            scene_objects=["mooring post", "cargo manifest board", "oil-stained rope coil"],
+        )
+        harbormaster_office = LocationState(
+            id="location_harbormaster_office",
+            created_at=TURN_ZERO,
+            updated_at=TURN_ZERO,
+            district_id=the_docks.id,
+            name="Harbormaster Office",
+            location_type="administrative office",
+            known_npc_ids=[dockmaster.id],
+            scene_objects=["cargo register", "berthing chart", "damp inspection ledger"],
+        )
+        cargo_holding = LocationState(
+            id="location_cargo_holding",
+            created_at=TURN_ZERO,
+            updated_at=TURN_ZERO,
+            district_id=the_docks.id,
+            name="Cargo Holding",
+            location_type="storage",
+            known_npc_ids=[dock_hauler.id],
+            scene_objects=["stacked crates", "chalk lot markings", "iron transit seal"],
+        )
+        dock_workers_passage = LocationState(
+            id="location_dock_workers_passage",
+            created_at=TURN_ZERO,
+            updated_at=TURN_ZERO,
+            district_id=the_docks.id,
+            name="Dock Workers Passage",
+            location_type="service passage",
+            scene_objects=["unmarked door", "soot-marked wall", "discarded route slip"],
+        )
+
+        # --- Market Spires locations ---
+        trade_floor = LocationState(
+            id="location_trade_floor",
+            created_at=TURN_ZERO,
+            updated_at=TURN_ZERO,
+            district_id=market_spires.id,
+            name="Trade Floor",
+            location_type="market",
+            scene_objects=["merchant stall", "price board", "public lantern column"],
+        )
+        records_office = LocationState(
+            id="location_records_office",
+            created_at=TURN_ZERO,
+            updated_at=TURN_ZERO,
+            district_id=market_spires.id,
+            name="Records Office",
+            location_type="administrative office",
+            known_npc_ids=[records_broker.id],
+            scene_objects=["transaction ledger", "filing press", "ink-stained counter"],
+        )
+        guild_hall = LocationState(
+            id="location_guild_hall",
+            created_at=TURN_ZERO,
+            updated_at=TURN_ZERO,
+            district_id=market_spires.id,
+            name="Guild Hall",
+            location_type="authority hall",
+            known_npc_ids=[guild_steward.id],
+            scene_objects=["charter display", "guild seal press", "members register"],
+        )
+        back_counter = LocationState(
+            id="location_back_counter",
+            created_at=TURN_ZERO,
+            updated_at=TURN_ZERO,
+            district_id=market_spires.id,
+            name="Back Counter",
+            location_type="restricted office",
+            scene_objects=["unmarked ledger stack", "curtained access door", "sealed correspondence tray"],
+        )
+
+        # --- Salt Barrens locations ---
+        abandoned_works = LocationState(
+            id="location_abandoned_works",
+            created_at=TURN_ZERO,
+            updated_at=TURN_ZERO,
+            district_id=salt_barrens.id,
+            name="Abandoned Works",
+            location_type="industrial ruin",
+            scene_objects=["collapsed beam stack", "salt-crusted floor", "stripped lantern mount"],
+        )
+        salvage_yard = LocationState(
+            id="location_salvage_yard",
+            created_at=TURN_ZERO,
+            updated_at=TURN_ZERO,
+            district_id=salt_barrens.id,
+            name="Salvage Yard",
+            location_type="outdoor salvage",
+            known_npc_ids=[salvage_worker.id],
+            scene_objects=["sorted scrap pile", "broken glass heap", "hand-drawn boundary marker"],
+        )
+        lantern_graveyard = LocationState(
+            id="location_lantern_graveyard",
+            created_at=TURN_ZERO,
+            updated_at=TURN_ZERO,
+            district_id=salt_barrens.id,
+            name="Lantern Graveyard",
+            location_type="decommissioned site",
+            scene_objects=["rows of dead lantern casings", "corroded bracket pile", "unlit ceremonial post"],
         )
 
         # --- Clues ---
@@ -571,6 +856,38 @@ class LanternCityApp:
             related_case_ids=["case_missing_clerk"],
             related_district_ids=[old_quarter.id],
         )
+        clue_h = ClueState(
+            id="clue_official_closure_order",
+            created_at=TURN_ZERO,
+            updated_at=TURN_ZERO,
+            source_type="document",
+            source_id=civic_watch_desk.id,
+            clue_text=(
+                "A pre-drafted administrative closure order for the Old Quarter lantern incident — "
+                "dated before the official complaint was filed. "
+                "The case was being administratively closed before it was formally opened."
+            ),
+            reliability="uncertain",
+            related_npc_ids=[watcher_pell.id],
+            related_case_ids=["case_missing_clerk"],
+            related_district_ids=[lantern_ward.id],
+        )
+        clue_i = ClueState(
+            id="clue_ritual_authorization",
+            created_at=TURN_ZERO,
+            updated_at=TURN_ZERO,
+            source_type="testimony",
+            source_id=shrine_liaison_hall.id,
+            clue_text=(
+                "Sister Calis acknowledges that a lantern alteration of this type requires "
+                "shrine-level authorization — whoever acted did so with knowledge of ritual protocols, "
+                "not merely technical access."
+            ),
+            reliability="uncertain",
+            related_npc_ids=[sister_calis.id],
+            related_case_ids=["case_missing_clerk"],
+            related_district_ids=[lantern_ward.id, old_quarter.id],
+        )
 
         # --- District updates ---
         updated_old_quarter = old_quarter.model_copy(
@@ -588,8 +905,49 @@ class LanternCityApp:
         )
         updated_lantern_ward = lantern_ward.model_copy(
             update={
-                "visible_locations": [lantern_square.id],
+                "visible_locations": [
+                    lantern_square.id,
+                    regulation_office.id,
+                    ceremonial_walk.id,
+                    shrine_liaison_hall.id,
+                    civic_watch_desk.id,
+                ],
                 "version": lantern_ward.version + 1,
+                "updated_at": TURN_ZERO,
+            }
+        )
+        updated_the_docks = the_docks.model_copy(
+            update={
+                "visible_locations": [
+                    pier_landing.id,
+                    harbormaster_office.id,
+                    cargo_holding.id,
+                ],
+                "hidden_locations": [dock_workers_passage.id],
+                "version": the_docks.version + 1,
+                "updated_at": TURN_ZERO,
+            }
+        )
+        updated_market_spires = market_spires.model_copy(
+            update={
+                "visible_locations": [
+                    trade_floor.id,
+                    records_office.id,
+                    guild_hall.id,
+                ],
+                "hidden_locations": [back_counter.id],
+                "version": market_spires.version + 1,
+                "updated_at": TURN_ZERO,
+            }
+        )
+        updated_salt_barrens = salt_barrens.model_copy(
+            update={
+                "visible_locations": [
+                    abandoned_works.id,
+                    salvage_yard.id,
+                ],
+                "hidden_locations": [lantern_graveyard.id],
+                "version": salt_barrens.version + 1,
                 "updated_at": TURN_ZERO,
             }
         )
@@ -668,6 +1026,104 @@ class LanternCityApp:
                 "updated_at": TURN_ZERO,
             }
         )
+        updated_sister_calis = sister_calis.model_copy(
+            update={
+                "public_identity": "shrine liaison to the Council of Lights",
+                "hidden_objective": (
+                    "Contain the ritual interpretation of the lantern alteration. "
+                    "Prevent it becoming a public spiritual crisis."
+                ),
+                "current_objective": (
+                    "Monitor how far the investigation reaches into official channels. "
+                    "Manage the contact between shrine practice and civic authority."
+                ),
+                "trust_in_player": 0.1,
+                "suspicion": 0.5,
+                "fear": 0.2,
+                "known_clue_ids": [clue_i.id],
+                "version": sister_calis.version + 1,
+                "updated_at": TURN_ZERO,
+            }
+        )
+        updated_watcher_pell = watcher_pell.model_copy(
+            update={
+                "public_identity": "civic watch compliance officer",
+                "hidden_objective": (
+                    "Close the missing clerk file without formal investigation. "
+                    "Preserve district calm and watch standing."
+                ),
+                "current_objective": (
+                    "Maintain watch posture. Keep complaints at the administrative level. "
+                    "Prevent escalation to civic inquiry."
+                ),
+                "trust_in_player": 0.05,
+                "suspicion": 0.35,
+                "fear": 0.1,
+                "known_clue_ids": [clue_h.id],
+                "version": watcher_pell.version + 1,
+                "updated_at": TURN_ZERO,
+            }
+        )
+        updated_dockmaster = dockmaster.model_copy(
+            update={
+                "public_identity": "harbormaster, Docks authority",
+                "hidden_objective": "Maintain control of what moves through unofficial channels.",
+                "current_objective": "Keep port operations running without civic interference.",
+                "trust_in_player": 0.15,
+                "suspicion": 0.45,
+                "fear": 0.1,
+                "version": dockmaster.version + 1,
+                "updated_at": TURN_ZERO,
+            }
+        )
+        updated_dock_hauler = dock_hauler.model_copy(
+            update={
+                "public_identity": "cargo hauler",
+                "hidden_objective": "Avoid being connected to any unofficial cargo movements.",
+                "current_objective": "Get through the day without drawing attention.",
+                "trust_in_player": 0.3,
+                "suspicion": 0.5,
+                "fear": 0.35,
+                "version": dock_hauler.version + 1,
+                "updated_at": TURN_ZERO,
+            }
+        )
+        updated_records_broker = records_broker.model_copy(
+            update={
+                "public_identity": "commercial records clerk",
+                "hidden_objective": "Leverage information asymmetry for personal gain.",
+                "current_objective": "Identify what information the player is looking for and its value.",
+                "trust_in_player": 0.2,
+                "suspicion": 0.3,
+                "fear": 0.05,
+                "version": records_broker.version + 1,
+                "updated_at": TURN_ZERO,
+            }
+        )
+        updated_guild_steward = guild_steward.model_copy(
+            update={
+                "public_identity": "trade guild compliance steward",
+                "hidden_objective": "Protect guild interests from outside scrutiny.",
+                "current_objective": "Enforce standard commercial procedures. Deflect irregular inquiries.",
+                "trust_in_player": 0.1,
+                "suspicion": 0.4,
+                "fear": 0.1,
+                "version": guild_steward.version + 1,
+                "updated_at": TURN_ZERO,
+            }
+        )
+        updated_salvage_worker = salvage_worker.model_copy(
+            update={
+                "public_identity": "salvage worker, Salt Barrens",
+                "hidden_objective": "Keep the graveyard and what it holds to himself.",
+                "current_objective": "Work the yard. Stay out of trouble from both directions.",
+                "trust_in_player": 0.35,
+                "suspicion": 0.6,
+                "fear": 0.5,
+                "version": salvage_worker.version + 1,
+                "updated_at": TURN_ZERO,
+            }
+        )
 
         self.store.save_objects_atomically(
             [
@@ -691,6 +1147,34 @@ class LanternCityApp:
                 clue_e,
                 clue_f,
                 clue_g,
+                clue_h,
+                clue_i,
+                updated_sister_calis,
+                updated_watcher_pell,
+                regulation_office,
+                ceremonial_walk,
+                shrine_liaison_hall,
+                civic_watch_desk,
+                # New districts
+                updated_the_docks,
+                updated_market_spires,
+                updated_salt_barrens,
+                pier_landing,
+                harbormaster_office,
+                cargo_holding,
+                dock_workers_passage,
+                trade_floor,
+                records_office,
+                guild_hall,
+                back_counter,
+                abandoned_works,
+                salvage_yard,
+                lantern_graveyard,
+                updated_dockmaster,
+                updated_dock_hauler,
+                updated_records_broker,
+                updated_guild_steward,
+                updated_salvage_worker,
             ]
         )
 
@@ -801,6 +1285,8 @@ _CASE_CLUE_IDS = [
     "clue_family_record_discrepancy",
     "clue_hidden_copy_sheet",
     "clue_witness_instability",
+    "clue_official_closure_order",
+    "clue_ritual_authorization",
 ]
 _CREDIBLE_RELIABILITIES = {"credible", "solid"}
 # (track, amount, reason)
@@ -920,6 +1406,57 @@ def _assess_resolution(
     )
 
 
+def _assess_generated_resolution(
+    case: CaseState, store: SQLiteStore
+) -> tuple[str, str, str]:
+    """Evaluate a generated case's stored resolution_conditions against current clue states."""
+    if not case.resolution_conditions:
+        return (
+            "failed",
+            "Insufficient evidence to resolve the case.",
+            "The case closed without resolution.",
+        )
+    paths = sorted(case.resolution_conditions, key=lambda p: p.get("priority", 99))
+    for path in paths:
+        required_ids = path.get("required_clue_ids", [])
+        required_count = int(path.get("required_credible_count", 0))
+        credible_count = sum(
+            1
+            for clue_id in required_ids
+            if isinstance(clue := store.load_object("ClueState", clue_id), ClueState)
+            and clue.reliability in _CREDIBLE_RELIABILITIES
+        )
+        if credible_count >= required_count:
+            return (
+                str(path.get("outcome_status", "failed")),
+                str(path.get("summary_text", "Case resolved.")),
+                str(path.get("fallout_text", "")),
+            )
+    last = paths[-1]
+    return (
+        str(last.get("outcome_status", "failed")),
+        str(last.get("summary_text", "Case closed without resolution.")),
+        str(last.get("fallout_text", "")),
+    )
+
+
+def _gains_for_outcome(outcome_status: str) -> list[tuple[str, int, str]]:
+    if outcome_status == "solved":
+        return [
+            ("reputation", 8, "Successfully resolved a generated investigation case."),
+            ("city_impact", 10, "Case closure shaped the city's ongoing tensions."),
+            ("clue_mastery", 5, "Evidence chain assembled and resolved."),
+        ]
+    if outcome_status == "partially solved":
+        return [
+            ("lantern_understanding", 4, "Partial resolution illuminated city dynamics."),
+            ("clue_mastery", 4, "Evidence gathered; incomplete resolution."),
+        ]
+    return [
+        ("lantern_understanding", 2, "Partial observation before case closed against truth."),
+    ]
+
+
 def _default_seed_payload() -> dict[str, object]:
     return {
         "schema_version": "1.0",
@@ -934,7 +1471,7 @@ def _default_seed_payload() -> dict[str, object]:
             "baseline_noise_level": "medium",
         },
         "district_configuration": {
-            "district_count": 2,
+            "district_count": 5,
             "districts": [
                 {
                     "id": "district_old_quarter",
@@ -954,6 +1491,33 @@ def _default_seed_payload() -> dict[str, object]:
                     "access_pattern": "controlled",
                     "hidden_location_density": "low",
                 },
+                {
+                    "id": "district_the_docks",
+                    "name": "The Docks",
+                    "role": "transient port district",
+                    "stability_baseline": 0.38,
+                    "lantern_state": "flickering",
+                    "access_pattern": "informal",
+                    "hidden_location_density": "medium",
+                },
+                {
+                    "id": "district_market_spires",
+                    "name": "Market Spires",
+                    "role": "commercial trade district",
+                    "stability_baseline": 0.62,
+                    "lantern_state": "bright",
+                    "access_pattern": "commercial",
+                    "hidden_location_density": "low",
+                },
+                {
+                    "id": "district_salt_barrens",
+                    "name": "Salt Barrens",
+                    "role": "abandoned industrial outer district",
+                    "stability_baseline": 0.18,
+                    "lantern_state": "extinguished",
+                    "access_pattern": "uncontrolled",
+                    "hidden_location_density": "high",
+                },
             ],
         },
         "faction_configuration": {
@@ -968,6 +1532,9 @@ def _default_seed_payload() -> dict[str, object]:
                     "influence_by_district": {
                         "district_old_quarter": 0.78,
                         "district_lantern_ward": 0.22,
+                        "district_the_docks": 0.20,
+                        "district_market_spires": 0.30,
+                        "district_salt_barrens": 0.08,
                     },
                     "attitude_toward_player": "wary",
                 },
@@ -980,6 +1547,9 @@ def _default_seed_payload() -> dict[str, object]:
                     "influence_by_district": {
                         "district_old_quarter": 0.18,
                         "district_lantern_ward": 0.81,
+                        "district_the_docks": 0.45,
+                        "district_market_spires": 0.55,
+                        "district_salt_barrens": 0.12,
                     },
                     "attitude_toward_player": "guarded",
                 },
@@ -1018,7 +1588,7 @@ def _default_seed_payload() -> dict[str, object]:
                     "type": "missing person",
                     "intensity": "medium",
                     "scope": "single district",
-                    "involved_district_ids": ["district_old_quarter"],
+                    "involved_district_ids": ["district_old_quarter", "district_lantern_ward"],
                     "involved_faction_ids": ["faction_memory_keepers"],
                     "key_npc_ids": ["npc_shrine_keeper", "npc_archive_clerk", "npc_brin_hesse", "npc_tovin_vale"],
                     "failure_modes": ["evidence destroyed", "Missingness escalates"],
@@ -1026,7 +1596,7 @@ def _default_seed_payload() -> dict[str, object]:
             ],
         },
         "npc_configuration": {
-            "tracked_npc_count": 4,
+            "tracked_npc_count": 11,
             "npcs": [
                 {
                     "id": "npc_shrine_keeper",
@@ -1075,6 +1645,90 @@ def _default_seed_payload() -> dict[str, object]:
                     "secrecy_level": "extreme",
                     "mobility_pattern": "stationary",
                     "relevance_level": "immediate",
+                },
+                {
+                    "id": "npc_sister_calis",
+                    "name": "Sister Calis",
+                    "role_category": "authority",
+                    "district_id": "district_lantern_ward",
+                    "location_id": "location_shrine_liaison_hall",
+                    "memory_depth": "high",
+                    "relationship_density": "medium",
+                    "secrecy_level": "high",
+                    "mobility_pattern": "district-bound",
+                    "relevance_level": "secondary",
+                },
+                {
+                    "id": "npc_watcher_pell",
+                    "name": "Watcher Pell",
+                    "role_category": "gatekeeper",
+                    "district_id": "district_lantern_ward",
+                    "location_id": "location_civic_watch_desk",
+                    "memory_depth": "medium",
+                    "relationship_density": "low",
+                    "secrecy_level": "medium",
+                    "mobility_pattern": "district-bound",
+                    "relevance_level": "secondary",
+                },
+                {
+                    "id": "npc_dockmaster",
+                    "name": "Harrow Selt",
+                    "role_category": "authority",
+                    "district_id": "district_the_docks",
+                    "location_id": "location_harbormaster_office",
+                    "memory_depth": "medium",
+                    "relationship_density": "medium",
+                    "secrecy_level": "medium",
+                    "mobility_pattern": "district-bound",
+                    "relevance_level": "secondary",
+                },
+                {
+                    "id": "npc_dock_hauler",
+                    "name": "Maren Osk",
+                    "role_category": "informant",
+                    "district_id": "district_the_docks",
+                    "location_id": "location_cargo_holding",
+                    "memory_depth": "low",
+                    "relationship_density": "low",
+                    "secrecy_level": "low",
+                    "mobility_pattern": "route-bound",
+                    "relevance_level": "background",
+                },
+                {
+                    "id": "npc_records_broker",
+                    "name": "Vel Dassen",
+                    "role_category": "informant",
+                    "district_id": "district_market_spires",
+                    "location_id": "location_records_office",
+                    "memory_depth": "high",
+                    "relationship_density": "medium",
+                    "secrecy_level": "medium",
+                    "mobility_pattern": "district-bound",
+                    "relevance_level": "secondary",
+                },
+                {
+                    "id": "npc_guild_steward",
+                    "name": "Cor Falt",
+                    "role_category": "gatekeeper",
+                    "district_id": "district_market_spires",
+                    "location_id": "location_guild_hall",
+                    "memory_depth": "medium",
+                    "relationship_density": "medium",
+                    "secrecy_level": "medium",
+                    "mobility_pattern": "district-bound",
+                    "relevance_level": "secondary",
+                },
+                {
+                    "id": "npc_salvage_worker",
+                    "name": "Persin Loke",
+                    "role_category": "informant",
+                    "district_id": "district_salt_barrens",
+                    "location_id": "location_salvage_yard",
+                    "memory_depth": "low",
+                    "relationship_density": "low",
+                    "secrecy_level": "low",
+                    "mobility_pattern": "district-bound",
+                    "relevance_level": "background",
                 },
             ],
         },

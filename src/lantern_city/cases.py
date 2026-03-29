@@ -3,6 +3,7 @@ from __future__ import annotations
 from lantern_city.models import CaseState
 
 CASE_STATUSES = (
+    "latent",
     "active",
     "stalled",
     "escalated",
@@ -12,6 +13,7 @@ CASE_STATUSES = (
 )
 _TERMINAL_STATUSES = {"solved", "partially solved", "failed"}
 _ALLOWED_TRANSITIONS = {
+    "latent": {"active"},
     "active": {"stalled", "escalated", "solved", "partially solved", "failed"},
     "stalled": {"active", "escalated", "partially solved", "failed"},
     "escalated": {"active", "solved", "partially solved", "failed"},

@@ -143,6 +143,9 @@ class CaseState(RuntimeModel):
     objective_summary: str = ""
     resolution_summary: str | None = None
     fallout_summary: str | None = None
+    # Generated case fields
+    discovery_hook: str = ""
+    resolution_conditions: list[JSONObject] = Field(default_factory=list)
 
 
 class SceneState(RuntimeModel):

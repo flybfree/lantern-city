@@ -296,7 +296,7 @@ def test_relationship_shift_rejects_out_of_bounds_single_turn_deltas(
     ("field_name", "value"),
     [
         ("summary_text", "   "),
-        ("summary_text", "X" * 161),
+        ("summary_text", "X" * 321),
         ("warnings", ["   "]),
         ("warnings", ["X" * 121]),
     ],
@@ -338,7 +338,7 @@ def test_npc_response_generation_result_rejects_transcript_like_exit_line() -> N
 
 def test_npc_response_generation_result_rejects_overlong_npc_line() -> None:
     payload = copy.deepcopy(make_valid_payload())
-    payload["cacheable_text"]["npc_line"] = "X" * 281
+    payload["cacheable_text"]["npc_line"] = "X" * 641
 
     with pytest.raises(ValidationError, match="npc_line"):
         NPCResponseGenerationResult.model_validate(payload)

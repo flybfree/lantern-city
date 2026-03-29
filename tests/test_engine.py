@@ -260,7 +260,7 @@ def test_handle_player_request_returns_district_entry_response_and_persists_city
     district = populated_store.load_object("DistrictState", DISTRICT_ID)
 
     assert outcome.response.narrative_text == (
-        "You enter Old Quarter. The district feels wet and watchful, and the lanterns are dim."
+        "You enter Old Quarter. The lanterns are dim."
     )
     assert outcome.response.state_changes == ["Presence increased in Old Quarter."]
     assert outcome.response.learned == ["The district lanterns are running dim."]

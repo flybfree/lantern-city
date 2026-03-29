@@ -28,6 +28,7 @@ def active_case() -> CaseState:
 
 def test_case_statuses_include_documented_states() -> None:
     assert set(CASE_STATUSES) == {
+        "latent",
         "active",
         "stalled",
         "escalated",

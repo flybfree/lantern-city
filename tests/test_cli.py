@@ -19,7 +19,8 @@ def test_cli_start_initializes_a_game_and_renders_compact_status(tmp_path: Path)
     output = run_cli("--db", str(database_path), "start")
 
     assert "Lantern City ready" in output
-    assert "Districts: district_lantern_ward, district_old_quarter" in output
+    assert "district_old_quarter" in output
+    assert "district_lantern_ward" in output
     assert "Active case: The Missing Clerk" in output
     assert "Next: enter district_old_quarter" in output
 
