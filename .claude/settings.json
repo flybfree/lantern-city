@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -c \"from lantern_city.cli import main; main\\([''talk'', ''npc_shrine_keeper'', ''Is there anything else you know? Anything you have not told me yet?'']\\)\")",
+      "Bash(python -c \"from lantern_city.cli import main; main\\([''inspect'', ''location_shrine_lane'']\\)\")",
+      "Bash(python -c \"from lantern_city.cli import main; main\\([''talk'', ''npc_archive_clerk'', ''What do you know about the missing clerk?'']\\)\")",
+      "Bash(python -c \"from lantern_city.cli import main; main\\([''case'', ''case_missing_clerk'']\\)\")",
+      "Bash(rm -f lantern-city.sqlite3)",
+      "Bash(python -c \":*)"
+    ]
+  }
+}

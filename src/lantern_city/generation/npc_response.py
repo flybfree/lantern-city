@@ -8,6 +8,11 @@ from typing import Any, Literal, Protocol, runtime_checkable
 from pydantic import Field, field_validator
 
 from lantern_city.active_slice import ActiveSlice
+from lantern_city.generation.writing_guardrails import (
+    COMMON_AVOID_RULES,
+    NPC_DIALOGUE_RULES,
+    TONE_SYSTEM_BLOCK,
+)
 from lantern_city.models import LanternCityModel, PlayerRequest
 
 
@@ -41,6 +46,10 @@ def _require_single_turn_text(value: str, *, field_name: str, max_length: int) -
         raise ValueError(f"{field_name} must be a single reply turn")
     if re.search(r"(?:^|\s)(?:player|npc|you|detective|investigator):", value, flags=re.IGNORECASE):
         raise ValueError(f"{field_name} must not look like a transcript")
+    non_ws = [c for c in value if not c.isspace()]
+    alpha_count = sum(1 for c in non_ws if c.isalpha())
+    if not non_ws or alpha_count < len(non_ws) * 0.25:
+        raise ValueError(f"{field_name} must not be an ellipsis or punctuation-only placeholder")
     return value
 
 
@@ -183,7 +192,7 @@ class NPCResponseCacheableText(LanternCityModel):
     @field_validator("npc_line")
     @classmethod
     def _validate_npc_line(cls, value: str) -> str:
-        return _require_single_turn_text(value, field_name="npc_line", max_length=280)
+        return _require_single_turn_text(value, field_name="npc_line", max_length=640)
 
     @field_validator("follow_up_suggestions")
     @classmethod
@@ -213,7 +222,7 @@ class NPCResponseGenerationResult(LanternCityModel):
     @field_validator("summary_text")
     @classmethod
     def _validate_summary_text(cls, value: str) -> str:
-        return _require_bounded_text(value, field_name="summary_text", max_length=160)
+        return _require_bounded_text(value, field_name="summary_text", max_length=320)
 
     @field_validator("warnings")
     @classmethod
@@ -269,11 +278,19 @@ class NPCResponseGenerationRequest:
                 "lantern_condition": self.active_slice.district.lantern_condition,
                 "tone": self.active_slice.district.tone,
             }
+        npc = self._target_npc()
+        history = [
+            {"player": entry["input_text"], "npc": entry["npc_response"]}
+            for entry in npc.memory_log[-6:]
+            if "input_text" in entry and "npc_response" in entry
+        ]
+
         return {
             "task_type": "npc_response",
             "request_id": self.request_id,
             "player_input": self.player_request.input_text,
             "player_intent": self.player_request.intent,
+            "conversation_history": history,
             "npc": {
                 "id": npc.id,
                 "name": npc.name,
@@ -285,6 +302,7 @@ class NPCResponseGenerationRequest:
                 "suspicion": npc.suspicion,
                 "fear": npc.fear,
                 "loyalty": npc.loyalty,
+                "emotional_register": _emotional_register(npc),
             },
             "scene": scene_payload,
             "district": district_payload,
@@ -308,26 +326,90 @@ class NPCResponseGenerationRequest:
         }
 
 
+def _emotional_register(npc: Any) -> str:
+    """Translate numeric trust/fear/suspicion into plain-English behavioral guidance."""
+    parts: list[str] = []
+    trust = getattr(npc, "trust_in_player", 0.0)
+    fear = getattr(npc, "fear", 0.0)
+    suspicion = getattr(npc, "suspicion", 0.0)
+
+    if trust < 0.2:
+        parts.append("does not trust the player — deflects personal questions, gives minimum viable answers")
+    elif trust < 0.45:
+        parts.append("cautious toward the player — cooperative only if it costs nothing")
+    else:
+        parts.append("tentatively open to the player")
+
+    if fear > 0.65:
+        parts.append("afraid — hedges every statement, avoids specific details, may redirect abruptly")
+    elif fear > 0.35:
+        parts.append("wary — chooses words carefully, leaves exits open")
+
+    if suspicion > 0.6:
+        parts.append("actively suspicious of the player's motives — may probe back or offer partial truths to test reaction")
+    elif suspicion > 0.3:
+        parts.append("somewhat suspicious — watches for inconsistency in what the player says")
+
+    return "; ".join(parts) if parts else "neutral"
+
+
 class NPCResponseGenerator:
     def __init__(self, llm_client: SupportsJSONGeneration) -> None:
         if not isinstance(llm_client, SupportsJSONGeneration):
             raise TypeError("llm_client must provide a generate_json method")
         self._llm_client = llm_client
 
-    def generate(self, request: NPCResponseGenerationRequest) -> NPCResponseGenerationResult:
+    def generate(
+        self,
+        request: NPCResponseGenerationRequest,
+        max_tokens: int = 900,
+    ) -> NPCResponseGenerationResult:
         try:
             payload = self._llm_client.generate_json(
                 messages=self._build_messages(request),
                 temperature=0.2,
-                max_tokens=900,
+                max_tokens=max_tokens,
                 schema=NPCResponseGenerationResult.model_json_schema(),
             )
         except Exception as exc:
             raise NPCResponseGenerationError(str(exc)) from exc
+        payload = self._sanitize_payload(payload)
         result = NPCResponseGenerationResult.model_validate(payload)
         self._validate_request_id(result, request)
         self._validate_slice_bounded_targets(result, request)
         return result
+
+    def _sanitize_payload(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Strip structured effects entries that would fail field-level validation.
+
+        Small models sometimes put clue or NPC ids into location-prefixed fields.
+        Dropping bad entries preserves the dialogue line rather than failing entirely.
+        """
+        updates = payload.get("structured_updates")
+        if not isinstance(updates, dict):
+            return payload
+        if "redirect_targets" in updates:
+            updates["redirect_targets"] = [
+                t for t in updates["redirect_targets"]
+                if isinstance(t, dict) and str(t.get("target_id", "")).startswith("location_")
+            ]
+        if "access_effects" in updates:
+            updates["access_effects"] = [
+                e for e in updates["access_effects"]
+                if isinstance(e, dict) and (
+                    e.get("target_id") is None
+                    or str(e.get("target_id", "")).startswith("location_")
+                )
+            ]
+        if "clue_effects" in updates:
+            updates["clue_effects"] = [
+                e for e in updates["clue_effects"]
+                if isinstance(e, dict) and (
+                    e.get("clue_id") is None
+                    or str(e.get("clue_id", "")).startswith("clue_")
+                )
+            ]
+        return payload
 
     def _validate_request_id(
         self,
@@ -392,7 +474,7 @@ class NPCResponseGenerator:
             "Return valid JSON only. "
             "Produce one bounded NPC response only. "
             "Use only the provided NPC, scene, and clue context. "
-            "Tone: restrained, character-specific, no exposition dump."
+            f"{TONE_SYSTEM_BLOCK}"
         )
         schema = NPCResponseGenerationResult.model_json_schema()
         user_prompt = (
@@ -402,9 +484,12 @@ class NPCResponseGenerator:
             "Respond as the provided NPC to the player's immediate action.\n\n"
             "Rules:\n"
             "- stay within the NPC's known goals, fears, and knowledge\n"
+            "- use npc.emotional_register to shape HOW the NPC speaks, not just what they reveal — it governs tone, deflection, and phrasing\n"
             "- generate exactly one reply turn plus structured effects\n"
             "- if the NPC refuses, the refusal should still be informative or redirective\n"
-            "- preserve the game's conversation model: useful quickly, easy to leave\n\n"
+            "- preserve the game's conversation model: useful quickly, easy to leave\n"
+            f"{NPC_DIALOGUE_RULES}\n"
+            f"{COMMON_AVOID_RULES}\n\n"
             f"Request:\n{json.dumps(request.to_payload(), indent=2, sort_keys=True)}\n\n"
             f"JSON Schema:\n{json.dumps(schema, indent=2, sort_keys=True)}"
         )

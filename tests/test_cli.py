@@ -37,6 +37,7 @@ def test_cli_supports_a_minimal_playable_command_loop(tmp_path: Path) -> None:
         "Ask who last saw the missing clerk.",
     )
     inspect_output = run_cli("--db", str(database_path), "inspect", "location_shrine_lane")
+    run_cli("--db", str(database_path), "inspect", "location_service_passage")
     case_output = run_cli("--db", str(database_path), "case", "case_missing_clerk")
 
     assert "Old Quarter" in enter_output
@@ -45,14 +46,15 @@ def test_cli_supports_a_minimal_playable_command_loop(tmp_path: Path) -> None:
     assert "Available NPC IDs:" in enter_output
     assert "npc_shrine_keeper (Ila Venn)" in enter_output
     assert "npc_archive_clerk (Sered Marr)" in enter_output
-    assert "Available location IDs: location_shrine_lane, location_archive_steps" in enter_output
+    assert "location_shrine_lane" in enter_output
+    assert "location_archive_steps" in enter_output
 
     assert "You ask Ila Venn" in talk_output
     assert "Clue:" in talk_output
     assert "Reliability: solid" in talk_output
 
-    assert "Lantern check" in inspect_output
-    assert "location_shrine_lane" in inspect_output
+    assert "[Lantern:" in inspect_output
+    assert "Shrine Lane" in inspect_output
 
     assert "Case status: solved" in case_output
     assert "Lantern understanding" in case_output

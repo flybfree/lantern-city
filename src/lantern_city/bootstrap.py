@@ -14,6 +14,7 @@ from lantern_city.models import (
     PlayerProgressState,
     ScoreTier,
 )
+from lantern_city.progression import get_tier, get_tier_label
 from lantern_city.seed_schema import CitySeedDocument
 from lantern_city.store import SQLiteStore
 
@@ -233,16 +234,22 @@ def _build_player_progress_state(
     seed: CitySeedDocument, player_progress_id: str
 ) -> PlayerProgressState:
     start = seed.progression_start_state
+    scores = {
+        "lantern_understanding": start.starting_lantern_understanding,
+        "access": start.starting_access,
+        "reputation": start.starting_reputation,
+        "leverage": start.starting_leverage,
+        "city_impact": start.starting_city_impact,
+        "clue_mastery": start.starting_clue_mastery,
+    }
     return PlayerProgressState(
         id=player_progress_id,
         created_at=TURN_ZERO,
         updated_at=TURN_ZERO,
-        lantern_understanding=_score_tier(start.starting_lantern_understanding),
-        access=_score_tier(start.starting_access),
-        reputation=_score_tier(start.starting_reputation),
-        leverage=_score_tier(start.starting_leverage),
-        city_impact=_score_tier(start.starting_city_impact),
-        clue_mastery=_score_tier(start.starting_clue_mastery),
+        **{
+            track: ScoreTier(score=score, tier=get_tier_label(track, get_tier(score)))
+            for track, score in scores.items()
+        },
     )
 
 
@@ -322,19 +329,6 @@ def _lantern_anomaly_flags(seed: CitySeedDocument, lantern_state: str) -> list[s
         return ["elevated_tampering_risk"]
     return []
 
-
-def _score_tier(score: int) -> ScoreTier:
-    if score >= 80:
-        tier = "Very High"
-    elif score >= 60:
-        tier = "High"
-    elif score >= 40:
-        tier = "Moderate"
-    elif score >= 20:
-        tier = "Low"
-    else:
-        tier = "Very Low"
-    return ScoreTier(score=score, tier=tier)
 
 
 def _humanize_identifier(value: str, *, prefix: str = "") -> str:

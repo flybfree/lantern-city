@@ -13,13 +13,14 @@ def test_end_to_end_flow_bootstraps_seed_and_advances_case_with_persistence(tmp_
     enter_output = app.run_command("enter district_old_quarter")
     talk_output = app.run_command("talk npc_shrine_keeper Ask who last saw the missing clerk.")
     inspect_output = app.run_command("inspect location_shrine_lane")
+    app.run_command("inspect location_service_passage")
     case_output = app.run_command("case case_missing_clerk")
 
     assert "seeded city_lantern_city" in start_output
     assert "Old Quarter" in enter_output
     assert "Ila Venn" in talk_output
     assert "Clue: clue_missing_clerk_ledgers" in talk_output
-    assert "Lantern check: dim" in inspect_output
+    assert "[Lantern: dim" in inspect_output
     assert "Case status: solved" in case_output
 
     reloaded = LanternCityApp(database_path)

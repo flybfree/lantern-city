@@ -15,6 +15,11 @@ _CLUE_DEGRADATION = {
     "unstable": "unstable",
     "contradicted": "contradicted",
 }
+_CLUE_UPGRADE = {
+    "unstable": "uncertain",
+    "uncertain": "credible",
+    "credible": "solid",
+}
 _SOURCE_DOMAIN_MAP = {
     "physical": "physical",
     "document": "records",
@@ -143,11 +148,27 @@ def assess_access(
     raise ValueError(f"Unsupported lantern state: {profile.state}")
 
 
+def is_corroborated(clue: ClueState, all_clues: list[ClueState]) -> bool:
+    """A clue is corroborated when at least one other clue with a different source type
+    shares the same case and has reliability of credible or better."""
+    for other in all_clues:
+        if other.id == clue.id:
+            continue
+        if other.source_type == clue.source_type:
+            continue
+        if other.reliability not in {"credible", "solid"}:
+            continue
+        if set(other.related_case_ids) & set(clue.related_case_ids):
+            return True
+    return False
+
+
 def apply_lantern_to_clue(
     clue: ClueState,
     profile: LanternRuleProfile,
     *,
     updated_at: str,
+    corroborated: bool = False,
 ) -> ClueState:
     if clue.reliability == "contradicted":
         return clue.model_copy(update={"updated_at": updated_at})
@@ -155,7 +176,12 @@ def apply_lantern_to_clue(
     domain = _SOURCE_DOMAIN_MAP.get(clue.source_type, clue.source_type)
     reliability = clue.reliability
 
-    if profile.state == "dim" and clue.source_type == "testimony":
+    if profile.state == "bright":
+        # Bright: testimony that is corroborated by physical or documentary evidence upgrades
+        if corroborated and clue.source_type == "testimony" and reliability in _CLUE_UPGRADE:
+            reliability = _CLUE_UPGRADE[reliability]
+        # physical and document clues: no automatic change under bright
+    elif profile.state == "dim" and clue.source_type == "testimony":
         reliability = _degrade(reliability, 1)
     elif profile.state == "flickering":
         reliability = _degrade(reliability, 2 if clue.source_type == "testimony" else 1)

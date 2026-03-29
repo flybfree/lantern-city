@@ -77,6 +77,7 @@ class LocationState(RuntimeModel):
     known_npc_ids: list[str] = Field(default_factory=list)
     hidden_feature_ids: list[str] = Field(default_factory=list)
     clue_ids: list[str] = Field(default_factory=list)
+    scene_objects: list[str] = Field(default_factory=list)
     lantern_effects: dict[str, float] = Field(default_factory=dict)
     description_cache: dict[str, str] = Field(default_factory=dict)
 
