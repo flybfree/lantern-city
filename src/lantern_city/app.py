@@ -97,10 +97,22 @@ class LanternCityApp:
             visible_npc = preferred_npc.name
         elif outcome.active_slice.npcs:
             visible_npc = outcome.active_slice.npcs[0].name
+        available_npcs = (
+            ", ".join(f"{npc.id} ({npc.name})" for npc in outcome.active_slice.npcs)
+            if outcome.active_slice.npcs
+            else "None"
+        )
+        available_locations = (
+            ", ".join(outcome.active_slice.district.visible_locations)
+            if outcome.active_slice.district is not None and outcome.active_slice.district.visible_locations
+            else "None"
+        )
         return (
             f"District: {district.name}\n"
             f"Lanterns: {district.lantern_condition}\n"
             f"Notable NPC: {visible_npc}\n"
+            f"Available NPC IDs: {available_npcs}\n"
+            f"Available location IDs: {available_locations}\n"
             f"Summary: {outcome.response.narrative_text}"
         )
 

@@ -42,6 +42,10 @@ def test_cli_supports_a_minimal_playable_command_loop(tmp_path: Path) -> None:
     assert "Old Quarter" in enter_output
     assert "Lanterns: dim" in enter_output
     assert "Ila Venn" in enter_output
+    assert "Available NPC IDs:" in enter_output
+    assert "npc_shrine_keeper (Ila Venn)" in enter_output
+    assert "npc_archive_clerk (Sered Marr)" in enter_output
+    assert "Available location IDs: location_shrine_lane, location_archive_steps" in enter_output
 
     assert "You ask Ila Venn" in talk_output
     assert "Clue:" in talk_output
@@ -52,3 +56,20 @@ def test_cli_supports_a_minimal_playable_command_loop(tmp_path: Path) -> None:
 
     assert "Case status: solved" in case_output
     assert "Lantern understanding" in case_output
+
+
+def test_cli_returns_helpful_error_for_unknown_npc_in_current_slice(tmp_path: Path) -> None:
+    database_path = tmp_path / "lantern-city.sqlite3"
+
+    run_cli("--db", str(database_path), "start")
+    run_cli("--db", str(database_path), "enter", "district_old_quarter")
+    output = run_cli(
+        "--db",
+        str(database_path),
+        "talk",
+        "npc_sered_marr",
+        "Ask about the missing clerk.",
+    )
+
+    assert "Missing required world object NPCState:npc_sered_marr" in output
+    assert "Hint: run `enter <district_id>` first and use one of the IDs shown in the district output." in output

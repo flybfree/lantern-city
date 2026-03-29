@@ -5,6 +5,7 @@ import sys
 from pathlib import Path
 from typing import TextIO
 
+from lantern_city.active_slice import MissingWorldObjectError
 from lantern_city.app import LanternCityApp
 
 
@@ -35,18 +36,26 @@ def main(argv: list[str] | None = None, *, stdout: TextIO | None = None) -> int:
     args = parser.parse_args(argv)
     app = LanternCityApp(Path(args.database_path))
 
-    if args.command == "start":
-        output = app.start_new_game()
-    elif args.command == "enter":
-        output = app.enter_district(args.district_id)
-    elif args.command == "talk":
-        output = app.talk_to_npc(args.npc_id, args.prompt)
-    elif args.command == "inspect":
-        output = app.inspect_location(args.location_id)
-    elif args.command == "case":
-        output = app.advance_case(args.case_id)
-    else:
-        parser.error(f"Unsupported command: {args.command}")
+    try:
+        if args.command == "start":
+            output = app.start_new_game()
+        elif args.command == "enter":
+            output = app.enter_district(args.district_id)
+        elif args.command == "talk":
+            output = app.talk_to_npc(args.npc_id, args.prompt)
+        elif args.command == "inspect":
+            output = app.inspect_location(args.location_id)
+        elif args.command == "case":
+            output = app.advance_case(args.case_id)
+        else:
+            parser.error(f"Unsupported command: {args.command}")
+    except MissingWorldObjectError as exc:
+        output = (
+            f"Error: {exc}\n"
+            "Hint: run `enter <district_id>` first and use one of the IDs shown in the district output."
+        )
+    except LookupError as exc:
+        output = f"Error: {exc}"
 
     destination = stdout or sys.stdout
     destination.write(f"{output}\n")
