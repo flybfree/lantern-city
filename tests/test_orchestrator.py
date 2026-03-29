@@ -2,7 +2,15 @@ from __future__ import annotations
 
 import pytest
 
-from lantern_city.models import CaseState, CityState, ClueState, DistrictState, LocationState, NPCState, PlayerRequest
+from lantern_city.models import (
+    CaseState,
+    CityState,
+    ClueState,
+    DistrictState,
+    LocationState,
+    NPCState,
+    PlayerRequest,
+)
 from lantern_city.orchestrator import RequestIntent, classify_request_intent, orchestrate_request
 from lantern_city.store import SQLiteStore
 
@@ -125,7 +133,9 @@ def populated_store(tmp_path) -> SQLiteStore:
     return store
 
 
-def test_orchestrate_request_builds_active_slice_for_npc_conversation(populated_store: SQLiteStore) -> None:
+def test_orchestrate_request_builds_active_slice_for_npc_conversation(
+    populated_store: SQLiteStore,
+) -> None:
     request = PlayerRequest(
         id="request_003",
         created_at=TURN_ZERO,
@@ -173,7 +183,9 @@ def test_orchestrate_request_returns_controlled_empty_slice_for_generic_action_w
     assert orchestrated.active_slice.clues == []
 
 
-def test_orchestrate_request_builds_case_progression_slice_from_target_id(populated_store: SQLiteStore) -> None:
+def test_orchestrate_request_builds_case_progression_slice_from_target_id(
+    populated_store: SQLiteStore,
+) -> None:
     request = PlayerRequest(
         id="request_005",
         created_at=TURN_ZERO,

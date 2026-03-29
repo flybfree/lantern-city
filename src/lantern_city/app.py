@@ -145,9 +145,7 @@ class LanternCityApp:
             clue_text = clue.id
             clue_reliability = clue.reliability
         return (
-            f"{outcome.response.narrative_text}\n"
-            f"Clue: {clue_text}\n"
-            f"Reliability: {clue_reliability}"
+            f"{outcome.response.narrative_text}\nClue: {clue_text}\nReliability: {clue_reliability}"
         )
 
     def inspect_location(self, location_id: str) -> str:
@@ -286,8 +284,7 @@ class LanternCityApp:
             source_type="document",
             source_id=shrine_lane.id,
             clue_text=(
-                "Ledger initials near the missing clerk's route do not match the public "
-                "register."
+                "Ledger initials near the missing clerk's route do not match the public register."
             ),
             reliability="credible",
             related_npc_ids=[shrine_keeper.id],

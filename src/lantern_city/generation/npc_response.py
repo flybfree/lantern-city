@@ -123,7 +123,9 @@ class AccessEffect(LanternCityModel):
     def _validate_target_id(cls, value: str | None) -> str | None:
         if value is None:
             return None
-        return _require_prefixed_id(value, field_name="target_id", prefix="location_", max_length=80)
+        return _require_prefixed_id(
+            value, field_name="target_id", prefix="location_", max_length=80
+        )
 
     @field_validator("note")
     @classmethod
@@ -144,7 +146,9 @@ class RedirectTarget(LanternCityModel):
     @field_validator("target_id")
     @classmethod
     def _validate_target_id(cls, value: str) -> str:
-        return _require_prefixed_id(value, field_name="target_id", prefix="location_", max_length=80)
+        return _require_prefixed_id(
+            value, field_name="target_id", prefix="location_", max_length=80
+        )
 
     @field_validator("reason")
     @classmethod
@@ -214,7 +218,9 @@ class NPCResponseGenerationResult(LanternCityModel):
     @field_validator("warnings")
     @classmethod
     def _validate_warnings(cls, value: list[str]) -> list[str]:
-        return [_require_bounded_text(item, field_name="warnings", max_length=120) for item in value]
+        return [
+            _require_bounded_text(item, field_name="warnings", max_length=120) for item in value
+        ]
 
 
 @dataclass(frozen=True, slots=True)
@@ -228,7 +234,9 @@ class NPCResponseGenerationRequest:
         if not self.request_id.strip():
             raise ValueError("request_id must be a non-empty string")
         if not self.active_slice.npcs:
-            raise ValueError("npc response generation requires at least one npc in the active slice")
+            raise ValueError(
+                "npc response generation requires at least one npc in the active slice"
+            )
         self._target_npc()
 
     def _target_npc_id(self) -> str:
@@ -239,7 +247,9 @@ class NPCResponseGenerationRequest:
         for npc in self.active_slice.npcs:
             if npc.id == target_npc_id:
                 return npc
-        raise ValueError("npc response generation requires the target npc to be present in the active slice")
+        raise ValueError(
+            "npc response generation requires the target npc to be present in the active slice"
+        )
 
     def to_payload(self) -> dict[str, object]:
         npc = self._target_npc()
@@ -342,7 +352,10 @@ class NPCResponseGenerator:
             visible_location_ids.update(district.visible_locations)
         if request.active_slice.location is not None:
             visible_location_ids.add(request.active_slice.location.id)
-        if request.active_slice.scene is not None and request.active_slice.scene.location_id is not None:
+        if (
+            request.active_slice.scene is not None
+            and request.active_slice.scene.location_id is not None
+        ):
             visible_location_ids.add(request.active_slice.scene.location_id)
 
         for clue_effect in result.structured_updates.clue_effects:
@@ -359,14 +372,16 @@ class NPCResponseGenerator:
                 continue
             if access_effect.target_id not in visible_location_ids:
                 raise NPCResponseGenerationError(
-                    "structured_updates.access_effects contains target_id outside the active slice: "
+                    "structured_updates.access_effects contains "
+                    "target_id outside the active slice: "
                     f"{access_effect.target_id}"
                 )
 
         for redirect_target in result.structured_updates.redirect_targets:
             if redirect_target.target_id not in visible_location_ids:
                 raise NPCResponseGenerationError(
-                    "structured_updates.redirect_targets contains target_id outside the active slice: "
+                    "structured_updates.redirect_targets contains "
+                    "target_id outside the active slice: "
                     f"{redirect_target.target_id}"
                 )
 

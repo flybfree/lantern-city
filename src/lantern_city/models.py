@@ -172,7 +172,9 @@ class ClueState(RuntimeModel):
 
 class PlayerProgressState(RuntimeModel):
     type: Literal["PlayerProgressState"] = "PlayerProgressState"
-    lantern_understanding: ScoreTier = Field(default_factory=lambda: ScoreTier(score=0, tier="Unknown"))
+    lantern_understanding: ScoreTier = Field(
+        default_factory=lambda: ScoreTier(score=0, tier="Unknown")
+    )
     access: ScoreTier = Field(default_factory=lambda: ScoreTier(score=0, tier="Unknown"))
     reputation: ScoreTier = Field(default_factory=lambda: ScoreTier(score=0, tier="Unknown"))
     leverage: ScoreTier = Field(default_factory=lambda: ScoreTier(score=0, tier="Unknown"))

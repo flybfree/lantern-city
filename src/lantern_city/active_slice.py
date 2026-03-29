@@ -371,7 +371,6 @@ def _raise_for_unresolved_explicit_target(
     )
 
 
-
 def _request_target_type(request: PlayerRequest) -> TargetObjectType | None:
     raw_target_type = request.context_refs.get("target_type")
     if raw_target_type is None:

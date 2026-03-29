@@ -61,7 +61,9 @@ def make_active_slice() -> ActiveSlice:
         updated_at="2026-03-28T00:00:00Z",
         city_seed_id="seed_001",
         district_ids=["district_old_quarter"],
-        summary_cache={"city_identity_summary": "A wet civic maze where lantern light makes memory arguable."},
+        summary_cache={
+            "city_identity_summary": "A wet civic maze where lantern light makes memory arguable."
+        },
     )
     district = DistrictState(
         id="district_old_quarter",
@@ -124,29 +126,40 @@ def make_valid_payload() -> dict[str, object]:
     return {
         "task_type": "district_expand",
         "request_id": "req_district_001",
-        "summary_text": "Old Quarter arrives as a narrow district slice with one clear local pressure.",
+        "summary_text": (
+            "Old Quarter arrives as a narrow district slice with one clear local pressure."
+        ),
         "structured_updates": {
-            "district_summary": "Old Quarter is a damp archive ward where routine still matters more than comfort.",
+            "district_summary": (
+                "Old Quarter is a damp archive ward where routine still matters more than comfort."
+            ),
             "major_locations": [
                 {
                     "location_id": "location_archive_steps",
                     "name": "Archive Steps",
                     "location_type": "archive entrance",
-                    "short_description": "Clerks and petitioners cross paths under failing lantern glass.",
+                    "short_description": (
+                        "Clerks and petitioners cross paths under failing lantern glass."
+                    ),
                     "playable_hook": "The missing clerk was last logged here.",
                 },
                 {
                     "location_id": "location_shrine_lane",
                     "name": "Shrine Lane",
                     "location_type": "shrine street",
-                    "short_description": "Rain gathers in the brass channels beneath the ward shrines.",
+                    "short_description": (
+                        "Rain gathers in the brass channels beneath the ward shrines."
+                    ),
                     "playable_hook": "People who avoid the records office still pass through here.",
                 },
                 {
                     "location_id": "location_registry_annex",
                     "name": "Registry Annex",
                     "location_type": "records office",
-                    "short_description": "A side office where corrected copies appear before anyone admits requesting them.",
+                    "short_description": (
+                        "A side office where corrected copies appear before anyone admits "
+                        "requesting them."
+                    ),
                     "playable_hook": "A clerk inside may know who touched the ledgers.",
                 },
             ],
@@ -168,8 +181,13 @@ def make_valid_payload() -> dict[str, object]:
             ],
         },
         "cacheable_text": {
-            "entry_text": "Old Quarter opens in damp stone, layered notices, and a lantern glow that never quite settles.",
-            "short_summary": "A dim archive ward where missing records matter more than raised voices.",
+            "entry_text": (
+                "Old Quarter opens in damp stone, layered notices, and a lantern glow that "
+                "never quite settles."
+            ),
+            "short_summary": (
+                "A dim archive ward where missing records matter more than raised voices."
+            ),
         },
         "confidence": 0.84,
         "warnings": [],
@@ -201,8 +219,8 @@ def test_district_generator_builds_narrow_prompt_and_returns_validated_output() 
     messages = call["messages"]
     assert messages[0]["role"] == "system"
     assert "current district slice only" in messages[0]["content"].lower()
-    assert "task_type\": \"district_expand\"" in messages[1]["content"]
-    assert "request_id\": \"req_district_001\"" in messages[1]["content"]
+    assert 'task_type": "district_expand"' in messages[1]["content"]
+    assert 'request_id": "req_district_001"' in messages[1]["content"]
     assert "Old Quarter" in messages[1]["content"]
     assert "Ila Venn" in messages[1]["content"]
     assert "The Missing Clerk" in messages[1]["content"]
@@ -300,7 +318,9 @@ def test_district_generation_result_rejects_unbounded_location_identity_fields(
 
 def test_district_generation_result_requires_three_to_five_major_locations() -> None:
     payload = copy.deepcopy(make_valid_payload())
-    payload["structured_updates"]["major_locations"] = payload["structured_updates"]["major_locations"][:2]
+    payload["structured_updates"]["major_locations"] = payload["structured_updates"][
+        "major_locations"
+    ][:2]
 
     with pytest.raises(ValidationError, match="major_locations"):
         DistrictGenerationResult.model_validate(payload)

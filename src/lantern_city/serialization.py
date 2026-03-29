@@ -1,18 +1,13 @@
 from __future__ import annotations
 
 import json
-from typing import TypeVar
 
 from pydantic import BaseModel
 
 from lantern_city.models import RuntimeModel
 
-BaseModelT = TypeVar("BaseModelT", bound=BaseModel)
-
-
 MODEL_TYPES: dict[str, type[RuntimeModel]] = {
-    model_cls.model_fields["type"].default: model_cls
-    for model_cls in RuntimeModel.__subclasses__()
+    model_cls.model_fields["type"].default: model_cls for model_cls in RuntimeModel.__subclasses__()
 }
 
 
@@ -32,7 +27,7 @@ def serialize_model(model: BaseModel) -> str:
     return to_json_string(model)
 
 
-def deserialize_model(
+def deserialize_model[BaseModelT: BaseModel](
     payload: str | dict[str, object],
     *,
     model_cls: type[BaseModelT] | None = None,

@@ -76,9 +76,7 @@ class OpenAICompatibleLLMClient:
             response.raise_for_status()
         except httpx.HTTPStatusError as exc:
             status_code = exc.response.status_code
-            raise LLMClientError(
-                f"LLM request failed with status {status_code}"
-            ) from exc
+            raise LLMClientError(f"LLM request failed with status {status_code}") from exc
         except httpx.HTTPError as exc:
             raise LLMClientError(f"LLM request failed: {exc}") from exc
 

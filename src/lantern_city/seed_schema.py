@@ -3,7 +3,14 @@ from __future__ import annotations
 from math import isclose
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints, ValidationError, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    StringConstraints,
+    ValidationError,
+    model_validator,
+)
 
 NoiseLevel = Literal["low", "medium", "high"]
 LanternStateValue = Literal["bright", "dim", "flickering", "extinguished", "altered"]
@@ -109,7 +116,10 @@ class FactionConfiguration(SeedModel):
             left, separator, right = raw_key.partition("|")
             normalized_key = f"{left.strip()}|{right.strip()}" if separator else raw_key
             if normalized_key in normalized_tension_map:
-                raise ValueError(f"tension_map contains duplicate faction pairs after normalization: {normalized_key}")
+                raise ValueError(
+                    "tension_map contains duplicate faction pairs after "
+                    f"normalization: {normalized_key}"
+                )
             normalized_tension_map[normalized_key] = tension
         self.tension_map = normalized_tension_map
 
@@ -163,9 +173,7 @@ class LanternConfiguration(SeedModel):
 
         total = sum(self.lantern_condition_distribution.values())
         if not isclose(total, 1.0, abs_tol=0.01):
-            raise ValueError(
-                "lantern_condition_distribution must sum approximately to 1.0"
-            )
+            raise ValueError("lantern_condition_distribution must sum approximately to 1.0")
         return self
 
 
@@ -270,7 +278,9 @@ class CitySeedDocument(SeedModel):
             unknown_districts = set(faction.influence_by_district) - district_ids
             if unknown_districts:
                 unknown = ", ".join(sorted(unknown_districts))
-                raise ValueError(f"faction influence_by_district references unknown district ids: {unknown}")
+                raise ValueError(
+                    f"faction influence_by_district references unknown district ids: {unknown}"
+                )
 
         for case in self.case_configuration.cases:
             unknown_districts = set(case.involved_district_ids) - district_ids

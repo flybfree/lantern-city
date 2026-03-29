@@ -121,11 +121,14 @@ def test_clue_mastery_and_access_gate_leverage_conversion() -> None:
         updated_at=TURN_ZERO,
     )
 
-    assert can_convert_clues_to_leverage(
-        progress,
-        contradiction_count=2,
-        target_kind="institution",
-    ) is False
+    assert (
+        can_convert_clues_to_leverage(
+            progress,
+            contradiction_count=2,
+            target_kind="institution",
+        )
+        is False
+    )
 
     sharper, _ = apply_progress_change(
         progress,
@@ -142,11 +145,14 @@ def test_clue_mastery_and_access_gate_leverage_conversion() -> None:
         updated_at="turn_2",
     )
 
-    assert can_convert_clues_to_leverage(
-        connected,
-        contradiction_count=2,
-        target_kind="institution",
-    ) is True
+    assert (
+        can_convert_clues_to_leverage(
+            connected,
+            contradiction_count=2,
+            target_kind="institution",
+        )
+        is True
+    )
 
 
 def test_city_impact_opportunities_require_matching_access_for_larger_scopes() -> None:
@@ -186,11 +192,14 @@ def test_reputation_enables_informal_access_when_familiarity_or_standing_covers_
     )
 
     assert can_use_informal_access(progress, required_access="restricted") is False
-    assert can_use_informal_access(
-        progress,
-        required_access="restricted",
-        district_or_faction_familiar=True,
-    ) is True
+    assert (
+        can_use_informal_access(
+            progress,
+            required_access="restricted",
+            district_or_faction_familiar=True,
+        )
+        is True
+    )
 
     respected, _ = apply_progress_change(
         progress,
@@ -223,7 +232,10 @@ def test_leverage_gates_pressure_against_people_and_institutions() -> None:
     )
 
     assert can_pressure_npc(stronger, evidence_strength="documented") is True
-    assert can_pressure_npc(stronger, evidence_strength="contradiction_chain", institutional=True) is False
+    assert (
+        can_pressure_npc(stronger, evidence_strength="contradiction_chain", institutional=True)
+        is False
+    )
 
     connected, _ = apply_progress_change(
         stronger,
@@ -233,7 +245,10 @@ def test_leverage_gates_pressure_against_people_and_institutions() -> None:
         updated_at="turn_2",
     )
 
-    assert can_pressure_npc(connected, evidence_strength="contradiction_chain", institutional=True) is True
+    assert (
+        can_pressure_npc(connected, evidence_strength="contradiction_chain", institutional=True)
+        is True
+    )
 
 
 def test_reputation_and_leverage_can_reopen_blocked_conversations_in_explicit_ways() -> None:

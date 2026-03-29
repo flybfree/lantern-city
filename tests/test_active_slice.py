@@ -345,7 +345,6 @@ def test_build_active_slice_raises_clear_error_for_unresolved_explicit_target_id
         build_active_slice(populated_store, city_id=CITY_ID, request=request)
 
 
-
 def test_build_active_slice_returns_controlled_empty_slice_for_generic_action_without_context(
     populated_store: SQLiteStore,
 ) -> None:

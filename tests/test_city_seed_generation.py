@@ -227,8 +227,8 @@ def test_city_seed_generator_builds_narrow_request_and_returns_validated_seed() 
     messages = call["messages"]
     assert messages[0]["role"] == "system"
     assert "engine owns all persistent state" in messages[0]["content"].lower()
-    assert "task_type\": \"city_seed\"" in messages[1]["content"]
-    assert "request_id\": \"req_city_seed_001\"" in messages[1]["content"]
+    assert 'task_type": "city_seed"' in messages[1]["content"]
+    assert 'request_id": "req_city_seed_001"' in messages[1]["content"]
     assert "district_count" in messages[1]["content"]
     assert "JSON Schema" in messages[1]["content"]
     assert '"city_identity"' in messages[1]["content"]

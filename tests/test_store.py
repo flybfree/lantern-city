@@ -52,9 +52,7 @@ def test_store_initializes_sqlite_schema(tmp_path) -> None:
     try:
         table_names = {
             row[0]
-            for row in connection.execute(
-                "SELECT name FROM sqlite_master WHERE type = 'table'"
-            )
+            for row in connection.execute("SELECT name FROM sqlite_master WHERE type = 'table'")
         }
     finally:
         connection.close()
@@ -91,9 +89,7 @@ def test_save_object_preserves_created_at_on_update(tmp_path) -> None:
 
     store.save_object(make_city_state())
     store.save_object(
-        make_city_state(version=2, updated_at="turn_1").model_copy(
-            update={"created_at": "turn_99"}
-        )
+        make_city_state(version=2, updated_at="turn_1").model_copy(update={"created_at": "turn_99"})
     )
 
     loaded = store.load_object("CityState", "city_001")
@@ -366,8 +362,7 @@ def test_store_migrates_legacy_cache_entries_schema_to_typed_identity(tmp_path) 
     migrated_connection = sqlite3.connect(db_path)
     try:
         columns = {
-            row[1]: row
-            for row in migrated_connection.execute("PRAGMA table_info(cache_entries)")
+            row[1]: row for row in migrated_connection.execute("PRAGMA table_info(cache_entries)")
         }
     finally:
         migrated_connection.close()

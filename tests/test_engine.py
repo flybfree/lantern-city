@@ -248,7 +248,6 @@ def test_handle_player_request_routes_district_entry_updates_through_state_updat
     assert updated_city.updated_at == TURN_ONE
 
 
-
 def test_handle_player_request_returns_district_entry_response_and_persists_city_update(
     populated_store: SQLiteStore,
 ) -> None:
@@ -261,8 +260,7 @@ def test_handle_player_request_returns_district_entry_response_and_persists_city
     district = populated_store.load_object("DistrictState", DISTRICT_ID)
 
     assert outcome.response.narrative_text == (
-        "You enter Old Quarter. The district feels wet and watchful, "
-        "and the lanterns are dim."
+        "You enter Old Quarter. The district feels wet and watchful, and the lanterns are dim."
     )
     assert outcome.response.state_changes == ["Presence increased in Old Quarter."]
     assert outcome.response.learned == ["The district lanterns are running dim."]
@@ -327,7 +325,6 @@ def test_handle_player_request_returns_npc_conversation_response_and_only_mutate
     assert populated_store.load_cache(f"response:talk_to_npc:{NPC_ID}:ask about the outage") is None
 
 
-
 def test_handle_player_request_returns_inspection_response_without_state_changes(
     populated_store: SQLiteStore,
 ) -> None:
@@ -341,7 +338,9 @@ def test_handle_player_request_returns_inspection_response_without_state_changes
 
     assert outcome.intent == "inspect_location"
     assert outcome.changed_objects == []
-    assert outcome.response.narrative_text == "You inspect Shrine Lane for anything that stands out."
+    assert (
+        outcome.response.narrative_text == "You inspect Shrine Lane for anything that stands out."
+    )
     assert outcome.response.learned == ["Fresh scoring marks suggest recent tampering."]
     assert outcome.response.now_available == ["Ask about what you found"]
     assert outcome.response.next_actions == ["Inspect a narrower detail", "Review known clues"]
@@ -351,7 +350,6 @@ def test_handle_player_request_returns_inspection_response_without_state_changes
     assert location is not None
     assert isinstance(location, LocationState)
     assert location.version == 1
-
 
 
 def test_handle_player_request_returns_case_progression_response_without_state_changes(
@@ -375,7 +373,6 @@ def test_handle_player_request_returns_case_progression_response_without_state_c
     assert case.version == 1
 
 
-
 def test_handle_player_request_returns_generic_action_response_without_state_changes(
     populated_store: SQLiteStore,
 ) -> None:
@@ -392,11 +389,13 @@ def test_handle_player_request_returns_generic_action_response_without_state_cha
     assert outcome.response.state_changes == []
     assert outcome.response.learned == []
     assert outcome.response.now_available == []
-    assert outcome.response.next_actions == ["Review what stands out", "Choose a more specific action"]
+    assert outcome.response.next_actions == [
+        "Review what stands out",
+        "Choose a more specific action",
+    ]
     assert city is not None
     assert isinstance(city, CityState)
     assert city.version == 1
-
 
 
 def test_handle_player_request_raises_when_npc_conversation_slice_has_no_npc(
@@ -419,7 +418,6 @@ def test_handle_player_request_raises_when_npc_conversation_slice_has_no_npc(
 
     with pytest.raises(LookupError, match="Conversation request requires an active NPC slice"):
         engine.handle_player_request(populated_store, city_id=CITY_ID, request=request)
-
 
 
 def test_handle_player_request_raises_when_district_entry_slice_has_no_district(

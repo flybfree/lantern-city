@@ -27,7 +27,9 @@ _ACCESS_LEVELS = ("public", "restricted", "trusted", "cleared", "secret")
 class LanternRuleProfile(LanternCityModel):
     state: Literal["bright", "dim", "flickering", "extinguished", "altered"]
     missingness: Literal["none", "low", "medium", "high"] = "none"
-    altered_target_domain: Literal["physical", "records", "testimony", "composite", "access"] | None = None
+    altered_target_domain: (
+        Literal["physical", "records", "testimony", "composite", "access"] | None
+    ) = None
     altered_effect_mode: Literal["distort", "suppress"] | None = None
     altered_scope: Literal["site", "route", "district", "network"] | None = None
     altered_owner_or_suspected_controller: str | None = None
@@ -53,11 +55,16 @@ class LanternRuleProfile(LanternCityModel):
                 joined = ", ".join(missing_fields)
                 raise ValueError(f"Altered lanterns require: {joined}")
             if self.altered_target_domain == "access" and self.altered_effect_mode != "suppress":
-                raise ValueError("altered_effect_mode must be suppress when altered_target_domain is access")
+                raise ValueError(
+                    "altered_effect_mode must be suppress when altered_target_domain is access"
+                )
             return self
 
         if any(value is not None for value in altered_fields):
-            raise ValueError("Only altered lanterns may define altered_target_domain, altered_effect_mode, or altered_scope")
+            raise ValueError(
+                "Only altered lanterns may define altered_target_domain, "
+                "altered_effect_mode, or altered_scope"
+            )
         return self
 
 

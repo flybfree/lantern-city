@@ -281,7 +281,9 @@ MODEL_CASES = [
             "updated_at": "turn_1",
             "request_id": "req_1001",
             "narrative_text": "The shrine keeper lowers their voice.",
-            "state_changes": [{"type": "clue_added", "clue_id": "clue_outage_before_disappearance"}],
+            "state_changes": [
+                {"type": "clue_added", "clue_id": "clue_outage_before_disappearance"}
+            ],
             "next_actions": ["Ask about the archive records", "Inspect the lantern"],
         },
         id="PlayerResponse",

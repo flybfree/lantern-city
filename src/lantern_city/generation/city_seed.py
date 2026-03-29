@@ -73,9 +73,7 @@ class CitySeedGenerationRequest:
         return value.strip()
 
     @classmethod
-    def _validate_seed_parameters(
-        cls, value: dict[str, JsonValue]
-    ) -> dict[str, JsonValue]:
+    def _validate_seed_parameters(cls, value: dict[str, JsonValue]) -> dict[str, JsonValue]:
         if not isinstance(value, dict):
             raise ValueError("seed_parameters must be a JSON object")
         if any(not isinstance(key, str) for key in value):

@@ -108,7 +108,8 @@ def _build_city_seed(
         starting_cases=case_ids,
         initial_missingness_pressure=seed.missingness_configuration.missingness_pressure,
         initial_lantern_profile={
-            district.id: district.lantern_state for district in seed.district_configuration.districts
+            district.id: district.lantern_state
+            for district in seed.district_configuration.districts
         },
         key_npc_ids=npc_ids,
     )

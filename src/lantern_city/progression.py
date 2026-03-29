@@ -213,7 +213,9 @@ def describe_track(progress: PlayerProgressState, track: str) -> str:
 def can_interpret_lantern_clue(
     progress: PlayerProgressState,
     *,
-    clue_reliability: Literal["solid", "credible", "uncertain", "distorted", "unstable", "contradicted"],
+    clue_reliability: Literal[
+        "solid", "credible", "uncertain", "distorted", "unstable", "contradicted"
+    ],
     requires_location_comparison: bool = False,
 ) -> bool:
     required_tier = _CLUE_INTERPRETATION_REQUIREMENTS[clue_reliability]
@@ -279,7 +281,10 @@ def can_pressure_npc(
     if leverage_tier < required_tier:
         return False
     if institutional:
-        return evidence_strength in {"contradiction_chain", "hard_proof"} and _track_tier(progress, "access") >= 3
+        return (
+            evidence_strength in {"contradiction_chain", "hard_proof"}
+            and _track_tier(progress, "access") >= 3
+        )
     return True
 
 

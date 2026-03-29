@@ -60,7 +60,9 @@ class DistrictLocation(LanternCityModel):
     @field_validator("location_id")
     @classmethod
     def _validate_location_id(cls, value: str) -> str:
-        return _require_prefixed_id(value, field_name="location_id", prefix="location_", max_length=80)
+        return _require_prefixed_id(
+            value, field_name="location_id", prefix="location_", max_length=80
+        )
 
     @field_validator("name")
     @classmethod
@@ -131,7 +133,9 @@ class NPCAnchorSpec(LanternCityModel):
         if self.npc_id is not None:
             return self
         if not self.name or not self.role or not self.local_relevance:
-            raise ValueError("npc anchor specs must provide either an npc_id or a complete local spec")
+            raise ValueError(
+                "npc anchor specs must provide either an npc_id or a complete local spec"
+            )
         return self
 
 
@@ -159,8 +163,7 @@ class DistrictStructuredUpdates(LanternCityModel):
     @classmethod
     def _validate_rumor_lines(cls, value: list[str]) -> list[str]:
         return [
-            _require_bounded_text(item, field_name="rumor_lines", max_length=140)
-            for item in value
+            _require_bounded_text(item, field_name="rumor_lines", max_length=140) for item in value
         ]
 
 
@@ -196,7 +199,9 @@ class DistrictGenerationResult(LanternCityModel):
     @field_validator("warnings")
     @classmethod
     def _validate_warnings(cls, value: list[str]) -> list[str]:
-        return [_require_bounded_text(item, field_name="warnings", max_length=120) for item in value]
+        return [
+            _require_bounded_text(item, field_name="warnings", max_length=120) for item in value
+        ]
 
 
 @dataclass(frozen=True, slots=True)

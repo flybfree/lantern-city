@@ -53,29 +53,29 @@ def test_to_json_payload_returns_json_ready_dict(city_state: CityState) -> None:
     json.dumps(payload)
 
 
-
 def test_to_json_string_returns_json_text(city_state: CityState) -> None:
     text = to_json_string(city_state)
 
     assert json.loads(text) == city_state.model_dump(mode="json")
 
 
-
-def test_deserialize_model_round_trips_from_dict_without_explicit_class(city_state: CityState) -> None:
+def test_deserialize_model_round_trips_from_dict_without_explicit_class(
+    city_state: CityState,
+) -> None:
     restored = deserialize_model(to_json_payload(city_state))
 
     assert isinstance(restored, CityState)
     assert restored == city_state
 
 
-
-def test_deserialize_model_round_trips_from_json_string(player_progress: PlayerProgressState) -> None:
+def test_deserialize_model_round_trips_from_json_string(
+    player_progress: PlayerProgressState,
+) -> None:
     restored = deserialize_model(to_json_string(player_progress))
 
     assert isinstance(restored, PlayerProgressState)
     assert restored == player_progress
     assert isinstance(restored.lantern_understanding, ScoreTier)
-
 
 
 def test_deserialize_model_accepts_explicit_model_class(city_state: CityState) -> None:
@@ -85,7 +85,6 @@ def test_deserialize_model_accepts_explicit_model_class(city_state: CityState) -
     assert restored == city_state
 
 
-
 def test_deserialize_model_accepts_non_runtime_model_class() -> None:
     score_tier = ScoreTier(score=32, tier="Informed")
 
@@ -93,7 +92,6 @@ def test_deserialize_model_accepts_non_runtime_model_class() -> None:
 
     assert isinstance(restored, ScoreTier)
     assert restored == score_tier
-
 
 
 def test_deserialize_model_rejects_unknown_runtime_type() -> None:
@@ -109,7 +107,6 @@ def test_deserialize_model_rejects_unknown_runtime_type() -> None:
         )
 
 
-
 def test_deserialize_model_rejects_type_mismatch_for_explicit_model_class() -> None:
     payload = {
         "id": "city_001",
@@ -122,7 +119,6 @@ def test_deserialize_model_rejects_type_mismatch_for_explicit_model_class() -> N
 
     with pytest.raises(ValueError, match="does not match requested model class"):
         deserialize_model(payload, model_cls=PlayerProgressState)
-
 
 
 def test_serialize_model_rejects_non_pydantic_objects() -> None:

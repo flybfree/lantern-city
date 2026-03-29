@@ -197,7 +197,9 @@ def test_validate_city_seed_allows_duplicate_npc_names(
     valid_seed_payload: dict[str, object],
 ) -> None:
     payload = copy.deepcopy(valid_seed_payload)
-    payload["npc_configuration"]["npcs"][1]["name"] = payload["npc_configuration"]["npcs"][0]["name"]
+    payload["npc_configuration"]["npcs"][1]["name"] = payload["npc_configuration"]["npcs"][0][
+        "name"
+    ]
 
     validated = validate_city_seed(payload)
 
@@ -221,8 +223,12 @@ def test_validate_city_seed_strips_required_string_fields(
         "  faction_memory_keepers  | faction_council_lights  ": 0.58,
     }
     payload["case_configuration"]["cases"][0]["id"] = "  case_missing_clerk  "
-    payload["case_configuration"]["cases"][0]["involved_district_ids"] = ["  district_old_quarter  "]
-    payload["case_configuration"]["cases"][0]["involved_faction_ids"] = ["  faction_memory_keepers  "]
+    payload["case_configuration"]["cases"][0]["involved_district_ids"] = [
+        "  district_old_quarter  "
+    ]
+    payload["case_configuration"]["cases"][0]["involved_faction_ids"] = [
+        "  faction_memory_keepers  "
+    ]
     payload["case_configuration"]["cases"][0]["key_npc_ids"] = [
         "  npc_shrine_keeper  ",
         " npc_archive_clerk ",
@@ -285,12 +291,16 @@ def test_validate_city_seed_strips_required_string_fields(
             id="duplicate-district-id",
         ),
         pytest.param(
-            lambda payload: payload["district_configuration"]["districts"][0].__setitem__("id", "   "),
+            lambda payload: payload["district_configuration"]["districts"][0].__setitem__(
+                "id", "   "
+            ),
             "district_configuration.districts.0.id",
             id="blank-district-id",
         ),
         pytest.param(
-            lambda payload: payload["district_configuration"]["districts"][0].__setitem__("name", "   "),
+            lambda payload: payload["district_configuration"]["districts"][0].__setitem__(
+                "name", "   "
+            ),
             "district_configuration.districts.0.name",
             id="blank-district-name",
         ),
@@ -321,12 +331,16 @@ def test_validate_city_seed_strips_required_string_fields(
             id="invalid-tension-map-key-format",
         ),
         pytest.param(
-            lambda payload: payload["faction_configuration"]["factions"][0].__setitem__("id", "   "),
+            lambda payload: payload["faction_configuration"]["factions"][0].__setitem__(
+                "id", "   "
+            ),
             "faction_configuration.factions.0.id",
             id="blank-faction-id",
         ),
         pytest.param(
-            lambda payload: payload["faction_configuration"]["factions"][0].__setitem__("name", "   "),
+            lambda payload: payload["faction_configuration"]["factions"][0].__setitem__(
+                "name", "   "
+            ),
             "faction_configuration.factions.0.name",
             id="blank-faction-name",
         ),
@@ -458,14 +472,14 @@ def test_validate_city_seed_strips_required_string_fields(
             id="npc-references-unknown-district",
         ),
         pytest.param(
-            lambda payload: payload["npc_configuration"]["npcs"][0].__setitem__("location_id", "   "),
+            lambda payload: payload["npc_configuration"]["npcs"][0].__setitem__(
+                "location_id", "   "
+            ),
             "npc_configuration.npcs.0.location_id",
             id="blank-npc-location-id",
         ),
         pytest.param(
-            lambda payload: payload["progression_start_state"].__setitem__(
-                "starting_access", 101
-            ),
+            lambda payload: payload["progression_start_state"].__setitem__("starting_access", 101),
             "starting_access",
             id="progression-out-of-range",
         ),

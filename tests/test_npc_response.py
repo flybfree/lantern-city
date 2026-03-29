@@ -179,7 +179,10 @@ def make_valid_payload() -> dict[str, object]:
             ],
         },
         "cacheable_text": {
-            "npc_line": "I keep the lantern ledger, not the annex hands. If you want the second signature, ask the night desk before they remember to deny it.",
+            "npc_line": (
+                "I keep the lantern ledger, not the annex hands. If you want the second "
+                "signature, ask the night desk before they remember to deny it."
+            ),
             "follow_up_suggestions": [
                 "Ask who was on the annex night desk.",
                 "Go to the Registry Annex before curfew.",
@@ -214,8 +217,8 @@ def test_npc_response_generator_builds_bounded_prompt_and_returns_validated_outp
     messages = call["messages"]
     assert messages[0]["role"] == "system"
     assert "one bounded npc response" in messages[0]["content"].lower()
-    assert "task_type\": \"npc_response\"" in messages[1]["content"]
-    assert "request_id\": \"req_npc_001\"" in messages[1]["content"]
+    assert 'task_type": "npc_response"' in messages[1]["content"]
+    assert 'request_id": "req_npc_001"' in messages[1]["content"]
     assert "Ila Venn" in messages[1]["content"]
     assert "Ask who signed the correction after dusk." in messages[1]["content"]
     assert "The ledger shows two different hands" in messages[1]["content"]
@@ -417,13 +420,25 @@ def test_npc_response_generation_result_rejects_unbounded_effect_text(
         (("structured_updates", "access_effects", 0, "effect_type"), "   ", "effect_type"),
         (("structured_updates", "access_effects", 0, "effect_type"), "X" * 41, "effect_type"),
         (("structured_updates", "access_effects", 0, "target_id"), "   ", "target_id"),
-        (("structured_updates", "access_effects", 0, "target_id"), "district_old_quarter", "target_id"),
-        (("structured_updates", "access_effects", 0, "target_id"), "location_" + "x" * 72, "target_id"),
+        (
+            ("structured_updates", "access_effects", 0, "target_id"),
+            "district_old_quarter",
+            "target_id",
+        ),
+        (
+            ("structured_updates", "access_effects", 0, "target_id"),
+            "location_" + "x" * 72,
+            "target_id",
+        ),
         (("structured_updates", "redirect_targets", 0, "target_type"), "   ", "target_type"),
         (("structured_updates", "redirect_targets", 0, "target_type"), "X" * 41, "target_type"),
         (("structured_updates", "redirect_targets", 0, "target_id"), "   ", "target_id"),
         (("structured_updates", "redirect_targets", 0, "target_id"), "annex_001", "target_id"),
-        (("structured_updates", "redirect_targets", 0, "target_id"), "location_" + "x" * 72, "target_id"),
+        (
+            ("structured_updates", "redirect_targets", 0, "target_id"),
+            "location_" + "x" * 72,
+            "target_id",
+        ),
     ],
 )
 def test_npc_response_generation_result_rejects_invalid_metadata_fields(

@@ -11,6 +11,7 @@ from lantern_city.active_slice import (
 from lantern_city.models import PlayerRequest
 from lantern_city.store import SQLiteStore
 
+
 @dataclass(frozen=True, slots=True)
 class OrchestratedRequest:
     request: PlayerRequest
