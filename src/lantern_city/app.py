@@ -86,6 +86,10 @@ class LanternCityApp:
         verb = parts[0].lower()
         if verb == "start":
             return self.start_new_game()
+        if verb == "overview":
+            return self.overview()
+        if verb == "look" and len(parts) >= 2:
+            return self.look(parts[1])
         if verb == "enter" and len(parts) >= 2:
             return self.enter_district(parts[1])
         if verb == "talk" and len(parts) >= 3:
@@ -328,6 +332,61 @@ class LanternCityApp:
             f"Access: {progress.access.score} ({progress.access.tier})",
             f"Leverage: {progress.leverage.score} ({progress.leverage.tier})",
         ]
+        return "\n".join(lines)
+
+    def overview(self) -> str:
+        city = self._require_city()
+        lines = ["=== Lantern City ==="]
+        for did in city.district_ids:
+            district = self._district(did)
+            if district is None:
+                continue
+            loc_count = len(district.visible_locations)
+            npc_count = len(district.relevant_npc_ids)
+            lines.append(
+                f"  {district.name} [{district.lantern_condition}]"
+                f"  — {loc_count} location(s), {npc_count} known NPC(s)  ({did})"
+            )
+        lines.append("")
+        lines.append("Active cases:")
+        cases = [
+            obj
+            for cid in city.active_case_ids
+            if isinstance(obj := self.store.load_object("CaseState", cid), CaseState)
+        ]
+        if cases:
+            for case in cases:
+                lines.append(f"  [{case.status}] {case.title}  ({case.id})")
+        else:
+            lines.append("  None")
+        return "\n".join(lines)
+
+    def look(self, district_id: str) -> str:
+        district = self._district(district_id)
+        if district is None:
+            raise LookupError(f"District not found: {district_id}")
+        lines = [
+            f"=== {district.name} ===",
+            f"Lanterns: {district.lantern_condition}",
+            "",
+            "Locations:",
+        ]
+        for loc_id in district.visible_locations:
+            loc = self.store.load_object("LocationState", loc_id)
+            if not isinstance(loc, LocationState):
+                continue
+            npc_names = []
+            for nid in loc.known_npc_ids:
+                npc = self._npc(nid)
+                if npc is not None:
+                    npc_names.append(f"{npc.name} ({nid})")
+            npc_str = ", ".join(npc_names) if npc_names else "—"
+            lines.append(f"  {loc.name}  ({loc_id})")
+            lines.append(f"    NPCs: {npc_str}")
+            if loc.scene_objects:
+                lines.append(f"    Objects: {', '.join(loc.scene_objects)}")
+        if not district.visible_locations:
+            lines.append("  None")
         return "\n".join(lines)
 
     def get_state_snapshot(self) -> dict[str, object]:

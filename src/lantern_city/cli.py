@@ -19,6 +19,10 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     subparsers.add_parser("start")
+    subparsers.add_parser("overview")
+
+    look_parser = subparsers.add_parser("look")
+    look_parser.add_argument("district_id")
 
     enter_parser = subparsers.add_parser("enter")
     enter_parser.add_argument("district_id")
@@ -83,6 +87,10 @@ def main(argv: list[str] | None = None, *, stdout: TextIO | None = None) -> int:
     try:
         if args.command == "start":
             output = app.start_new_game()
+        elif args.command == "overview":
+            output = app.overview()
+        elif args.command == "look":
+            output = app.look(args.district_id)
         elif args.command == "enter":
             output = app.enter_district(args.district_id)
         elif args.command == "talk":
