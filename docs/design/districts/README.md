@@ -9,6 +9,7 @@ District-level design specifications for all five MVP districts.
 - [the-docks.md](the-docks.md) — The Docks: transient port district, physical evidence and informal authority
 - [market-spires.md](market-spires.md) — Market Spires: commercial trade district, information brokering and guild access
 - [salt-barrens.md](salt-barrens.md) — Salt Barrens: abandoned industrial outer district, physical archive and civic margins
+- [underways.md](underways.md) — The Underways: buried maintenance infrastructure, lantern manipulation root causes, discovered not entered
 
 ## District Summary
 
@@ -19,3 +20,4 @@ District-level design specifications for all five MVP districts.
 | The Docks | flickering | 0.38 | Council moderate, informal strong | informal |
 | Market Spires | bright | 0.62 | Council significant | commercial |
 | Salt Barrens | extinguished | 0.18 | neither faction active | uncontrolled |
+| The Underways | altered | 0.25 | Memory Keepers structural, Council custodial | restricted |

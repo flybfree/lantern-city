@@ -491,6 +491,7 @@ class LanternCityApp:
         the_docks = self._district("district_the_docks")
         market_spires = self._district("district_market_spires")
         salt_barrens = self._district("district_salt_barrens")
+        underways = self._district("district_underways")
         shrine_keeper = self._npc("npc_shrine_keeper")
         archive_clerk = self._npc("npc_archive_clerk")
         brin_hesse = self._npc("npc_brin_hesse")
@@ -502,12 +503,14 @@ class LanternCityApp:
         records_broker = self._npc("npc_records_broker")
         guild_steward = self._npc("npc_guild_steward")
         salvage_worker = self._npc("npc_salvage_worker")
+        route_warden = self._npc("npc_route_warden")
         if (
             old_quarter is None
             or lantern_ward is None
             or the_docks is None
             or market_spires is None
             or salt_barrens is None
+            or underways is None
             or shrine_keeper is None
             or archive_clerk is None
             or brin_hesse is None
@@ -519,6 +522,7 @@ class LanternCityApp:
             or records_broker is None
             or guild_steward is None
             or salvage_worker is None
+            or route_warden is None
         ):
             raise LookupError("Bootstrap did not create required authored objects")
 
@@ -747,6 +751,36 @@ class LanternCityApp:
             scene_objects=["rows of dead lantern casings", "corroded bracket pile", "unlit ceremonial post"],
         )
 
+        # --- Underways locations ---
+        junction_hall = LocationState(
+            id="location_junction_hall",
+            created_at=TURN_ZERO,
+            updated_at=TURN_ZERO,
+            district_id=underways.id,
+            name="Junction Hall",
+            location_type="maintenance junction",
+            known_npc_ids=[route_warden.id],
+            scene_objects=["junction lantern array", "route marker board", "maintenance tool alcove", "district branch seals"],
+        )
+        conduit_run = LocationState(
+            id="location_conduit_run",
+            created_at=TURN_ZERO,
+            updated_at=TURN_ZERO,
+            district_id=underways.id,
+            name="Conduit Run",
+            location_type="maintenance passage",
+            scene_objects=["worn stone conduit floor", "rerouted lantern housing", "transit mark series", "access ladder rungs"],
+        )
+        alteration_chamber = LocationState(
+            id="location_alteration_chamber",
+            created_at=TURN_ZERO,
+            updated_at=TURN_ZERO,
+            district_id=underways.id,
+            name="Alteration Chamber",
+            location_type="infrastructure node",
+            scene_objects=["exposed lantern conduit junction", "modification tool set", "fresh and old work marks", "faction maintenance notation"],
+        )
+
         # --- Clues ---
         clue_a = ClueState(
             id="clue_missing_clerk_ledgers",
@@ -951,6 +985,17 @@ class LanternCityApp:
                 "updated_at": TURN_ZERO,
             }
         )
+        updated_underways = underways.model_copy(
+            update={
+                "visible_locations": [
+                    junction_hall.id,
+                    conduit_run.id,
+                ],
+                "hidden_locations": [alteration_chamber.id],
+                "version": underways.version + 1,
+                "updated_at": TURN_ZERO,
+            }
+        )
 
         # --- NPC updates with cast-sheet values ---
         updated_shrine_keeper = shrine_keeper.model_copy(
@@ -1124,6 +1169,24 @@ class LanternCityApp:
                 "updated_at": TURN_ZERO,
             }
         )
+        updated_route_warden = route_warden.model_copy(
+            update={
+                "public_identity": "maintenance route warden, Underways",
+                "hidden_objective": (
+                    "Protect the route network from outside interests — both faction and civic. "
+                    "The Underways belongs to people who work it, not to people who permit it."
+                ),
+                "current_objective": (
+                    "Maintain the junction. Know who is coming through and why. "
+                    "Decide whether newcomers are useful or dangerous."
+                ),
+                "trust_in_player": 0.0,
+                "suspicion": 0.7,
+                "fear": 0.2,
+                "version": route_warden.version + 1,
+                "updated_at": TURN_ZERO,
+            }
+        )
 
         self.store.save_objects_atomically(
             [
@@ -1175,6 +1238,12 @@ class LanternCityApp:
                 updated_records_broker,
                 updated_guild_steward,
                 updated_salvage_worker,
+                # Underways
+                updated_underways,
+                junction_hall,
+                conduit_run,
+                alteration_chamber,
+                updated_route_warden,
             ]
         )
 
@@ -1471,7 +1540,7 @@ def _default_seed_payload() -> dict[str, object]:
             "baseline_noise_level": "medium",
         },
         "district_configuration": {
-            "district_count": 5,
+            "district_count": 6,
             "districts": [
                 {
                     "id": "district_old_quarter",
@@ -1518,6 +1587,15 @@ def _default_seed_payload() -> dict[str, object]:
                     "access_pattern": "uncontrolled",
                     "hidden_location_density": "high",
                 },
+                {
+                    "id": "district_underways",
+                    "name": "The Underways",
+                    "role": "buried maintenance infrastructure district",
+                    "stability_baseline": 0.25,
+                    "lantern_state": "altered",
+                    "access_pattern": "restricted",
+                    "hidden_location_density": "high",
+                },
             ],
         },
         "faction_configuration": {
@@ -1535,6 +1613,7 @@ def _default_seed_payload() -> dict[str, object]:
                         "district_the_docks": 0.20,
                         "district_market_spires": 0.30,
                         "district_salt_barrens": 0.08,
+                        "district_underways": 0.45,
                     },
                     "attitude_toward_player": "wary",
                 },
@@ -1550,6 +1629,7 @@ def _default_seed_payload() -> dict[str, object]:
                         "district_the_docks": 0.45,
                         "district_market_spires": 0.55,
                         "district_salt_barrens": 0.12,
+                        "district_underways": 0.35,
                     },
                     "attitude_toward_player": "guarded",
                 },
@@ -1596,7 +1676,7 @@ def _default_seed_payload() -> dict[str, object]:
             ],
         },
         "npc_configuration": {
-            "tracked_npc_count": 11,
+            "tracked_npc_count": 12,
             "npcs": [
                 {
                     "id": "npc_shrine_keeper",
@@ -1729,6 +1809,18 @@ def _default_seed_payload() -> dict[str, object]:
                     "secrecy_level": "low",
                     "mobility_pattern": "district-bound",
                     "relevance_level": "background",
+                },
+                {
+                    "id": "npc_route_warden",
+                    "name": "Renn Dour",
+                    "role_category": "informant",
+                    "district_id": "district_underways",
+                    "location_id": "location_junction_hall",
+                    "memory_depth": "high",
+                    "relationship_density": "low",
+                    "secrecy_level": "high",
+                    "mobility_pattern": "route-bound",
+                    "relevance_level": "secondary",
                 },
             ],
         },
