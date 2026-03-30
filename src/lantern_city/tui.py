@@ -222,22 +222,26 @@ class GenerateCityScreen(Screen[Path | None]):
         default_name = f"city-{datetime.datetime.now():%Y%m%d-%H%M}.sqlite3"
         with Vertical(id="gen-box"):
             yield Static("[bold yellow]GENERATE NEW CITY[/bold yellow]", markup=True, id="gen-title")
-            yield Label("Concept  [dim](optional — describe the city's theme)[/dim]", markup=True)
+            yield Label("LLM URL  [bold red]*[/bold red]  [dim](required)[/dim]", markup=True)
+            yield Input(value=self._saved_url, placeholder="http://192.168.x.x:1234/v1", id="inp-url")
+            yield Label("Model  [bold red]*[/bold red]  [dim](required)[/dim]", markup=True)
+            yield Input(value=self._saved_model, placeholder="mistral or llama3 etc.", id="inp-model")
+            yield Label("Concept  [dim](optional)[/dim]", markup=True)
             yield Input(placeholder="e.g. steampunk port city run by criminal gangs", id="inp-concept")
             yield Label("Output file")
             yield Input(value=default_name, id="inp-output")
-            yield Label("LLM URL")
-            yield Input(value=self._saved_url, placeholder="http://localhost:11434/v1", id="inp-url")
-            yield Label("Model")
-            yield Input(value=self._saved_model, placeholder="llama3", id="inp-model")
-            yield RichLog(highlight=False, markup=True, wrap=True, id="gen-log")
-            yield Static("", markup=True, id="gen-error")
+            yield RichLog(highlight=False, markup=False, wrap=True, id="gen-log")
             with Horizontal(id="gen-buttons"):
                 yield Button("Cancel", variant="default", id="btn-gen-cancel")
                 yield Button("Generate", variant="primary", id="btn-gen-start")
 
     def on_mount(self) -> None:
-        self.query_one("#inp-concept", Input).focus()
+        # Focus URL if empty, otherwise concept
+        url_field = self.query_one("#inp-url", Input)
+        if not url_field.value:
+            url_field.focus()
+        else:
+            self.query_one("#inp-concept", Input).focus()
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "btn-gen-cancel":
@@ -250,38 +254,47 @@ class GenerateCityScreen(Screen[Path | None]):
         if not self._generating:
             self.dismiss(None)
 
+    def _log(self, msg: str) -> None:
+        self.query_one("#gen-log", RichLog).write(msg)
+
     def _start_generation(self) -> None:
         url = self.query_one("#inp-url", Input).value.strip()
         model = self.query_one("#inp-model", Input).value.strip()
         output_name = self.query_one("#inp-output", Input).value.strip()
         concept = self.query_one("#inp-concept", Input).value.strip()
 
-        error_widget = self.query_one("#gen-error", Static)
-        if not url or not model:
-            error_widget.update("[red]LLM URL and Model are required.[/red]")
-            return
-        if not output_name:
-            error_widget.update("[red]Output filename is required.[/red]")
-            return
-        output = Path(output_name)
-        if output.exists():
-            error_widget.update(f"[red]{output_name} already exists — choose a different name.[/red]")
-            return
-
-        error_widget.update("")
-        self._generating = True
-        self._set_inputs_disabled(True)
         log = self.query_one("#gen-log", RichLog)
         log.clear()
 
+        if not url:
+            self._log("ERROR: LLM URL is required (e.g. http://192.168.x.x:1234/v1)")
+            self.query_one("#inp-url", Input).focus()
+            return
+        if not model:
+            self._log("ERROR: Model name is required (e.g. llama3 or mistral)")
+            self.query_one("#inp-model", Input).focus()
+            return
+        if not output_name:
+            self._log("ERROR: Output filename is required.")
+            return
+        output = Path(output_name)
+        if output.exists():
+            self._log(f"ERROR: {output_name} already exists — choose a different name.")
+            return
+
+        self._generating = True
+        self._set_inputs_disabled(True)
+        self._log(f"Starting generation → {output_name}")
+        if concept:
+            self._log(f"Concept: {concept}")
+        self._log("")
+
         def on_progress(msg: str) -> None:
             self.call_from_thread(
-                lambda m=msg: self.query_one("#gen-log", RichLog).write(
-                    Text.from_markup(f"[dim]{escape(m)}[/dim]")
-                )
+                lambda m=msg: self.query_one("#gen-log", RichLog).write(m)
             )
 
-        async def _run() -> Path | str:
+        async def _worker() -> Path | str:
             from lantern_city.app import LanternCityApp
             from lantern_city.llm_client import OpenAICompatibleConfig
             from lantern_city.cli import _save_llm_config
@@ -300,9 +313,6 @@ class GenerateCityScreen(Screen[Path | None]):
                     pass
                 return f"ERROR: {exc}"
 
-        async def _worker() -> Path | str:
-            return await _run()
-
         self.run_worker(_worker(), exclusive=True, name="gen")
 
     def on_worker_state_changed(self, event: Worker.StateChanged) -> None:
@@ -313,20 +323,19 @@ class GenerateCityScreen(Screen[Path | None]):
 
         self._generating = False
         self._set_inputs_disabled(False)
-        error_widget = self.query_one("#gen-error", Static)
 
         if event.state == WorkerState.SUCCESS:
             result = event.worker.result
             if isinstance(result, Path):
-                error_widget.update("[green]City generated.[/green]")
+                self._log(f"\nCity saved: {result}")
                 self.dismiss(result)
             else:
-                error_widget.update(f"[red]{escape(str(result))}[/red]")
+                self._log(f"\n{result}")
         else:
-            error_widget.update(f"[red]Generation failed: {escape(str(event.worker.error))}[/red]")
+            self._log(f"\nGeneration failed: {event.worker.error}")
 
     def _set_inputs_disabled(self, disabled: bool) -> None:
-        for widget_id in ("#inp-concept", "#inp-output", "#inp-url", "#inp-model",
+        for widget_id in ("#inp-url", "#inp-model", "#inp-concept", "#inp-output",
                           "#btn-gen-start", "#btn-gen-cancel"):
             try:
                 self.query_one(widget_id).disabled = disabled  # type: ignore[union-attr]
@@ -390,17 +399,22 @@ class CityPickerScreen(Screen[Path | None]):
             self._open_generate_screen()
 
     def _open_generate_screen(self) -> None:
-        # Pre-fill LLM config from any existing city's saved config
+        # Find a saved LLM config: check city-paired .json files, then any .json in CWD
         saved_url, saved_model = "", ""
-        for city_path in self._cities:
-            cfg = _load_llm_config(str(city_path))
+        candidates = list(self._cities) + list(Path.cwd().glob("*.json"))
+        for candidate in candidates:
+            cfg = _load_llm_config(str(candidate.with_suffix(".sqlite3")))
+            if not cfg:
+                # Try the json file itself as the db path stub
+                cfg = _load_llm_config(str(candidate))
             if cfg:
                 saved_url, saved_model = cfg.base_url, cfg.model
                 break
+
         def _on_generated(result: Path | None) -> None:
             if result is not None:
                 self.dismiss(result)
-            # If None (cancelled), just return to the picker
+
         self.app.push_screen(GenerateCityScreen(saved_url, saved_model), _on_generated)
 
     def action_open_selected(self) -> None:
