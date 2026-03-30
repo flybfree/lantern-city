@@ -233,7 +233,7 @@ class GenerateCityScreen(Screen[Path | None]):
         self._generating = False
 
     def compose(self) -> ComposeResult:
-        default_name = f"city-{datetime.datetime.now():%Y%m%d-%H%M}.sqlite3"
+        default_name = f"city-{datetime.datetime.now():%Y%m%d-%H%M}"
         with Vertical(id="gen-box"):
             yield Static("[bold yellow]GENERATE NEW CITY[/bold yellow]", markup=True, id="gen-title")
             yield Label("LLM URL  [bold red]*[/bold red]  [dim](required)[/dim]", markup=True)
@@ -291,6 +291,8 @@ class GenerateCityScreen(Screen[Path | None]):
         if not output_name:
             self._log("ERROR: Output filename is required.")
             return
+        if not output_name.endswith(".sqlite3"):
+            output_name = output_name.rstrip(".") + ".sqlite3"
         output = Path(output_name)
         if output.exists():
             self._log(f"ERROR: {output_name} already exists — choose a different name.")

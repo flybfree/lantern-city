@@ -60,7 +60,10 @@ def main() -> int:
     from lantern_city.cli import _load_llm_config, _save_llm_config
     from lantern_city.llm_client import OpenAICompatibleConfig
 
-    output = Path(args.output)
+    out_name = args.output
+    if not out_name.endswith(".sqlite3"):
+        out_name = out_name.rstrip(".") + ".sqlite3"
+    output = Path(out_name)
     if output.exists():
         print(f"ERROR: {output} already exists.")
         print("  Delete it first, or specify a different --output path.")
