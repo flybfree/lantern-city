@@ -51,8 +51,8 @@ def test_cli_supports_a_minimal_playable_command_loop(tmp_path: Path) -> None:
     assert "location_archive_steps" in enter_output
 
     assert "You ask Ila Venn" in talk_output
-    assert "Clue:" in talk_output
-    assert "Reliability: solid" in talk_output
+    assert "[Clue" in talk_output
+    assert "solid" in talk_output
 
     assert "[Lantern:" in inspect_output
     assert "Shrine Lane" in inspect_output

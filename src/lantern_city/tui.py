@@ -28,15 +28,15 @@ from rich.text import Text
 from textual.app import App, ComposeResult, ScreenResultType
 from textual.binding import Binding
 from textual.containers import Horizontal, ScrollableContainer, Vertical
-from textual.screen import ModalScreen
-from textual.widgets import Button, Input, Label, RichLog, Static
+from textual.screen import ModalScreen, Screen
+from textual.widgets import Button, Input, Label, ListView, ListItem, RichLog, Static
 from textual.worker import Worker, WorkerState
 
 from lantern_city.app import LanternCityApp
 from lantern_city.cli import _load_llm_config, _save_llm_config
 from lantern_city.game_master import GameMaster
 from lantern_city.llm_client import OpenAICompatibleConfig, OpenAICompatibleLLMClient
-from lantern_city.models import CaseState, LocationState
+from lantern_city.models import CaseState, CityState, LocationState, PlayerProgressState
 
 # Direct-command verbs whose output goes to the narrative pane (not info pane)
 _NARRATIVE_INFO_COMMANDS = frozenset({"clues", "look", "overview"})
@@ -83,6 +83,7 @@ resolve a case.
 [bold]── Controls ─────────────────────────────────────────[/bold]
 
   [dim]Ctrl+G[/dim]  toggle GM / direct command mode
+  [dim]Ctrl+R[/dim]  toggle map / player stats (reputation, leverage, attention)
   [dim]Ctrl+S[/dim]  configure LLM connection
   [dim]Ctrl+C[/dim]  quit
   [dim]↑ ↓[/dim]     cycle input history
@@ -103,7 +104,7 @@ _HELP_TEXT = """\
   [bold]clues[/bold]                        view acquired clues
   [bold]help[/bold]                         show this panel
 
-[dim]Ctrl+G — toggle GM / CMD mode  |  Ctrl+C — quit  |  ↑↓ history[/dim]"""
+[dim]Ctrl+G — GM/CMD  |  Ctrl+R — map/stats  |  Ctrl+C — quit  |  ↑↓ history[/dim]"""
 
 
 class TurnLogger:
@@ -144,6 +145,114 @@ class TurnLogger:
         except (OSError, json.JSONDecodeError):
             pass
         return []
+
+
+class CityPickerScreen(Screen[Path | None]):
+    """Full-screen city selection shown when no --db argument is given."""
+
+    CSS = """
+    CityPickerScreen {
+        align: center middle;
+        background: $background;
+    }
+    #picker-box {
+        width: 70;
+        height: auto;
+        max-height: 80vh;
+        background: $surface;
+        border: solid $primary;
+        padding: 1 2;
+    }
+    #picker-title {
+        text-align: center;
+        color: $warning;
+        padding-bottom: 1;
+    }
+    #picker-hint {
+        color: $text-muted;
+        padding-bottom: 1;
+    }
+    #city-list {
+        height: auto;
+        max-height: 20;
+        border: solid $primary-darken-2;
+        margin-bottom: 1;
+    }
+    #picker-buttons {
+        height: 3;
+        align: right middle;
+    }
+    #btn-open {
+        margin-left: 1;
+    }
+    """
+
+    BINDINGS = [
+        Binding("ctrl+c", "quit", "Quit", priority=True),
+        Binding("escape", "quit", "Quit"),
+        Binding("enter", "open_selected", "Open"),
+    ]
+
+    def __init__(self, cities: list[Path]) -> None:
+        super().__init__()
+        self._cities = cities
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="picker-box"):
+            yield Static("[bold yellow]LANTERN CITY[/bold yellow]", markup=True, id="picker-title")
+            if self._cities:
+                yield Static(
+                    "Select a city file to open, or quit and run [bold]generate_city.py[/bold] to create a new one.",
+                    markup=True,
+                    id="picker-hint",
+                )
+                items = [
+                    ListItem(Label(f"  {p.stem}  [dim]({p.name})[/dim]", markup=True), id=f"city-{i}")
+                    for i, p in enumerate(self._cities)
+                ]
+                yield ListView(*items, id="city-list")
+            else:
+                yield Static(
+                    "[yellow]No city files found.[/yellow]\n\n"
+                    "Create one with:\n"
+                    "  [dim]uv run python generate_city.py --url URL --model NAME[/dim]\n\n"
+                    "Then relaunch the TUI.",
+                    markup=True,
+                    id="picker-hint",
+                )
+            with Horizontal(id="picker-buttons"):
+                yield Button("Quit", variant="default", id="btn-quit")
+                if self._cities:
+                    yield Button("Open", variant="primary", id="btn-open")
+
+    def on_mount(self) -> None:
+        if self._cities:
+            self.query_one("#city-list", ListView).focus()
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "btn-quit":
+            self.dismiss(None)
+        elif event.button.id == "btn-open":
+            self._open_selected()
+
+    def action_open_selected(self) -> None:
+        self._open_selected()
+
+    def _open_selected(self) -> None:
+        if not self._cities:
+            return
+        lv = self.query_one("#city-list", ListView)
+        idx = lv.index or 0
+        self.dismiss(self._cities[idx])
+
+    def on_list_view_selected(self, event: ListView.Selected) -> None:
+        item_id = event.item.id or ""
+        if item_id.startswith("city-"):
+            idx = int(item_id.removeprefix("city-"))
+            self.dismiss(self._cities[idx])
+
+    def action_quit(self) -> None:
+        self.dismiss(None)
 
 
 class SettingsScreen(ModalScreen[tuple[str, str] | None]):
@@ -271,6 +380,7 @@ class LanternCityTUI(App[None]):
     BINDINGS = [
         Binding("ctrl+c", "quit", "Quit", priority=True),
         Binding("ctrl+g", "toggle_gm", "Toggle GM mode"),
+        Binding("ctrl+r", "toggle_info", "Toggle stats/map"),
         Binding("ctrl+s", "settings", "LLM settings"),
     ]
 
@@ -285,10 +395,11 @@ class LanternCityTUI(App[None]):
         self._gm = gm
         self._database_path = database_path
         self._gm_mode: bool = True  # always start in GM mode; falls back to CMD if no LLM
+        self._info_mode: str = "surroundings"  # "surroundings" or "stats"
         self._history: list[str] = []
         self._history_idx: int = 0
         self._visited_districts: set[str] = set()
-        self._logger = TurnLogger(database_path)
+        self._turn_log = TurnLogger(database_path)
         self._last_input: str = ""
 
     # ------------------------------------------------------------------
@@ -311,6 +422,7 @@ class LanternCityTUI(App[None]):
         try:
             pos = self._game._load_position()
             if pos is not None:
+                self._visited_districts.update(pos.visited_district_ids)
                 if pos.district_id:
                     self._visited_districts.add(pos.district_id)
                 narrative.write(Text.from_markup(
@@ -396,6 +508,10 @@ class LanternCityTUI(App[None]):
 
         self.push_screen(SettingsScreen(url, model), _on_close)
 
+    def action_toggle_info(self) -> None:
+        self._info_mode = "stats" if self._info_mode == "surroundings" else "surroundings"
+        self._refresh_surroundings()
+
     def _apply_llm_config(self, url: str, model: str) -> None:
         """Instantiate a new LLM client + GM and enable GM mode."""
         llm_config = OpenAICompatibleConfig(base_url=url, model=model)
@@ -429,8 +545,26 @@ class LanternCityTUI(App[None]):
             narrative.write(Text.from_markup(_WELCOME_TEXT))
             return
 
+        # clue list — always run the real clues command so the player sees actual clue text
+        _raw_lower = raw.lower().strip()
+        if verb == "clues" or any(phrase in _raw_lower for phrase in (
+            "show my clues", "show clues", "list clues", "my clues",
+            "what clues", "clues i have", "clues do i have",
+        )):
+            self.query_one("#cmd", Input).disabled = True
+            self._update_status_raw("processing…")
+
+            async def _run_clues() -> str:
+                try:
+                    return await asyncio.to_thread(self._game.run_command, "clues")
+                except Exception as exc:
+                    return f"⚠ {exc}"
+
+            self.run_worker(_run_clues(), exclusive=True, name="cmd:clues")
+            return
+
         # status update — ask the GM for a narrative recap, no game actions
-        if verb in ("status", "update") or raw.lower().strip() in (
+        if verb in ("status", "update") or _raw_lower in (
             "where am i", "what's going on", "what is going on",
             "catch me up", "what do i know", "recap",
         ):
@@ -447,6 +581,28 @@ class LanternCityTUI(App[None]):
 
         self.query_one("#cmd", Input).disabled = True
         self._update_status_raw("processing…")
+
+        # start — stream progress steps directly to the narrative log
+        if verb == "start":
+            concept_arg = raw.split(None, 1)[1] if len(raw.split(None, 1)) > 1 else None
+
+            def _progress(msg: str) -> None:
+                self.call_from_thread(
+                    lambda m=msg: self.query_one("#narrative", RichLog).write(
+                        Text.from_markup(f"[dim]{escape(m)}[/dim]")
+                    )
+                )
+
+            async def _run_start() -> str:
+                try:
+                    return await asyncio.to_thread(
+                        self._game.start_new_game, concept_arg, _progress
+                    )
+                except Exception as exc:
+                    return f"\u26a0 {exc}"
+
+            self.run_worker(_run_start(), exclusive=True, name="cmd:start")
+            return
 
         if self._gm_mode and self._gm is not None:
             async def _run_gm() -> str:
@@ -475,15 +631,15 @@ class LanternCityTUI(App[None]):
             if name == "gm":
                 prose = event.worker.result  # type: ignore[assignment]
                 self.query_one("#narrative", RichLog).write(escape(prose))
-                self._logger.record(mode="GM", player_input=self._last_input, response=prose)
+                self._turn_log.record(mode="GM", player_input=self._last_input, response=prose)
             else:
                 result: str = event.worker.result  # type: ignore[assignment]
                 self.query_one("#narrative", RichLog).write(escape(result))
-                self._logger.record(mode="CMD", player_input=self._last_input, response=result)
+                self._turn_log.record(mode="CMD", player_input=self._last_input, response=result)
         elif event.state == WorkerState.ERROR:
             err_text = f"Error: {event.worker.error}"
             self.query_one("#narrative", RichLog).write(Text(err_text, style="bold red"))
-            self._logger.record(mode="ERR", player_input=self._last_input, response=err_text)
+            self._turn_log.record(mode="ERR", player_input=self._last_input, response=err_text)
 
         cmd_input.disabled = False
         cmd_input.focus()
@@ -512,7 +668,10 @@ class LanternCityTUI(App[None]):
             cmd.placeholder = "enter command…"
 
     def _refresh_surroundings(self) -> None:
-        panel = self._build_surroundings_panel()
+        if self._info_mode == "stats":
+            panel = self._build_stats_panel()
+        else:
+            panel = self._build_surroundings_panel()
         self._update_info(panel, markup=True)
 
     def _build_surroundings_panel(self) -> str:
@@ -524,13 +683,14 @@ class LanternCityTUI(App[None]):
 
         if city is None or pos is None:
             return (
-                "[dim]Ctrl+G — toggle GM/CMD  |  Ctrl+S — LLM settings[/dim]\n\n"
+                "[dim]Ctrl+G — GM/CMD  |  Ctrl+R — map/stats  |  Ctrl+S — LLM[/dim]\n\n"
                 "Type [bold]start[/bold] to begin a new game."
             )
 
         lines: list[str] = []
 
-        # Track visited districts
+        # Sync visited districts from persisted store + current session
+        self._visited_districts.update(pos.visited_district_ids)
         if pos.district_id:
             self._visited_districts.add(pos.district_id)
 
@@ -616,6 +776,102 @@ class LanternCityTUI(App[None]):
 
         return "\n".join(lines)
 
+    def _build_stats_panel(self) -> str:
+        mode = "[bold green]GM[/bold green]" if self._gm_mode else "[bold yellow]CMD[/bold yellow]"
+        lines: list[str] = [
+            f"Mode: {mode}  [dim](Ctrl+G)[/dim]\n",
+            "[bold yellow]Player Stats[/bold yellow]  [dim](Ctrl+R — back to map)[/dim]\n",
+        ]
+
+        try:
+            progress_items = self._game.store.list_objects("PlayerProgressState")
+            progress = progress_items[0] if progress_items else None
+            if not isinstance(progress, PlayerProgressState):
+                progress = None
+        except Exception:
+            progress = None
+
+        try:
+            cities = self._game.store.list_objects("CityState")
+            city = cities[0] if cities else None
+            if not isinstance(city, CityState):
+                city = None
+        except Exception:
+            city = None
+
+        if progress is None and city is None:
+            lines.append("[dim]No game in progress.[/dim]")
+            return "\n".join(lines)
+
+        def _tier_color(tier: str) -> str:
+            return {
+                "Unknown": "dim", "Novice": "grey50", "Apprentice": "cyan",
+                "Journeyman": "green", "Expert": "yellow", "Master": "bold yellow",
+            }.get(tier, "white")
+
+        if progress is not None:
+            # Reputation
+            rep = progress.reputation
+            rc = _tier_color(rep.tier)
+            lines.append(f"[bold]Reputation[/bold]")
+            lines.append(f"  [{rc}]{rep.score:>3}  {escape(rep.tier)}[/{rc}]")
+            lines.append("")
+
+            # Leverage
+            lev = progress.leverage
+            lc = _tier_color(lev.tier)
+            lines.append(f"[bold]Leverage[/bold]")
+            lines.append(f"  [{lc}]{lev.score:>3}  {escape(lev.tier)}[/{lc}]")
+            lines.append("")
+
+            # Lantern Understanding
+            lu = progress.lantern_understanding
+            luc = _tier_color(lu.tier)
+            lines.append(f"[bold]Lantern Understanding[/bold]")
+            lines.append(f"  [{luc}]{lu.score:>3}  {escape(lu.tier)}[/{luc}]")
+            lines.append("")
+
+            # Access
+            acc = progress.access
+            ac = _tier_color(acc.tier)
+            lines.append(f"[bold]Access[/bold]")
+            lines.append(f"  [{ac}]{acc.score:>3}  {escape(acc.tier)}[/{ac}]")
+            lines.append("")
+
+        # Attention (player_presence_level from CityState)
+        if city is not None:
+            presence = city.player_presence_level
+            if presence < 0.33:
+                attn_label, attn_color, attn_icon = "Low", "green", "◎"
+            elif presence < 0.67:
+                attn_label, attn_color, attn_icon = "Medium", "yellow", "◉"
+            else:
+                attn_label, attn_color, attn_icon = "High", "red", "◈"
+            pct = int(presence * 100)
+            lines.append(f"[bold]Attention[/bold]")
+            lines.append(
+                f"  [{attn_color}]{attn_icon} {attn_label}[/{attn_color}]"
+                f"  [dim]{pct}%[/dim]"
+            )
+            lines.append("")
+
+            # City tension
+            tension = city.global_tension
+            if tension < 0.33:
+                tens_label, tens_color = "Calm", "green"
+            elif tension < 0.67:
+                tens_label, tens_color = "Uneasy", "yellow"
+            else:
+                tens_label, tens_color = "Volatile", "red"
+            tpct = int(tension * 100)
+            lines.append(f"[bold]City Tension[/bold]")
+            lines.append(
+                f"  [{tens_color}]{tens_label}[/{tens_color}]"
+                f"  [dim]{tpct}%[/dim]"
+            )
+
+        return "\n".join(lines)
+
     def _refresh_status(self) -> None:
         mode = "[GM]" if self._gm_mode else "[CMD]"
         try:
@@ -638,6 +894,25 @@ class LanternCityTUI(App[None]):
 # Entry point
 # ------------------------------------------------------------------
 
+def _scan_cities(directory: Path) -> list[Path]:
+    """Return *.sqlite3 files in *directory*, newest-modified first."""
+    return sorted(
+        directory.glob("*.sqlite3"),
+        key=lambda p: p.stat().st_mtime,
+        reverse=True,
+    )
+
+
+def _run_city_picker(cities: list[Path]) -> Path | None:
+    """Show the city picker screen and return the chosen path (or None to quit)."""
+
+    class _PickerApp(App[Path | None]):
+        def on_mount(self) -> None:
+            self.push_screen(CityPickerScreen(cities), self.exit)
+
+    return _PickerApp().run()
+
+
 def main(argv: list[str] | None = None) -> int:
     import sys
 
@@ -645,25 +920,40 @@ def main(argv: list[str] | None = None) -> int:
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
     parser = argparse.ArgumentParser(prog="lantern-city-tui")
-    parser.add_argument("--db", dest="database_path", default="lantern-city.sqlite3")
+    parser.add_argument("--db", dest="database_path", default=None,
+                        help="Path to a city SQLite database. Omit to pick from available files.")
     parser.add_argument("--llm-url", dest="llm_url", default=None)
     parser.add_argument("--llm-model", dest="llm_model", default=None)
     args = parser.parse_args(argv)
 
+    # Resolve database path — show picker if not specified
+    if args.database_path is None:
+        cities = _scan_cities(Path.cwd())
+        if len(cities) == 1:
+            # Only one city — open it automatically
+            db_path = str(cities[0])
+        else:
+            chosen = _run_city_picker(cities)
+            if chosen is None:
+                return 0
+            db_path = str(chosen)
+    else:
+        db_path = args.database_path
+
     if args.llm_url and args.llm_model:
-        _save_llm_config(args.database_path, args.llm_url, args.llm_model)
+        _save_llm_config(db_path, args.llm_url, args.llm_model)
         llm_config = OpenAICompatibleConfig(base_url=args.llm_url, model=args.llm_model)
     else:
-        llm_config = _load_llm_config(args.database_path)
+        llm_config = _load_llm_config(db_path)
 
-    game = LanternCityApp(Path(args.database_path), llm_config=llm_config)
+    game = LanternCityApp(Path(db_path), llm_config=llm_config)
 
     gm: GameMaster | None = None
     if llm_config is not None:
         llm_client = OpenAICompatibleLLMClient(llm_config)
         gm = GameMaster(app=game, llm=llm_client)
 
-    LanternCityTUI(game, gm=gm, database_path=args.database_path).run()
+    LanternCityTUI(game, gm=gm, database_path=db_path).run()
     return 0
 
 

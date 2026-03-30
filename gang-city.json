@@ -1,0 +1,4 @@
+{
+  "llm_url": "http://192.168.3.181:1234",
+  "llm_model": "unsloth/qwen3.5-35b-a3b"
+}

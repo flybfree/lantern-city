@@ -19,7 +19,7 @@ def test_end_to_end_flow_bootstraps_seed_and_advances_case_with_persistence(tmp_
     assert "seeded city_lantern_city" in start_output
     assert "Old Quarter" in enter_output
     assert "Ila Venn" in talk_output
-    assert "Clue: clue_missing_clerk_ledgers" in talk_output
+    assert "[Clue" in talk_output
     assert "[Lantern: dim" in inspect_output
     assert "Case status: solved" in case_output
 

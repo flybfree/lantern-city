@@ -1,0 +1,358 @@
+{
+  "schema_version": "1.0",
+  "city_identity": {
+    "city_name": "Lantern City",
+    "dominant_mood": [
+      "noir",
+      "wet",
+      "uncertain"
+    ],
+    "weather_pattern": [
+      "persistent rain",
+      "coastal fog"
+    ],
+    "architectural_style": [
+      "old stone",
+      "brass fixtures"
+    ],
+    "economic_character": [
+      "port trade",
+      "recordkeeping"
+    ],
+    "social_texture": [
+      "guarded",
+      "rumor-driven"
+    ],
+    "ritual_texture": [
+      "formal lantern ceremonies",
+      "hidden shrine practice"
+    ],
+    "baseline_noise_level": "medium"
+  },
+  "district_configuration": {
+    "district_count": 6,
+    "districts": [
+      {
+        "id": "district_old_quarter",
+        "name": "Old Quarter",
+        "role": "memory/archive district",
+        "stability_baseline": 0.47,
+        "lantern_state": "dim",
+        "access_pattern": "restricted",
+        "hidden_location_density": "medium"
+      },
+      {
+        "id": "district_lantern_ward",
+        "name": "Lantern Ward",
+        "role": "administrative lantern district",
+        "stability_baseline": 0.71,
+        "lantern_state": "bright",
+        "access_pattern": "controlled",
+        "hidden_location_density": "low"
+      },
+      {
+        "id": "district_the_docks",
+        "name": "The Docks",
+        "role": "transient port district",
+        "stability_baseline": 0.38,
+        "lantern_state": "flickering",
+        "access_pattern": "informal",
+        "hidden_location_density": "medium"
+      },
+      {
+        "id": "district_market_spires",
+        "name": "Market Spires",
+        "role": "commercial trade district",
+        "stability_baseline": 0.62,
+        "lantern_state": "bright",
+        "access_pattern": "commercial",
+        "hidden_location_density": "low"
+      },
+      {
+        "id": "district_salt_barrens",
+        "name": "Salt Barrens",
+        "role": "abandoned industrial outer district",
+        "stability_baseline": 0.18,
+        "lantern_state": "extinguished",
+        "access_pattern": "uncontrolled",
+        "hidden_location_density": "high"
+      },
+      {
+        "id": "district_underways",
+        "name": "The Underways",
+        "role": "buried maintenance infrastructure district",
+        "stability_baseline": 0.25,
+        "lantern_state": "altered",
+        "access_pattern": "restricted",
+        "hidden_location_density": "high"
+      }
+    ]
+  },
+  "faction_configuration": {
+    "faction_count": 2,
+    "factions": [
+      {
+        "id": "faction_memory_keepers",
+        "name": "Memory Keepers",
+        "role": "memory stewardship",
+        "public_goal": "preserve continuity",
+        "hidden_goal": "control what the city remembers",
+        "influence_by_district": {
+          "district_old_quarter": 0.78,
+          "district_lantern_ward": 0.22,
+          "district_the_docks": 0.2,
+          "district_market_spires": 0.3,
+          "district_salt_barrens": 0.08,
+          "district_underways": 0.45
+        },
+        "attitude_toward_player": "wary"
+      },
+      {
+        "id": "faction_council_lights",
+        "name": "Council of Lights",
+        "role": "civic lantern administration",
+        "public_goal": "maintain public order",
+        "hidden_goal": "monopolize lantern legitimacy",
+        "influence_by_district": {
+          "district_old_quarter": 0.18,
+          "district_lantern_ward": 0.81,
+          "district_the_docks": 0.45,
+          "district_market_spires": 0.55,
+          "district_salt_barrens": 0.12,
+          "district_underways": 0.35
+        },
+        "attitude_toward_player": "guarded"
+      }
+    ],
+    "tension_map": {
+      "faction_memory_keepers|faction_council_lights": 0.58
+    }
+  },
+  "lantern_configuration": {
+    "lantern_system_style": "civic grid with ritual overlays",
+    "lantern_ownership_structure": "mixed control",
+    "lantern_maintenance_structure": "shrine technicians and civic engineers",
+    "lantern_condition_distribution": {
+      "bright": 0.4,
+      "dim": 0.35,
+      "flickering": 0.15,
+      "extinguished": 0.05,
+      "altered": 0.05
+    },
+    "lantern_reach_profile": "district-wide with street-level exceptions",
+    "lantern_social_effect_profile": [
+      "legitimacy",
+      "restricted movement"
+    ],
+    "lantern_memory_effect_profile": [
+      "clearer testimony",
+      "contradictory accounts"
+    ],
+    "lantern_tampering_probability": 0.22
+  },
+  "missingness_configuration": {
+    "missingness_pressure": 0.42,
+    "missingness_scope": "records first",
+    "missingness_visibility": "known-but-denied",
+    "missingness_style": "edited records and contradictory witness accounts",
+    "missingness_targets": [
+      "families",
+      "archives"
+    ],
+    "missingness_risk_level": "medium"
+  },
+  "case_configuration": {
+    "starting_case_count": 1,
+    "cases": [
+      {
+        "id": "case_missing_clerk",
+        "type": "missing person",
+        "intensity": "medium",
+        "scope": "single district",
+        "involved_district_ids": [
+          "district_old_quarter",
+          "district_lantern_ward"
+        ],
+        "involved_faction_ids": [
+          "faction_memory_keepers"
+        ],
+        "key_npc_ids": [
+          "npc_shrine_keeper",
+          "npc_archive_clerk",
+          "npc_brin_hesse",
+          "npc_tovin_vale"
+        ],
+        "failure_modes": [
+          "evidence destroyed",
+          "Missingness escalates"
+        ]
+      }
+    ]
+  },
+  "npc_configuration": {
+    "tracked_npc_count": 12,
+    "npcs": [
+      {
+        "id": "npc_shrine_keeper",
+        "name": "Ila Venn",
+        "role_category": "informant",
+        "district_id": "district_old_quarter",
+        "location_id": "location_shrine_lane",
+        "memory_depth": "medium",
+        "relationship_density": "medium",
+        "secrecy_level": "high",
+        "mobility_pattern": "district-bound",
+        "relevance_level": "immediate"
+      },
+      {
+        "id": "npc_archive_clerk",
+        "name": "Sered Marr",
+        "role_category": "gatekeeper",
+        "district_id": "district_old_quarter",
+        "location_id": "location_archive_steps",
+        "memory_depth": "high",
+        "relationship_density": "medium",
+        "secrecy_level": "high",
+        "mobility_pattern": "district-bound",
+        "relevance_level": "immediate"
+      },
+      {
+        "id": "npc_brin_hesse",
+        "name": "Brin Hesse",
+        "role_category": "informant",
+        "district_id": "district_old_quarter",
+        "location_id": "location_maintenance_route",
+        "memory_depth": "low",
+        "relationship_density": "low",
+        "secrecy_level": "medium",
+        "mobility_pattern": "route-bound",
+        "relevance_level": "secondary"
+      },
+      {
+        "id": "npc_tovin_vale",
+        "name": "Tovin Vale",
+        "role_category": "informant",
+        "district_id": "district_old_quarter",
+        "location_id": "location_subarchive_chamber",
+        "memory_depth": "high",
+        "relationship_density": "low",
+        "secrecy_level": "extreme",
+        "mobility_pattern": "stationary",
+        "relevance_level": "immediate"
+      },
+      {
+        "id": "npc_sister_calis",
+        "name": "Sister Calis",
+        "role_category": "authority",
+        "district_id": "district_lantern_ward",
+        "location_id": "location_shrine_liaison_hall",
+        "memory_depth": "high",
+        "relationship_density": "medium",
+        "secrecy_level": "high",
+        "mobility_pattern": "district-bound",
+        "relevance_level": "secondary"
+      },
+      {
+        "id": "npc_watcher_pell",
+        "name": "Watcher Pell",
+        "role_category": "gatekeeper",
+        "district_id": "district_lantern_ward",
+        "location_id": "location_civic_watch_desk",
+        "memory_depth": "medium",
+        "relationship_density": "low",
+        "secrecy_level": "medium",
+        "mobility_pattern": "district-bound",
+        "relevance_level": "secondary"
+      },
+      {
+        "id": "npc_dockmaster",
+        "name": "Harrow Selt",
+        "role_category": "authority",
+        "district_id": "district_the_docks",
+        "location_id": "location_harbormaster_office",
+        "memory_depth": "medium",
+        "relationship_density": "medium",
+        "secrecy_level": "medium",
+        "mobility_pattern": "district-bound",
+        "relevance_level": "secondary"
+      },
+      {
+        "id": "npc_dock_hauler",
+        "name": "Maren Osk",
+        "role_category": "informant",
+        "district_id": "district_the_docks",
+        "location_id": "location_cargo_holding",
+        "memory_depth": "low",
+        "relationship_density": "low",
+        "secrecy_level": "low",
+        "mobility_pattern": "route-bound",
+        "relevance_level": "background"
+      },
+      {
+        "id": "npc_records_broker",
+        "name": "Vel Dassen",
+        "role_category": "informant",
+        "district_id": "district_market_spires",
+        "location_id": "location_records_office",
+        "memory_depth": "high",
+        "relationship_density": "medium",
+        "secrecy_level": "medium",
+        "mobility_pattern": "district-bound",
+        "relevance_level": "secondary"
+      },
+      {
+        "id": "npc_guild_steward",
+        "name": "Cor Falt",
+        "role_category": "gatekeeper",
+        "district_id": "district_market_spires",
+        "location_id": "location_guild_hall",
+        "memory_depth": "medium",
+        "relationship_density": "medium",
+        "secrecy_level": "medium",
+        "mobility_pattern": "district-bound",
+        "relevance_level": "secondary"
+      },
+      {
+        "id": "npc_salvage_worker",
+        "name": "Persin Loke",
+        "role_category": "informant",
+        "district_id": "district_salt_barrens",
+        "location_id": "location_salvage_yard",
+        "memory_depth": "low",
+        "relationship_density": "low",
+        "secrecy_level": "low",
+        "mobility_pattern": "district-bound",
+        "relevance_level": "background"
+      },
+      {
+        "id": "npc_route_warden",
+        "name": "Renn Dour",
+        "role_category": "informant",
+        "district_id": "district_underways",
+        "location_id": "location_junction_hall",
+        "memory_depth": "high",
+        "relationship_density": "low",
+        "secrecy_level": "high",
+        "mobility_pattern": "route-bound",
+        "relevance_level": "secondary"
+      }
+    ]
+  },
+  "progression_start_state": {
+    "starting_lantern_understanding": 18,
+    "starting_access": 10,
+    "starting_reputation": 12,
+    "starting_leverage": 5,
+    "starting_city_impact": 2,
+    "starting_clue_mastery": 20
+  },
+  "tone_and_difficulty": {
+    "story_density": "medium",
+    "mystery_complexity": "medium",
+    "social_resistance": "medium",
+    "investigation_pace": "moderate",
+    "consequence_severity": "medium",
+    "revelation_delay": "medium",
+    "narrative_strangeness": "medium"
+  }
+}

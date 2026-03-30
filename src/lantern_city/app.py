@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import json
 import shlex
 import sys
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -15,6 +17,12 @@ from lantern_city.generation.case_generation import (
     CaseGenerationError,
     CaseGenerator,
 )
+from lantern_city.generation.city_seed import (
+    CitySeedGenerationError,
+    CitySeedGenerationRequest,
+    CitySeedGenerator,
+)
+from lantern_city.generation.world_content import WorldContentGenerator
 from lantern_city.generation.transient_response import (
     TransientGenerationError,
     generate_transient_encounter,
@@ -55,7 +63,15 @@ class LanternCityApp:
     def __post_init__(self) -> None:
         self.store = SQLiteStore(self.database_path)
 
-    def start_new_game(self) -> str:
+    def start_new_game(
+        self,
+        concept: str | None = None,
+        on_progress: Callable[[str], None] | None = None,
+    ) -> str:
+        def _emit(msg: str) -> None:
+            if on_progress is not None:
+                on_progress(msg)
+
         existing_city = self._city()
         if existing_city is not None:
             case = self._active_case(existing_city)
@@ -66,19 +82,40 @@ class LanternCityApp:
                 f"Active case: {case_title}"
             )
 
-        seed = validate_city_seed(_default_seed_payload())
-        result = bootstrap_city(seed, self.store)
-        self._seed_authored_scene_objects()
         if self.llm_config is not None:
+            _emit("[city] Generating city seed via LLM…")
+            seed = self._generate_city_seed(concept, on_progress=on_progress)
+        else:
+            _emit("[city] Loading default city seed (no LLM configured)…")
+            seed = validate_city_seed(_load_default_seed())
+
+        _emit("[city] Bootstrapping city structure…")
+        result = bootstrap_city(seed, self.store)
+        _emit(f"[city] Structure ready: {result.city_id}")
+
+        if self.llm_config is not None:
+            _emit("[city] Generating world content (locations, clues, NPC placement)…")
+            self._generate_world_content(on_progress=on_progress)
+            _emit("[city] Generating latent cases…")
             self._generate_latent_cases(count=2)
+            _emit("[city] Latent cases ready.")
+        else:
+            _emit("[city] Seeding authored scene objects…")
+            self._seed_authored_scene_objects()
+
         city = self._require_city()
         case = self._active_case(city)
         case_title = "None" if case is None else self._display_case_title(case.title)
+        first_district = (
+            case.involved_district_ids[0]
+            if case and case.involved_district_ids
+            else (city.district_ids[0] if city.district_ids else "unknown")
+        )
         return (
             f"Lantern City ready: seeded {result.city_id}\n"
             f"Districts: {', '.join(result.district_ids)}\n"
             f"Active case: {case_title}\n"
-            f"Next: enter district_old_quarter"
+            f"Next: enter {first_district}"
         )
 
     def run_command(self, command: str) -> str:
@@ -88,7 +125,8 @@ class LanternCityApp:
 
         verb = parts[0].lower()
         if verb == "start":
-            return self.start_new_game()
+            concept = " ".join(parts[1:]) if len(parts) > 1 else None
+            return self.start_new_game(concept=concept)
         if verb == "overview":
             return self.overview()
         if verb == "clues":
@@ -118,7 +156,11 @@ class LanternCityApp:
         district = outcome.active_slice.district
         if district is None:
             raise LookupError(f"District not found: {district_id}")
-        self._save_position(district_id=district_id, location_id=None, npc_ids=[])
+        existing_pos = self._load_position()
+        visited = list(existing_pos.visited_district_ids) if existing_pos else []
+        if district_id not in visited:
+            visited.append(district_id)
+        self._save_position(district_id=district_id, location_id=None, npc_ids=[], visited_district_ids=visited)
         visible_npc = "None"
         preferred_npc = next(
             (npc for npc in outcome.active_slice.npcs if npc.id == "npc_shrine_keeper"),
@@ -199,12 +241,9 @@ class LanternCityApp:
             city = self._require_city()
             propagation_notices = self._propagate_missingness(city, district, updated_at=TURN_TWO)
 
-        clue_text = "None"
-        clue_reliability = "unknown"
+        lines = [outcome.response.narrative_text]
         if clue is not None:
-            clue_text = clue.id
-            clue_reliability = clue.reliability
-        lines = [f"{outcome.response.narrative_text}", f"Clue: {clue_text}", f"Reliability: {clue_reliability}"]
+            lines.append(f'[Clue — {clue.reliability}] "{clue.clue_text}"')
         lines.extend(propagation_notices)
         return "\n".join(lines)
 
@@ -389,14 +428,20 @@ class LanternCityApp:
         pos = self._load_position()
         if pos is None or not pos.clue_ids:
             return "No clues acquired yet."
-        lines = ["=== Acquired Clues ==="]
+        lines = [f"=== Acquired Clues ({len(pos.clue_ids)} tracked) ==="]
+        unresolved: list[str] = []
         for clue_id in pos.clue_ids:
             clue = self.store.load_object("ClueState", clue_id)
             if not isinstance(clue, ClueState):
+                unresolved.append(clue_id)
                 continue
             label = _clue_label(clue_id)
             lines.append(f"  [{clue.reliability}] {label}")
             lines.append(f"    {clue.clue_text}")
+        if unresolved:
+            lines.append(f"\n  [dim] {len(unresolved)} tracked ID(s) not yet resolved:")
+            for uid in unresolved:
+                lines.append(f"    {uid}")
         return "\n".join(lines)
 
     def go(self, location_id: str) -> str:
@@ -671,6 +716,58 @@ class LanternCityApp:
             city = bootstrap_result.updated_city
             existing_case_types.append(result.case_type)
             existing_npc_names.extend(spec.name for spec in result.npc_specs)
+
+    def _generate_city_seed(
+        self,
+        concept: str | None = None,
+        on_progress: Callable[[str], None] | None = None,
+    ):
+        """Use the LLM to generate a new CitySeedDocument."""
+        from lantern_city.llm_client import OpenAICompatibleLLMClient
+        assert self.llm_config is not None
+        llm = OpenAICompatibleLLMClient(self.llm_config)
+        generator = CitySeedGenerator(llm)
+        request = CitySeedGenerationRequest(
+            request_id="seed_gen_new",
+            concept=concept or "",
+        )
+        try:
+            return generator.generate(request, on_progress=on_progress)
+        except CitySeedGenerationError as exc:
+            raise RuntimeError(f"City seed generation failed: {exc}") from exc
+
+    def _generate_world_content(self, on_progress: Callable[[str], None] | None = None) -> None:
+        """Use the LLM to generate locations, clues, and NPC placements for the current city."""
+        from lantern_city.llm_client import OpenAICompatibleLLMClient
+        assert self.llm_config is not None
+        city = self._require_city()
+        districts = [
+            obj for did in city.district_ids
+            if (obj := self.store.load_object("DistrictState", did)) is not None
+            and isinstance(obj, DistrictState)
+        ]
+        npcs = self.store.list_objects("NPCState")
+        npcs = [n for n in npcs if isinstance(n, NPCState)]
+        cases = [
+            obj for cid in city.active_case_ids
+            if (obj := self.store.load_object("CaseState", cid)) is not None
+            and isinstance(obj, CaseState)
+        ]
+        llm = OpenAICompatibleLLMClient(self.llm_config)
+        generator = WorldContentGenerator(llm)
+        content = generator.generate(
+            districts=districts,
+            npcs=npcs,
+            cases=cases,
+            on_progress=on_progress,
+        )
+        objects_to_save: list = (
+            content.locations
+            + content.clues
+            + content.district_updates
+            + content.npc_updates
+        )
+        self.store.save_objects_atomically(objects_to_save)
 
     def _seed_authored_scene_objects(self) -> None:
         old_quarter = self._district("district_old_quarter")
@@ -1120,6 +1217,7 @@ class LanternCityApp:
                     maintenance_route.id,
                     service_passage.id,
                 ],
+                "hidden_locations": [subarchive_chamber.id],
                 "version": old_quarter.version + 1,
                 "updated_at": TURN_ZERO,
             }
@@ -1741,6 +1839,12 @@ def _gains_for_outcome(outcome_status: str) -> list[tuple[str, int, str]]:
     return [
         ("lantern_understanding", 2, "Partial observation before case closed against truth."),
     ]
+
+
+def _load_default_seed() -> dict[str, object]:
+    """Load the default offline seed from the bundled JSON file."""
+    seed_path = Path(__file__).parent / "data" / "default_seed.json"
+    return json.loads(seed_path.read_text(encoding="utf-8"))  # type: ignore[return-value]
 
 
 def _default_seed_payload() -> dict[str, object]:

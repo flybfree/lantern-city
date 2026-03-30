@@ -44,6 +44,207 @@ def _bounded(value: str, *, field_name: str, max_length: int) -> str:
     return value
 
 
+# Normalisation maps for LLM enum outputs that deviate from expected values.
+# Keys are lowercase variants the LLM commonly produces; values are canonical strings.
+
+_INTENSITY_MAP: dict[str, str] = {
+    "low": "low",
+    "medium": "medium",
+    "moderate": "medium",
+    "mid": "medium",
+    "middle": "medium",
+    "high": "high",
+    "severe": "high",
+    "intense": "high",
+    "critical": "high",
+}
+
+_ROLE_CATEGORY_MAP: dict[str, str] = {
+    "informant": "informant",
+    "gatekeeper": "gatekeeper",
+    "authority": "authority",
+    "suspect": "suspect",
+    "witness": "witness",
+    # common LLM free-text variations → nearest canonical role
+    "clerk": "gatekeeper",
+    "official": "authority",
+    "officer": "authority",
+    "guard": "authority",
+    "administrator": "authority",
+    "manager": "authority",
+    "supervisor": "authority",
+    "foreman": "authority",
+    "shift_foreman": "authority",
+    "inspector": "authority",
+    "warden": "authority",
+    "captain": "authority",
+    "commander": "authority",
+    "contact": "informant",
+    "source": "informant",
+    "operative": "informant",
+    "agent": "informant",
+    "spy": "informant",
+    "broker": "informant",
+    "handler": "informant",
+    "doorkeeper": "gatekeeper",
+    "archivist": "gatekeeper",
+    "registrar": "gatekeeper",
+    "keeper": "gatekeeper",
+    "accused": "suspect",
+    "perpetrator": "suspect",
+    "criminal": "suspect",
+    "target": "suspect",
+    "gang_leader": "suspect",
+    "smuggler": "suspect",
+    "bystander": "witness",
+    "observer": "witness",
+    "passerby": "witness",
+    "worker": "witness",
+    "laborer": "witness",
+    "labourer": "witness",
+    "wireworker": "witness",
+    "dockworker": "witness",
+    "factory_worker": "witness",
+    "engineer": "witness",
+    "technician": "witness",
+    "mechanic": "witness",
+    "resident": "witness",
+    "citizen": "witness",
+    "employee": "witness",
+}
+
+_SOURCE_TYPE_MAP: dict[str, str] = {
+    "physical": "physical",
+    "physical_evidence": "physical",
+    "physical evidence": "physical",
+    "object": "physical",
+    "artifact": "physical",
+    "item": "physical",
+    "evidence": "physical",
+    "trace": "physical",
+    "material": "physical",
+    "document": "document",
+    "document_record": "document",
+    "written": "document",
+    "record": "document",
+    "paper": "document",
+    "file": "document",
+    "ledger": "document",
+    "note": "document",
+    "log": "document",
+    "memo": "document",
+    "report": "document",
+    "testimony": "testimony",
+    "witness_account": "testimony",
+    "witness account": "testimony",
+    "witness_statement": "testimony",
+    "witness statement": "testimony",
+    "overheard_conversation": "testimony",
+    "overheard conversation": "testimony",
+    "overheard": "testimony",
+    "account": "testimony",
+    "statement": "testimony",
+    "interview": "testimony",
+    "confession": "testimony",
+    "hearsay": "testimony",
+    "rumor": "testimony",
+    "rumour": "testimony",
+    "conversation": "testimony",
+    "composite": "composite",
+    "combined": "composite",
+    "mixed": "composite",
+    "multi": "composite",
+}
+
+_RELIABILITY_MAP: dict[str, str] = {
+    "credible": "credible",
+    "solid": "credible",
+    "reliable": "credible",
+    "confirmed": "credible",
+    "verified": "credible",
+    "high": "credible",
+    "certain": "credible",
+    "uncertain": "uncertain",
+    "unverified": "uncertain",
+    "dubious": "uncertain",
+    "questionable": "uncertain",
+    "medium": "uncertain",
+    "moderate": "uncertain",
+    "possible": "uncertain",
+    "unstable": "unstable",
+    "low": "unstable",
+    "shaky": "unstable",
+    "unreliable": "unstable",
+    "weak": "unstable",
+    "suspected": "unstable",
+}
+
+_OUTCOME_STATUS_MAP: dict[str, str] = {
+    "solved": "solved",
+    "resolved": "solved",
+    "complete": "solved",
+    "completed": "solved",
+    "closed": "solved",
+    "success": "solved",
+    "successful": "solved",
+    "partially solved": "partially solved",
+    "partial": "partially solved",
+    "partially_solved": "partially solved",
+    "partially_resolved": "partially solved",
+    "partial resolution": "partially solved",
+    "incomplete": "partially solved",
+    "inconclusive": "partially solved",
+    "failed": "failed",
+    "failure": "failed",
+    "escalated": "failed",
+    "unsolved": "failed",
+    "abandoned": "failed",
+    "unresolved": "failed",
+    "cold": "failed",
+    "dead end": "failed",
+}
+
+
+def _normalize(
+    value: str,
+    mapping: dict[str, str],
+    field_name: str,
+    allowed: set[str],
+    default: str | None = None,
+) -> str:
+    """Return the canonical value for *value* using *mapping*.
+
+    Resolution order:
+    1. Exact key lookup (underscores and spaces treated as equivalent).
+    2. Prefix match: value starts with a known key or vice-versa.
+    3. Substring match: any known key appears inside the value.
+    4. *default* if provided.
+    5. Raise ValueError.
+    """
+    v_under = value.strip().lower().replace("-", "_").replace(" ", "_")
+    v_space = value.strip().lower()
+
+    if v_under in mapping:
+        return mapping[v_under]
+    if v_space in mapping:
+        return mapping[v_space]
+
+    # Prefix match
+    for key, canonical in mapping.items():
+        if v_under.startswith(key) or key.startswith(v_under):
+            return canonical
+
+    # Substring match — key appears anywhere inside the value
+    for key, canonical in mapping.items():
+        if key in v_under:
+            return canonical
+
+    if default is not None:
+        return default
+
+    raise ValueError(f"{field_name} must be one of {allowed}, got {value!r}")
+
+
 class GeneratedNPCSpec(LanternCityModel):
     name: str
     role_category: str
@@ -65,10 +266,7 @@ class GeneratedNPCSpec(LanternCityModel):
     @classmethod
     def _v_role(cls, v: str) -> str:
         allowed = {"informant", "gatekeeper", "authority", "suspect", "witness"}
-        v = v.strip().lower()
-        if v not in allowed:
-            raise ValueError(f"role_category must be one of {allowed}")
-        return v
+        return _normalize(v, _ROLE_CATEGORY_MAP, "role_category", allowed, default="witness")
 
     @field_validator("location_type_hint")
     @classmethod
@@ -103,10 +301,7 @@ class GeneratedClueSpec(LanternCityModel):
     @classmethod
     def _v_source_type(cls, v: str) -> str:
         allowed = {"physical", "document", "testimony", "composite"}
-        v = v.strip().lower()
-        if v not in allowed:
-            raise ValueError(f"source_type must be one of {allowed}")
-        return v
+        return _normalize(v, _SOURCE_TYPE_MAP, "source_type", allowed, default="physical")
 
     @field_validator("clue_text")
     @classmethod
@@ -117,10 +312,7 @@ class GeneratedClueSpec(LanternCityModel):
     @classmethod
     def _v_reliability(cls, v: str) -> str:
         allowed = {"credible", "uncertain", "unstable"}
-        v = v.strip().lower()
-        if v not in allowed:
-            raise ValueError(f"starting_reliability must be one of {allowed}")
-        return v
+        return _normalize(v, _RELIABILITY_MAP, "starting_reliability", allowed)
 
     @field_validator("location_type_hint")
     @classmethod
@@ -152,9 +344,7 @@ class GeneratedResolutionPath(LanternCityModel):
     @classmethod
     def _v_outcome_status(cls, v: str) -> str:
         allowed = {"solved", "partially solved", "failed"}
-        if v not in allowed:
-            raise ValueError(f"outcome_status must be one of {allowed}")
-        return v
+        return _normalize(v, _OUTCOME_STATUS_MAP, "outcome_status", allowed)
 
     @field_validator("summary_text")
     @classmethod
@@ -194,9 +384,7 @@ class CaseGenerationResult(LanternCityModel):
     @classmethod
     def _v_intensity(cls, v: str) -> str:
         allowed = {"low", "medium", "high"}
-        if v not in allowed:
-            raise ValueError(f"intensity must be one of {allowed}")
-        return v
+        return _normalize(v, _INTENSITY_MAP, "intensity", allowed)
 
     @field_validator("opening_hook")
     @classmethod

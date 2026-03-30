@@ -233,6 +233,7 @@ class ActiveWorkingSet(RuntimeModel):
     scene_id: str | None = None
     npc_ids: list[str] = Field(default_factory=list)
     clue_ids: list[str] = Field(default_factory=list)
+    visited_district_ids: list[str] = Field(default_factory=list)
     cached_summaries: dict[str, str] = Field(default_factory=dict)
 
 
