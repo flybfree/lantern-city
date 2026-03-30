@@ -400,26 +400,37 @@ class LanternCityApp:
             d_name = district.name if district else pos.district_id
             lines.append(f"You are in: {d_name}{loc_label}")
             lines.append("")
+        # Build a map of district_id → case titles that involve it
+        cases = [
+            obj
+            for cid in city.active_case_ids
+            if isinstance(obj := self.store.load_object("CaseState", cid), CaseState)
+        ]
+        district_cases: dict[str, list[str]] = {}
+        for case in cases:
+            for did in case.involved_district_ids:
+                district_cases.setdefault(did, []).append(case.title)
+
         for did in city.district_ids:
             district = self._district(did)
             if district is None:
                 continue
             loc_count = len(district.visible_locations)
             npc_count = len(district.relevant_npc_ids)
+            case_tag = ""
+            if did in district_cases:
+                case_tag = f"  [CASE: {', '.join(district_cases[did])}]"
             lines.append(
                 f"  {district.name} [{district.lantern_condition}]"
-                f"  — {loc_count} location(s), {npc_count} known NPC(s)  ({did})"
+                f"  — {loc_count} location(s), {npc_count} known NPC(s)  ({did}){case_tag}"
             )
         lines.append("")
         lines.append("Active cases:")
-        cases = [
-            obj
-            for cid in city.active_case_ids
-            if isinstance(obj := self.store.load_object("CaseState", cid), CaseState)
-        ]
         if cases:
             for case in cases:
+                involved = ", ".join(case.involved_district_ids) or "—"
                 lines.append(f"  [{case.status}] {case.title}  ({case.id})")
+                lines.append(f"    Involved districts: {involved}")
         else:
             lines.append("  None")
         return "\n".join(lines)
@@ -484,6 +495,16 @@ class LanternCityApp:
         district = self._district(district_id)
         if district is None:
             raise LookupError(f"District not found: {district_id}")
+
+        # Build a set of clue IDs in active cases whose involved districts include this one
+        city = self._city()
+        case_clue_ids: set[str] = set()
+        if city:
+            for cid in city.active_case_ids:
+                case = self.store.load_object("CaseState", cid)
+                if isinstance(case, CaseState) and district_id in case.involved_district_ids:
+                    case_clue_ids.update(case.known_clue_ids)
+
         lines = [
             f"=== {district.name} ===",
             f"Lanterns: {district.lantern_condition}",
@@ -500,7 +521,9 @@ class LanternCityApp:
                 if npc is not None:
                     npc_names.append(f"{npc.name} ({nid})")
             npc_str = ", ".join(npc_names) if npc_names else "—"
-            lines.append(f"  {loc.name}  ({loc_id})")
+            clues_here = len([c for c in loc.clue_ids if c in case_clue_ids])
+            clue_tag = f"  [!] {clues_here} clue(s) of interest" if clues_here else ""
+            lines.append(f"  {loc.name}  ({loc_id}){clue_tag}")
             lines.append(f"    NPCs: {npc_str}")
             if loc.scene_objects:
                 lines.append(f"    Objects: {', '.join(loc.scene_objects)}")

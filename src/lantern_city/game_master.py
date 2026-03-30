@@ -210,10 +210,42 @@ class GameMaster:
             for cid in city.active_case_ids
         ]
         active_cases = [c for c in active_cases if isinstance(c, CaseState)]
+        acquired_clue_ids: set[str] = set(pos.clue_ids) if pos is not None else set()
         if active_cases:
             lines.append("\nActive cases:")
             for case in active_cases:
                 lines.append(f"  {case.title} ({case.id})  [{case.status}]")
+                lines.append(f"    Objective: {case.objective_summary}")
+                if case.involved_district_ids:
+                    lines.append(f"    Involved districts: {', '.join(case.involved_district_ids)}")
+
+                # List locations in involved districts that have uninvestigated case clues
+                uninvestigated: list[str] = []
+                case_clue_ids = set(case.known_clue_ids)
+                for did in case.involved_district_ids:
+                    district = self.app._district(did)
+                    if district is None:
+                        continue
+                    for loc_id in district.visible_locations:
+                        loc = self.app.store.load_object("LocationState", loc_id)
+                        if not isinstance(loc, LocationState):
+                            continue
+                        remaining = [c for c in loc.clue_ids if c in case_clue_ids and c not in acquired_clue_ids]
+                        if remaining:
+                            uninvestigated.append(f"{loc.name} ({loc_id})")
+                if uninvestigated:
+                    lines.append(
+                        f"    Locations with uninvestigated clues: {', '.join(uninvestigated)}"
+                    )
+
+                # Key NPCs involved in this case
+                key_npcs: list[str] = []
+                for npc_id in case.involved_npc_ids:
+                    npc = self.app._npc(npc_id)
+                    if npc:
+                        key_npcs.append(f"{npc.name} ({npc_id})")
+                if key_npcs:
+                    lines.append(f"    Key NPCs: {', '.join(key_npcs)}")
         else:
             lines.append("\nActive cases: none")
 
