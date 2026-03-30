@@ -147,45 +147,197 @@ class TurnLogger:
         return []
 
 
+_PICKER_CSS = """
+CityPickerScreen, GenerateCityScreen {
+    align: center middle;
+    background: $background;
+}
+#picker-box, #gen-box {
+    width: 72;
+    height: auto;
+    max-height: 85vh;
+    background: $surface;
+    border: solid $primary;
+    padding: 1 2;
+}
+#picker-title, #gen-title {
+    text-align: center;
+    color: $warning;
+    padding-bottom: 1;
+}
+#picker-hint {
+    color: $text-muted;
+    padding-bottom: 1;
+}
+#city-list {
+    height: auto;
+    max-height: 16;
+    border: solid $primary-darken-2;
+    margin-bottom: 1;
+}
+#picker-buttons, #gen-buttons {
+    height: 3;
+    align: right middle;
+    margin-top: 1;
+}
+#picker-buttons Button, #gen-buttons Button {
+    margin-left: 1;
+}
+#gen-box Label {
+    margin-top: 1;
+    color: $text-muted;
+}
+#gen-box Input {
+    margin-bottom: 0;
+}
+#gen-log {
+    height: 12;
+    border: solid $primary-darken-2;
+    margin-top: 1;
+}
+#gen-error {
+    color: $error;
+    margin-top: 1;
+}
+"""
+
+
+class GenerateCityScreen(Screen[Path | None]):
+    """Form screen for generating a new city via LLM."""
+
+    CSS = _PICKER_CSS
+
+    BINDINGS = [
+        Binding("ctrl+c", "cancel", "Cancel", priority=True),
+        Binding("escape", "cancel", "Cancel"),
+    ]
+
+    def __init__(self, saved_url: str = "", saved_model: str = "") -> None:
+        super().__init__()
+        self._saved_url = saved_url
+        self._saved_model = saved_model
+        self._generating = False
+
+    def compose(self) -> ComposeResult:
+        default_name = f"city-{datetime.datetime.now():%Y%m%d-%H%M}.sqlite3"
+        with Vertical(id="gen-box"):
+            yield Static("[bold yellow]GENERATE NEW CITY[/bold yellow]", markup=True, id="gen-title")
+            yield Label("Concept  [dim](optional — describe the city's theme)[/dim]", markup=True)
+            yield Input(placeholder="e.g. steampunk port city run by criminal gangs", id="inp-concept")
+            yield Label("Output file")
+            yield Input(value=default_name, id="inp-output")
+            yield Label("LLM URL")
+            yield Input(value=self._saved_url, placeholder="http://localhost:11434/v1", id="inp-url")
+            yield Label("Model")
+            yield Input(value=self._saved_model, placeholder="llama3", id="inp-model")
+            yield RichLog(highlight=False, markup=True, wrap=True, id="gen-log")
+            yield Static("", markup=True, id="gen-error")
+            with Horizontal(id="gen-buttons"):
+                yield Button("Cancel", variant="default", id="btn-gen-cancel")
+                yield Button("Generate", variant="primary", id="btn-gen-start")
+
+    def on_mount(self) -> None:
+        self.query_one("#inp-concept", Input).focus()
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "btn-gen-cancel":
+            if not self._generating:
+                self.dismiss(None)
+        elif event.button.id == "btn-gen-start":
+            self._start_generation()
+
+    def action_cancel(self) -> None:
+        if not self._generating:
+            self.dismiss(None)
+
+    def _start_generation(self) -> None:
+        url = self.query_one("#inp-url", Input).value.strip()
+        model = self.query_one("#inp-model", Input).value.strip()
+        output_name = self.query_one("#inp-output", Input).value.strip()
+        concept = self.query_one("#inp-concept", Input).value.strip()
+
+        error_widget = self.query_one("#gen-error", Static)
+        if not url or not model:
+            error_widget.update("[red]LLM URL and Model are required.[/red]")
+            return
+        if not output_name:
+            error_widget.update("[red]Output filename is required.[/red]")
+            return
+        output = Path(output_name)
+        if output.exists():
+            error_widget.update(f"[red]{output_name} already exists — choose a different name.[/red]")
+            return
+
+        error_widget.update("")
+        self._generating = True
+        self._set_inputs_disabled(True)
+        log = self.query_one("#gen-log", RichLog)
+        log.clear()
+
+        def on_progress(msg: str) -> None:
+            self.call_from_thread(
+                lambda m=msg: self.query_one("#gen-log", RichLog).write(
+                    Text.from_markup(f"[dim]{escape(m)}[/dim]")
+                )
+            )
+
+        async def _run() -> Path | str:
+            from lantern_city.app import LanternCityApp
+            from lantern_city.llm_client import OpenAICompatibleConfig
+            from lantern_city.cli import _save_llm_config
+            llm_config = OpenAICompatibleConfig(base_url=url, model=model)
+            _save_llm_config(str(output), url, model)
+            game = LanternCityApp(output, llm_config=llm_config)
+            try:
+                await asyncio.to_thread(
+                    game.start_new_game, concept or None, on_progress
+                )
+                return output
+            except Exception as exc:
+                try:
+                    output.unlink()
+                except OSError:
+                    pass
+                return f"ERROR: {exc}"
+
+        async def _worker() -> Path | str:
+            return await _run()
+
+        self.run_worker(_worker(), exclusive=True, name="gen")
+
+    def on_worker_state_changed(self, event: Worker.StateChanged) -> None:
+        if event.worker.name != "gen":
+            return
+        if event.state not in (WorkerState.SUCCESS, WorkerState.ERROR, WorkerState.CANCELLED):
+            return
+
+        self._generating = False
+        self._set_inputs_disabled(False)
+        error_widget = self.query_one("#gen-error", Static)
+
+        if event.state == WorkerState.SUCCESS:
+            result = event.worker.result
+            if isinstance(result, Path):
+                error_widget.update("[green]City generated.[/green]")
+                self.dismiss(result)
+            else:
+                error_widget.update(f"[red]{escape(str(result))}[/red]")
+        else:
+            error_widget.update(f"[red]Generation failed: {escape(str(event.worker.error))}[/red]")
+
+    def _set_inputs_disabled(self, disabled: bool) -> None:
+        for widget_id in ("#inp-concept", "#inp-output", "#inp-url", "#inp-model",
+                          "#btn-gen-start", "#btn-gen-cancel"):
+            try:
+                self.query_one(widget_id).disabled = disabled  # type: ignore[union-attr]
+            except Exception:
+                pass
+
+
 class CityPickerScreen(Screen[Path | None]):
     """Full-screen city selection shown when no --db argument is given."""
 
-    CSS = """
-    CityPickerScreen {
-        align: center middle;
-        background: $background;
-    }
-    #picker-box {
-        width: 70;
-        height: auto;
-        max-height: 80vh;
-        background: $surface;
-        border: solid $primary;
-        padding: 1 2;
-    }
-    #picker-title {
-        text-align: center;
-        color: $warning;
-        padding-bottom: 1;
-    }
-    #picker-hint {
-        color: $text-muted;
-        padding-bottom: 1;
-    }
-    #city-list {
-        height: auto;
-        max-height: 20;
-        border: solid $primary-darken-2;
-        margin-bottom: 1;
-    }
-    #picker-buttons {
-        height: 3;
-        align: right middle;
-    }
-    #btn-open {
-        margin-left: 1;
-    }
-    """
+    CSS = _PICKER_CSS
 
     BINDINGS = [
         Binding("ctrl+c", "quit", "Quit", priority=True),
@@ -202,7 +354,7 @@ class CityPickerScreen(Screen[Path | None]):
             yield Static("[bold yellow]LANTERN CITY[/bold yellow]", markup=True, id="picker-title")
             if self._cities:
                 yield Static(
-                    "Select a city file to open, or quit and run [bold]generate_city.py[/bold] to create a new one.",
+                    "Select a city to open, or generate a new one.",
                     markup=True,
                     id="picker-hint",
                 )
@@ -213,27 +365,43 @@ class CityPickerScreen(Screen[Path | None]):
                 yield ListView(*items, id="city-list")
             else:
                 yield Static(
-                    "[yellow]No city files found.[/yellow]\n\n"
-                    "Create one with:\n"
-                    "  [dim]uv run python generate_city.py --url URL --model NAME[/dim]\n\n"
-                    "Then relaunch the TUI.",
+                    "[dim]No city files found in this directory.[/dim]",
                     markup=True,
                     id="picker-hint",
                 )
             with Horizontal(id="picker-buttons"):
                 yield Button("Quit", variant="default", id="btn-quit")
+                yield Button("Generate New City", variant="warning", id="btn-generate")
                 if self._cities:
                     yield Button("Open", variant="primary", id="btn-open")
 
     def on_mount(self) -> None:
         if self._cities:
             self.query_one("#city-list", ListView).focus()
+        else:
+            self.query_one("#btn-generate", Button).focus()
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "btn-quit":
             self.dismiss(None)
         elif event.button.id == "btn-open":
             self._open_selected()
+        elif event.button.id == "btn-generate":
+            self._open_generate_screen()
+
+    def _open_generate_screen(self) -> None:
+        # Pre-fill LLM config from any existing city's saved config
+        saved_url, saved_model = "", ""
+        for city_path in self._cities:
+            cfg = _load_llm_config(str(city_path))
+            if cfg:
+                saved_url, saved_model = cfg.base_url, cfg.model
+                break
+        def _on_generated(result: Path | None) -> None:
+            if result is not None:
+                self.dismiss(result)
+            # If None (cancelled), just return to the picker
+        self.app.push_screen(GenerateCityScreen(saved_url, saved_model), _on_generated)
 
     def action_open_selected(self) -> None:
         self._open_selected()
@@ -926,17 +1094,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--llm-model", dest="llm_model", default=None)
     args = parser.parse_args(argv)
 
-    # Resolve database path — show picker if not specified
+    # Resolve database path — always show picker if not specified
     if args.database_path is None:
         cities = _scan_cities(Path.cwd())
-        if len(cities) == 1:
-            # Only one city — open it automatically
-            db_path = str(cities[0])
-        else:
-            chosen = _run_city_picker(cities)
-            if chosen is None:
-                return 0
-            db_path = str(chosen)
+        chosen = _run_city_picker(cities)
+        if chosen is None:
+            return 0
+        db_path = str(chosen)
     else:
         db_path = args.database_path
 
