@@ -131,6 +131,13 @@ def bootstrap_generated_case(
             "priority": path.priority,
         })
 
+    # --- Resolve hook NPC ---
+    hook_npc_id = ""
+    if result.hook_npc_index is not None and result.hook_npc_index in npc_id_map:
+        hook_npc_id = npc_id_map[result.hook_npc_index]
+    elif npc_id_map:
+        hook_npc_id = npc_id_map[0]  # Default to first NPC if not specified
+
     # --- Create CaseState ---
     case = CaseState(
         id=case_id,
@@ -145,6 +152,7 @@ def bootstrap_generated_case(
         open_questions=[s.clue_text[:80] for s in result.clue_specs[:3]],
         objective_summary=result.objective_summary,
         discovery_hook=result.opening_hook,
+        hook_npc_id=hook_npc_id,
         resolution_conditions=resolution_conditions,
     )
 

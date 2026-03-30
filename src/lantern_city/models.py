@@ -145,6 +145,7 @@ class CaseState(RuntimeModel):
     fallout_summary: str | None = None
     # Generated case fields
     discovery_hook: str = ""
+    hook_npc_id: str = ""  # NPC who introduces the case through conversation; empty = district-entry trigger
     resolution_conditions: list[JSONObject] = Field(default_factory=list)
 
 

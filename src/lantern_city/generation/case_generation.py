@@ -369,6 +369,11 @@ class CaseGenerationResult(LanternCityModel):
     opening_hook: str
     objective_summary: str
     involved_district_ids: list[str] = Field(min_length=1, max_length=5)
+    hook_npc_index: int | None = Field(
+        default=None,
+        description="0-based index into npc_specs of the NPC who introduces this case through conversation. "
+                    "Set to 0 (first NPC) unless a different NPC is more naturally the hook.",
+    )
     npc_specs: list[GeneratedNPCSpec] = Field(min_length=1, max_length=5)
     clue_specs: list[GeneratedClueSpec] = Field(min_length=3, max_length=8)
     resolution_paths: list[GeneratedResolutionPath] = Field(min_length=2, max_length=5)
@@ -500,8 +505,13 @@ class CaseGenerator:
             "- resolution_paths: priority 1 = best outcome checked first, "
             "higher numbers = worse fallback paths\n"
             "- required_clue_indices: indices into clue_specs that must be credible for this path\n"
-            "- opening_hook: 1-2 sentences surfaced as a rumor or observation when the player "
-            "enters one of the involved districts — civic, grounded, no magic\n"
+            "- hook_npc_index: 0-based index into npc_specs of the NPC who will introduce this case "
+            "to the player through conversation. Pick the NPC who would most naturally bring this "
+            "problem to a stranger's attention — typically a worried witness or reluctant informant. "
+            "Default to 0 (first NPC) if unsure.\n"
+            "- opening_hook: 1-3 sentences that the hook NPC speaks (or implies) when approached — "
+            "written as natural dialogue or overheard words, grounded, civic, no magic. "
+            "This is what surfaces the case when the player talks to the hook NPC.\n"
             f"- {COMMON_AVOID_RULES}\n\n"
             f"request_id: {request.request_id}\n\n"
             f"JSON Schema:\n{json.dumps(CaseGenerationResult.model_json_schema(), indent=2)}"

@@ -18,13 +18,22 @@ A case begins when the player receives a meaningful problem, such as:
 - a civic inconsistency
 - a Missingness-related anomaly
 
-A case can start through:
-- direct assignment
-- rumor discovery
-- overheard conversation
-- faction pressure
-- accidental discovery
-- a consequence of a previous case
+### How cases are introduced
+
+Every generated case has a **hook NPC** — the person who brings the problem to the player's
+attention through conversation. The case stays latent (invisible to the player) until the player
+talks to that NPC.
+
+When the player talks to the hook NPC, the engine:
+1. Lets the conversation unfold naturally
+2. Has the NPC speak or imply the `opening_hook` (written as natural dialogue or observation)
+3. Activates the case and appends a `[New case: ...]` notice to the response
+
+The GM is instructed to weave the hook into the conversation when the opportunity arises —
+not as an interruption, but as what that NPC would naturally say to a stranger who stopped to listen.
+
+Authored (handcrafted) cases without a hook NPC fall back to the old behavior:
+activating automatically when the player enters one of the involved districts.
 
 ## Case Components
 

@@ -249,6 +249,29 @@ class GameMaster:
         else:
             lines.append("\nActive cases: none")
 
+        # Hook NPC signal — if the player is currently talking to an NPC who introduces a latent case,
+        # tell the GM so it can weave the case hook naturally into the conversation.
+        current_npc_ids: list[str] = pos.npc_ids if pos is not None else []
+        if current_npc_ids:
+            all_cases = [
+                self.app.store.load_object("CaseState", cid)
+                for cid in city.active_case_ids
+            ]
+            for case in all_cases:
+                if not isinstance(case, CaseState):
+                    continue
+                if case.status != "latent":
+                    continue
+                if case.hook_npc_id and case.hook_npc_id in current_npc_ids:
+                    hook_npc = self.app._npc(case.hook_npc_id)
+                    npc_name = hook_npc.name if hook_npc else case.hook_npc_id
+                    lines.append(
+                        f"\n[GM NOTE] {npc_name} is the person who will bring the case "
+                        f'"{case.title}" to the player\'s attention. '
+                        f"If the conversation opens naturally, have them say or imply: "
+                        f"{case.discovery_hook}"
+                    )
+
         # Clue count
         clue_count = len(pos.clue_ids) if pos is not None else 0
         lines.append(f"\nAcquired clues: {clue_count}")

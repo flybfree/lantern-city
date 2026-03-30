@@ -241,9 +241,13 @@ class LanternCityApp:
             city = self._require_city()
             propagation_notices = self._propagate_missingness(city, district, updated_at=TURN_TWO)
 
+        case_hook = self._check_npc_case_hook(npc_id, updated_at=TURN_TWO)
+
         lines = [outcome.response.narrative_text]
         if clue is not None:
             lines.append(f'[Clue — {clue.reliability}] "{clue.clue_text}"')
+        if case_hook:
+            lines.append(f"\n{case_hook}")
         lines.extend(propagation_notices)
         return "\n".join(lines)
 
@@ -400,11 +404,12 @@ class LanternCityApp:
             d_name = district.name if district else pos.district_id
             lines.append(f"You are in: {d_name}{loc_label}")
             lines.append("")
-        # Build a map of district_id → case titles that involve it
+        # Build a map of district_id → case titles that involve it (only non-latent cases)
         cases = [
             obj
             for cid in city.active_case_ids
             if isinstance(obj := self.store.load_object("CaseState", cid), CaseState)
+            and obj.status != "latent"
         ]
         district_cases: dict[str, list[str]] = {}
         for case in cases:
@@ -502,7 +507,11 @@ class LanternCityApp:
         if city:
             for cid in city.active_case_ids:
                 case = self.store.load_object("CaseState", cid)
-                if isinstance(case, CaseState) and district_id in case.involved_district_ids:
+                if (
+                    isinstance(case, CaseState)
+                    and case.status != "latent"
+                    and district_id in case.involved_district_ids
+                ):
                     case_clue_ids.update(case.known_clue_ids)
 
         lines = [
@@ -663,7 +672,10 @@ class LanternCityApp:
         return f"[Passing: {encounter.archetype}]\n{narrative}"
 
     def _check_case_discovery(self, district_id: str, *, updated_at: str) -> str | None:
-        """Transition any latent case to active when the player enters one of its districts."""
+        """Transition latent cases to active on district entry — only for cases without a hook NPC.
+
+        Cases with hook_npc_id are introduced through NPC conversation, not district entry.
+        """
         city = self._require_city()
         for case_id in city.active_case_ids:
             case = self.store.load_object("CaseState", case_id)
@@ -671,11 +683,33 @@ class LanternCityApp:
                 continue
             if case.status != "latent":
                 continue
+            if case.hook_npc_id:
+                continue  # This case is introduced via NPC conversation
             if district_id not in case.involved_district_ids:
                 continue
             updated_case = transition_case(case, "active", updated_at=updated_at)
             self.store.save_object(updated_case)
             return case.discovery_hook or f"A new lead has emerged: {case.title}"
+        return None
+
+    def _check_npc_case_hook(self, npc_id: str, *, updated_at: str) -> str | None:
+        """Activate a latent case when the player talks to its hook NPC.
+
+        Returns a formatted narrative hook string, or None if this NPC introduces no case.
+        """
+        city = self._require_city()
+        for case_id in city.active_case_ids:
+            case = self.store.load_object("CaseState", case_id)
+            if not isinstance(case, CaseState):
+                continue
+            if case.status != "latent":
+                continue
+            if case.hook_npc_id != npc_id:
+                continue
+            updated_case = transition_case(case, "active", updated_at=updated_at)
+            self.store.save_object(updated_case)
+            hook_text = case.discovery_hook or f"Something about this case demands your attention: {case.title}"
+            return f"[New case: {case.title}]\n{hook_text}"
         return None
 
     def _generate_latent_cases(self, count: int = 2) -> None:
