@@ -110,16 +110,63 @@ The player has improved the situation, but not fully resolved it.
 ### Failed
 The player lost the opportunity, but the city moved on with consequences.
 
+## Case Resolution
+
+The player triggers resolution with `case <case_id>`. The engine evaluates the
+case's resolution paths in priority order (priority 1 = best outcome) and picks
+the first path where the player has enough **credible** clues.
+
+### Resolution paths
+
+Each case is generated with 2–5 resolution paths, each specifying:
+- `outcome_status` — `solved`, `partially solved`, or `failed`
+- `required_credible_count` — minimum number of credible clues needed
+- `required_clue_ids` — specific clues that must be credible
+- `summary_text` — narrative description of the outcome
+- `fallout_text` — city consequences
+
+The engine walks paths from priority 1 downward. The last path is the fallback
+(always reached if no earlier path is satisfied).
+
+### Outcome tiers
+
+| Outcome | Condition | Gains |
+|---|---|---|
+| `solved` | Enough credible clues for the best path | +reputation, +city_impact, +clue_mastery |
+| `partially solved` | Some evidence but not enough for `solved` | +lantern_understanding, +clue_mastery |
+| `failed` | No path satisfied; fallback applied | +lantern_understanding (small) |
+
+### What determines credibility
+
+Clue reliability is shaped by the lantern condition of the district where the
+clue was found, and by NPC dialogue. A clue starts as `credible`, `uncertain`,
+or `unstable`. Talking to relevant NPCs can raise reliability; contradicting
+testimony can lower it.
+
+**Reliability is what gates outcomes — not clue count.**
+
+### Improving outcomes before resolving
+
+Before typing `case <case_id>`:
+1. Check `clues` — identify which are `uncertain` or `unstable`
+2. `inspect` locations in the involved districts to find more clues
+3. `talk` to NPCs connected to the case — dialogue can raise clue reliability
+4. Re-enter districts with better lantern conditions if possible
+
+### Closure is permanent
+
+Cases close on resolution and cannot be re-opened. A `partially solved` case
+does not become `solved` later. When the active case pool drops below two open
+cases, the engine generates a new latent case to replace closed ones.
+
 ## Case Closure
 
-A case should close when one of these is true:
-- the core mystery has been resolved
-- the player has exhausted the meaningful available avenues
-- the outcome has become stable enough that the story can move on
-- the case has escalated into a new case or larger arc
+A case closes when one of these is true:
+- the player resolves it with `case <case_id>`
+- the core mystery has been addressed (any outcome)
 
 Closure does not always mean happy ending.
-It means the case has reached a new stable state.
+It means the case has reached a new stable state and the city moves on.
 
 ## How Many Cases Can Be Active
 

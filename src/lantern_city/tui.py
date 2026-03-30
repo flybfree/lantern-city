@@ -77,8 +77,22 @@ freely; inspect locations to gather evidence.
 Clues have a [bold]reliability[/bold] rating shaped by the lanterns around them. \
 A clue found under bright lanterns is solid. One found in a flickering or dim \
 district may be uncertain or contradicted. NPCs can clarify testimony — or \
-muddy it further. When you have enough solid evidence, you can attempt to \
-resolve a case.
+muddy it further.
+
+[bold]── Resolving a case ─────────────────────────────────[/bold]
+
+When you are ready, type [bold]case <case_id>[/bold] to attempt resolution. The engine \
+walks the case's resolution paths from best to worst and picks the first one where \
+you have enough [bold]credible[/bold] clues.
+
+  [bold]solved[/bold]           — enough credible evidence; full outcome and gains
+  [bold]partially solved[/bold] — some evidence, incomplete picture; smaller gains
+  [bold]failed[/bold]           — insufficient evidence; case closes with consequences
+
+[yellow]Cases are closed permanently on resolution — you cannot re-open them.[/yellow] \
+To reach [bold]solved[/bold] instead of [bold]partially solved[/bold]: inspect more locations, \
+talk to NPCs to raise uncertain clues to credible, and check [bold]clues[/bold] before \
+you commit. Clue reliability is what gates outcomes, not clue count.
 
 [bold]── Controls ─────────────────────────────────────────[/bold]
 

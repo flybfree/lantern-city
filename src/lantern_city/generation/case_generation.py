@@ -40,7 +40,8 @@ def _bounded(value: str, *, field_name: str, max_length: int) -> str:
     if not value:
         raise ValueError(f"{field_name} must be non-empty")
     if len(value) > max_length:
-        raise ValueError(f"{field_name} must be under {max_length} chars")
+        # Truncate at a word boundary rather than hard-rejecting
+        value = value[:max_length].rsplit(" ", 1)[0].rstrip(" .,;:")
     return value
 
 
@@ -194,6 +195,8 @@ _OUTCOME_STATUS_MAP: dict[str, str] = {
     "partial resolution": "partially solved",
     "incomplete": "partially solved",
     "inconclusive": "partially solved",
+    "mixed": "partially solved",
+    "bittersweet": "partially solved",
     "failed": "failed",
     "failure": "failed",
     "escalated": "failed",
@@ -344,7 +347,7 @@ class GeneratedResolutionPath(LanternCityModel):
     @classmethod
     def _v_outcome_status(cls, v: str) -> str:
         allowed = {"solved", "partially solved", "failed"}
-        return _normalize(v, _OUTCOME_STATUS_MAP, "outcome_status", allowed)
+        return _normalize(v, _OUTCOME_STATUS_MAP, "outcome_status", allowed, default="partially solved")
 
     @field_validator("summary_text")
     @classmethod
