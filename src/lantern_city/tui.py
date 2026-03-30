@@ -287,10 +287,13 @@ class GenerateCityScreen(Screen[Path | None]):
         self._log(f"Starting generation → {output_name}")
         if concept:
             self._log(f"Concept: {concept}")
+        self._log(f"LLM: {url}  model: {model}")
+        log_path = output.with_suffix(".generation.log")
+        self._log(f"Log: {log_path}")
         self._log("")
 
         def on_progress(msg: str) -> None:
-            self.call_from_thread(
+            self.app.call_from_thread(
                 lambda m=msg: self.query_one("#gen-log", RichLog).write(m)
             )
 
@@ -298,15 +301,26 @@ class GenerateCityScreen(Screen[Path | None]):
             from lantern_city.app import LanternCityApp
             from lantern_city.llm_client import OpenAICompatibleConfig
             from lantern_city.cli import _save_llm_config
+
+            log_file = open(log_path, "w", encoding="utf-8")  # noqa: SIM115
+
+            def _emit(msg: str) -> None:
+                on_progress(msg)
+                log_file.write(msg + "\n")
+                log_file.flush()
+
             llm_config = OpenAICompatibleConfig(base_url=url, model=model)
             _save_llm_config(str(output), url, model)
             game = LanternCityApp(output, llm_config=llm_config)
             try:
                 await asyncio.to_thread(
-                    game.start_new_game, concept or None, on_progress
+                    game.start_new_game, concept or None, _emit
                 )
+                log_file.close()
                 return output
             except Exception as exc:
+                log_file.write(f"\nERROR: {exc}\n")
+                log_file.close()
                 try:
                     output.unlink()
                 except OSError:

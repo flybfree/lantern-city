@@ -82,34 +82,43 @@ def main() -> int:
             print("  Provide --url and --model, or configure once via the TUI (Ctrl+S).")
             return 1
 
-    print(f"Output:  {output}")
-    print(f"LLM:     {llm_config.base_url}  model: {llm_config.model}")
-    if args.concept:
-        print(f"Concept: {args.concept}")
-    print()
+    log_path = output.with_suffix(".generation.log")
+    log_file = open(log_path, "w", encoding="utf-8")  # noqa: SIM115
 
-    def on_progress(msg: str) -> None:
+    def _emit(msg: str) -> None:
         print(f"  {msg}", flush=True)
+        log_file.write(msg + "\n")
+        log_file.flush()
+
+    header = (
+        f"Output:  {output}\n"
+        f"LLM:     {llm_config.base_url}  model: {llm_config.model}\n"
+        + (f"Concept: {args.concept}\n" if args.concept else "")
+    )
+    print(header)
+    log_file.write(header + "\n")
 
     game = LanternCityApp(output, llm_config=llm_config)
     try:
         result = game.start_new_game(
             concept=args.concept or None,
-            on_progress=on_progress,
+            on_progress=_emit,
         )
     except Exception as exc:
-        print(f"\nERROR during generation: {exc}")
-        # Clean up partial DB so the user can retry cleanly
+        msg = f"\nERROR during generation: {exc}"
+        print(msg)
+        log_file.write(msg + "\n")
+        log_file.close()
         try:
             output.unlink()
         except OSError:
             pass
         return 1
 
-    print()
-    print(result)
-    print()
-    print(f"City saved to: {output}")
+    footer = f"\n{result}\n\nCity saved to: {output}\nLog: {log_path}"
+    print(footer)
+    log_file.write(footer + "\n")
+    log_file.close()
     print(f"Open it with:  lantern-city-tui --db {output}")
     return 0
 

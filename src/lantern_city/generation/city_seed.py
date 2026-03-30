@@ -419,6 +419,7 @@ def _assemble(framework: dict[str, Any], cases_npcs: dict[str, Any]) -> dict[str
 
     district_ids = [str(d.get("id", "")) for d in districts]
     faction_ids = [str(f.get("id", "")) for f in factions]
+    npc_ids = [str(n.get("id", "")) for n in npcs]
 
     # Normalise cross-references so validation doesn't fail on LLM ID inconsistencies
     factions = _fix_faction_influences(factions, district_ids)
@@ -429,6 +430,10 @@ def _assemble(framework: dict[str, Any], cases_npcs: dict[str, Any]) -> dict[str
         ) or district_ids[:1]
         case["involved_faction_ids"] = _fix_id_list(
             list(case.get("involved_faction_ids", [])), faction_ids, "faction_"
+        )
+        # key_npc_ids must reference actual NPC ids — drop any that don't resolve
+        case["key_npc_ids"] = _fix_id_list(
+            list(case.get("key_npc_ids", [])), npc_ids, "npc_"
         )
 
     for npc in npcs:
