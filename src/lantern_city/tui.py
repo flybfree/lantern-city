@@ -848,6 +848,8 @@ class LanternCityTUI(App[None]):
                 result: str = event.worker.result  # type: ignore[assignment]
                 self.query_one("#narrative", RichLog).write(escape(result))
                 self._turn_log.record(mode="CMD", player_input=self._last_input, response=result)
+                if name == "cmd:start":
+                    self._show_case_opening_hook()
         elif event.state == WorkerState.ERROR:
             err_text = f"Error: {event.worker.error}"
             self.query_one("#narrative", RichLog).write(Text(err_text, style="bold red"))
@@ -879,6 +881,39 @@ class LanternCityTUI(App[None]):
         else:
             cmd.placeholder = "enter command…"
 
+    def _show_case_opening_hook(self) -> None:
+        """After game start, print the active case context as a narrative prompt."""
+        try:
+            city = self._game._city()
+            if city is None:
+                return
+            for case_id in city.active_case_ids:
+                case = self._game.store.load_object("CaseState", case_id)
+                if not isinstance(case, CaseState):
+                    continue
+                if case.status == "latent":
+                    continue
+                parts: list[str] = []
+                if case.objective_summary:
+                    parts.append(f"[italic]{escape(case.objective_summary)}[/italic]")
+                if case.discovery_hook:
+                    parts.append(escape(case.discovery_hook))
+                if case.involved_district_ids:
+                    district_name = (
+                        case.involved_district_ids[0]
+                        .replace("district_", "")
+                        .replace("_", " ")
+                        .title()
+                    )
+                    parts.append(f"[dim]Start in: {district_name}[/dim]")
+                if parts:
+                    self.query_one("#narrative", RichLog).write(
+                        Text.from_markup("\n".join(parts))
+                    )
+                break
+        except Exception:
+            pass
+
     def _refresh_surroundings(self) -> None:
         if self._info_mode == "stats":
             panel = self._build_stats_panel()
@@ -893,7 +928,7 @@ class LanternCityTUI(App[None]):
         except Exception:
             return _HELP_TEXT
 
-        if city is None or pos is None:
+        if city is None:
             return (
                 "[dim]Ctrl+G — GM/CMD  |  Ctrl+R — map/stats  |  Ctrl+S — LLM[/dim]\n\n"
                 "Type [bold]start[/bold] to begin a new game."
@@ -902,16 +937,17 @@ class LanternCityTUI(App[None]):
         lines: list[str] = []
 
         # Sync visited districts from persisted store + current session
-        self._visited_districts.update(pos.visited_district_ids)
-        if pos.district_id:
-            self._visited_districts.add(pos.district_id)
+        if pos is not None:
+            self._visited_districts.update(pos.visited_district_ids)
+            if pos.district_id:
+                self._visited_districts.add(pos.district_id)
 
         # Mode indicator
         mode = "[bold green]GM[/bold green]" if self._gm_mode else "[bold yellow]CMD[/bold yellow]"
         lines.append(f"Mode: {mode}  [dim](Ctrl+G)[/dim]\n")
 
         # ── Current location detail ──────────────────────────────────
-        if pos.district_id:
+        if pos is not None and pos.district_id:
             district = self._game._district(pos.district_id)
             if district:
                 lc = district.lantern_condition
@@ -938,13 +974,29 @@ class LanternCityTUI(App[None]):
                                 lines.append(f"      · {escape(npc.name)}")
                     lines.append("")
 
+        # ── Latent lead districts (undiscovered cases) ───────────────
+        latent_lead_districts: set[str] = set()
+        for cid in city.active_case_ids:
+            try:
+                lc_case = self._game.store.load_object("CaseState", cid)
+                if not isinstance(lc_case, CaseState) or lc_case.status != "latent":
+                    continue
+                if lc_case.hook_npc_id:
+                    npc = self._game._npc(lc_case.hook_npc_id)
+                    if npc and npc.district_id:
+                        latent_lead_districts.add(npc.district_id)
+                else:
+                    latent_lead_districts.update(lc_case.involved_district_ids)
+            except Exception:
+                pass
+
         # ── All districts ────────────────────────────────────────────
         lines.append("[bold]City Districts:[/bold]")
         for did in city.district_ids:
             district = self._game._district(did)
             if not district:
                 continue
-            is_current = did == pos.district_id
+            is_current = pos is not None and did == pos.district_id
             was_visited = did in self._visited_districts
             lc = district.lantern_condition
             lantern_color = {
@@ -963,15 +1015,21 @@ class LanternCityTUI(App[None]):
             else:
                 name_markup = f"[dim]{escape(district.name)}[/dim] [dim]— unexplored[/dim]"
 
+            if did in latent_lead_districts and not is_current:
+                name_markup += " [dim yellow]◆[/dim yellow]"
+
             lines.append(f"  [{lantern_color}]{lantern_icon}[/{lantern_color}] {name_markup}")
         lines.append("")
 
-        # ── Active cases ─────────────────────────────────────────────
+        # ── Active cases (latent cases are hidden until discovered) ──
         active_cases = [
             self._game.store.load_object("CaseState", cid)
             for cid in city.active_case_ids
         ]
-        active_cases = [c for c in active_cases if isinstance(c, CaseState)]
+        active_cases = [
+            c for c in active_cases
+            if isinstance(c, CaseState) and c.status != "latent"
+        ]
         if active_cases:
             lines.append("[bold]Cases:[/bold]")
             for case in active_cases:
@@ -980,11 +1038,33 @@ class LanternCityTUI(App[None]):
             lines.append("")
 
         # ── Clues ────────────────────────────────────────────────────
-        clue_count = len(pos.clue_ids)
+        clue_count = len(pos.clue_ids) if pos is not None else 0
         clue_color = "green" if clue_count > 0 else "dim"
         lines.append(f"[bold]Clues:[/bold] [{clue_color}]{clue_count} acquired[/{clue_color}]")
+        credible_count = 0
         if clue_count > 0:
+            uncertain_count = 0
+            for clue_id in (pos.clue_ids if pos is not None else []):
+                try:
+                    clue = self._game.store.load_object("ClueState", clue_id)
+                    if isinstance(clue, ClueState):
+                        if clue.reliability in ("credible", "solid"):
+                            credible_count += 1
+                        elif clue.reliability != "contradicted":
+                            uncertain_count += 1
+                except Exception:
+                    pass
+            lines.append(
+                f"  [green]{credible_count} credible[/green]"
+                f"  [dim]{uncertain_count} uncertain[/dim]"
+            )
             lines.append("  [dim]say 'show my clues'[/dim]")
+
+        # ── What to do next ──────────────────────────────────────────
+        hint = _next_step_hint(active_cases, clue_count, credible_count)
+        if hint:
+            lines.append("")
+            lines.append(f"[bold]Next:[/bold] [dim]{escape(hint)}[/dim]")
 
         return "\n".join(lines)
 
@@ -1100,6 +1180,21 @@ class LanternCityTUI(App[None]):
             self._update_status_raw("  |  ".join(parts))
         except Exception:
             self._update_status_raw(f"Lantern City  {mode}")
+
+
+def _next_step_hint(active_cases: list, clue_count: int, credible_count: int) -> str:
+    """Return a one-line "what to do next" suggestion based on current game state."""
+    if not active_cases:
+        return "Enter a district to find leads."
+    case = active_cases[0]
+    if clue_count == 0:
+        if case.involved_district_ids:
+            name = case.involved_district_ids[0].replace("district_", "").replace("_", " ").title()
+            return f"Inspect locations or talk to NPCs in {name}."
+        return "Inspect locations to find clues."
+    if credible_count == 0:
+        return "Talk to NPCs to raise clue reliability before resolving."
+    return f"Ready to attempt resolution — type: case {case.id}"
 
 
 # ------------------------------------------------------------------

@@ -13,7 +13,8 @@ from lantern_city.generation.writing_guardrails import (
     NPC_DIALOGUE_RULES,
     TONE_SYSTEM_BLOCK,
 )
-from lantern_city.models import LanternCityModel, PlayerRequest
+from lantern_city.models import LanternCityModel, PlayerProgressState, PlayerRequest
+from lantern_city.progression import can_pressure_npc, can_use_informal_access
 
 
 class NPCResponseGenerationError(RuntimeError):
@@ -238,6 +239,7 @@ class NPCResponseGenerationRequest:
     active_slice: ActiveSlice
     player_request: PlayerRequest
     npc_id: str | None = None
+    progress: PlayerProgressState | None = None
 
     def __post_init__(self) -> None:
         if not self.request_id.strip():
@@ -285,12 +287,30 @@ class NPCResponseGenerationRequest:
             if "input_text" in entry and "npc_response" in entry
         ]
 
+        player_standing: dict[str, object] | None = None
+        if self.progress is not None:
+            player_standing = {
+                "reputation": self.progress.reputation.tier,
+                "access": self.progress.access.tier,
+                "leverage": self.progress.leverage.tier,
+                "can_enter_restricted_spaces": can_use_informal_access(
+                    self.progress, required_access="restricted"
+                ),
+                "can_enter_trusted_spaces": can_use_informal_access(
+                    self.progress, required_access="trusted"
+                ),
+                "can_pressure_npc": can_pressure_npc(
+                    self.progress, evidence_strength="documented"
+                ),
+            }
+
         return {
             "task_type": "npc_response",
             "request_id": self.request_id,
             "player_input": self.player_request.input_text,
             "player_intent": self.player_request.intent,
             "conversation_history": history,
+            "player_standing": player_standing,
             "npc": {
                 "id": npc.id,
                 "name": npc.name,
@@ -488,6 +508,12 @@ class NPCResponseGenerator:
             "- generate exactly one reply turn plus structured effects\n"
             "- if the NPC refuses, the refusal should still be informative or redirective\n"
             "- preserve the game's conversation model: useful quickly, easy to leave\n"
+            "- if player_standing is present, use it to gate what the NPC can grant:\n"
+            "  access tier Public/Restricted: NPC cannot grant entry to trusted or secret spaces;\n"
+            "  reputation Wary/Known: NPC stays guarded, does not volunteer sensitive details;\n"
+            "  reputation Respected+: NPC may offer more direct cooperation;\n"
+            "  can_pressure_npc=false: deflect any pressure attempt without rewarding it;\n"
+            "  can_pressure_npc=true: the NPC may yield or bargain if leverage is applied;\n"
             f"{NPC_DIALOGUE_RULES}\n"
             f"{COMMON_AVOID_RULES}\n\n"
             f"Request:\n{json.dumps(request.to_payload(), indent=2, sort_keys=True)}\n\n"

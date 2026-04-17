@@ -198,6 +198,7 @@ class LanternCityApp:
 
     def talk_to_npc(self, npc_id: str, prompt: str) -> str:
         city = self._require_city()
+        progress = self._require_progress()
         outcome = handle_player_request(
             self.store,
             city_id=city.id,
@@ -208,6 +209,7 @@ class LanternCityApp:
                 updated_at=TURN_TWO,
             ),
             llm_config=self.llm_config,
+            progress=progress,
         )
         npc = outcome.active_slice.npcs[0]
         self._save_position(npc_ids=[npc.id])
@@ -253,6 +255,7 @@ class LanternCityApp:
 
     def inspect_location(self, location_id: str, object_name: str | None = None) -> str:
         city = self._require_city()
+        progress = self._require_progress()
         outcome = handle_player_request(
             self.store,
             city_id=city.id,
@@ -263,6 +266,7 @@ class LanternCityApp:
                 updated_at=TURN_THREE,
             ),
             llm_config=self.llm_config,
+            progress=progress,
         )
         district = outcome.active_slice.district
         if district is None:
@@ -380,6 +384,24 @@ class LanternCityApp:
             if len(non_terminal) < 2:
                 self._generate_latent_cases(count=1)
 
+        # Surface a latent case if no active investigations remain after resolution
+        city = self._require_city()
+        still_active = [
+            obj
+            for cid in city.active_case_ids
+            if isinstance(obj := self.store.load_object("CaseState", cid), CaseState)
+            and obj.status not in {"solved", "partially solved", "failed", "latent"}
+        ]
+        surfaced_hook: str | None = None
+        if not still_active:
+            for cid in city.active_case_ids:
+                next_case = self.store.load_object("CaseState", cid)
+                if isinstance(next_case, CaseState) and next_case.status == "latent":
+                    activated = transition_case(next_case, "active", updated_at=TURN_FOUR)
+                    self.store.save_object(activated)
+                    surfaced_hook = activated.discovery_hook or f"A new lead has emerged: {activated.title}"
+                    break
+
         lines = [
             f"Case status: {updated_case.status}",
             f"Resolution: {path.replace('_', ' ')}",
@@ -388,6 +410,8 @@ class LanternCityApp:
             f"Access: {progress.access.score} ({progress.access.tier})",
             f"Leverage: {progress.leverage.score} ({progress.leverage.tier})",
         ]
+        if surfaced_hook:
+            lines.append(f"\n{surfaced_hook}")
         return "\n".join(lines)
 
     def overview(self) -> str:

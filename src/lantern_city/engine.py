@@ -21,7 +21,7 @@ from lantern_city.generation.npc_response import (
     NPCResponseGenerator,
 )
 from lantern_city.llm_client import OpenAICompatibleConfig, OpenAICompatibleLLMClient
-from lantern_city.models import ClueState, DistrictState, NPCState, PlayerRequest, RuntimeModel
+from lantern_city.models import ClueState, DistrictState, NPCState, PlayerProgressState, PlayerRequest, RuntimeModel
 from lantern_city.orchestrator import orchestrate_request
 from lantern_city.response import ResponsePayload, compose_response
 from lantern_city.store import SQLiteStore
@@ -52,6 +52,7 @@ def handle_player_request(
     city_id: str,
     request: PlayerRequest,
     llm_config: OpenAICompatibleConfig | None = None,
+    progress: PlayerProgressState | None = None,
 ) -> EngineOutcome:
     orchestrated = orchestrate_request(store, city_id=city_id, request=request)
     state_update_engine = StateUpdateEngine(store)
@@ -69,10 +70,11 @@ def handle_player_request(
             orchestrated.active_slice,
             request,
             llm_config=llm_config,
+            progress=progress,
         )
     elif orchestrated.intent == "inspect_location":
         response = _build_inspection_response(
-            orchestrated.active_slice, request, llm_config=llm_config
+            orchestrated.active_slice, request, llm_config=llm_config, progress=progress
         )
         changed_objects = []
     elif orchestrated.intent == "case_progression":
@@ -134,12 +136,13 @@ def _handle_npc_conversation(
     request: PlayerRequest,
     *,
     llm_config: OpenAICompatibleConfig | None = None,
+    progress: PlayerProgressState | None = None,
 ) -> tuple[ResponsePayload, list[str]]:
     npc = _require_npc(active_slice)
     clue = _first_clue(active_slice.clues)
     case_title = None if active_slice.case is None else active_slice.case.title
 
-    npc_line = _generate_npc_dialogue(active_slice, request, llm_config=llm_config)
+    npc_line = _generate_npc_dialogue(active_slice, request, llm_config=llm_config, progress=progress)
     if npc_line is None:
         public_identity = f", {npc.public_identity}" if npc.public_identity else ""
         quoted_input = request.input_text or "Ask a careful question."
@@ -185,12 +188,13 @@ def _build_inspection_response(
     request: PlayerRequest,
     *,
     llm_config: OpenAICompatibleConfig | None = None,
+    progress: PlayerProgressState | None = None,
 ) -> ResponsePayload:
     location_name = "the area"
     if active_slice.location is not None:
         location_name = active_slice.location.name
 
-    prose = _generate_inspection_prose(active_slice, request, llm_config=llm_config)
+    prose = _generate_inspection_prose(active_slice, request, llm_config=llm_config, progress=progress)
     if prose is not None:
         narrative_text, learned, next_actions = prose
     else:
@@ -212,6 +216,7 @@ def _generate_inspection_prose(
     request: PlayerRequest,
     *,
     llm_config: OpenAICompatibleConfig | None,
+    progress: PlayerProgressState | None = None,
 ) -> tuple[str, list[str], list[str]] | None:
     if llm_config is None:
         return None
@@ -221,6 +226,7 @@ def _generate_inspection_prose(
             request_id=request.id,
             active_slice=active_slice,
             player_request=request,
+            progress=progress,
         )
         result = LocationInspectionGenerator(llm_client).generate(gen_request)
         llm_client.close()
@@ -330,6 +336,7 @@ def _generate_npc_dialogue(
     request: PlayerRequest,
     *,
     llm_config: OpenAICompatibleConfig | None,
+    progress: PlayerProgressState | None = None,
 ) -> str | None:
     if llm_config is None or not active_slice.npcs:
         return None
@@ -340,6 +347,7 @@ def _generate_npc_dialogue(
             active_slice=active_slice,
             player_request=request,
             npc_id=request.target_id,
+            progress=progress,
         )
         result = NPCResponseGenerator(llm_client).generate(gen_request, max_tokens=2000)
         llm_client.close()

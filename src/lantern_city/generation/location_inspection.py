@@ -12,7 +12,8 @@ from lantern_city.generation.writing_guardrails import (
     SCENE_NARRATION_RULES,
     TONE_SYSTEM_BLOCK,
 )
-from lantern_city.models import LanternCityModel, PlayerRequest
+from lantern_city.models import LanternCityModel, PlayerProgressState, PlayerRequest
+from lantern_city.progression import current_unlocks
 
 
 class LocationInspectionError(RuntimeError):
@@ -82,6 +83,7 @@ class LocationInspectionRequest:
     request_id: str
     active_slice: ActiveSlice
     player_request: PlayerRequest
+    progress: PlayerProgressState | None = None
 
     def __post_init__(self) -> None:
         if not self.request_id.strip():
@@ -137,6 +139,17 @@ class LocationInspectionRequest:
             for npc in self.active_slice.npcs
         ]
 
+        player_standing: dict[str, object] | None = None
+        if self.progress is not None:
+            lu = self.progress.lantern_understanding
+            cm = self.progress.clue_mastery
+            player_standing = {
+                "lantern_understanding": lu.tier,
+                "clue_mastery": cm.tier,
+                "interpretation_note": current_unlocks("lantern_understanding", lu.score)[-1],
+                "clue_reading_note": current_unlocks("clue_mastery", cm.score)[-1],
+            }
+
         return {
             "task_type": "location_inspect",
             "request_id": self.request_id,
@@ -145,6 +158,7 @@ class LocationInspectionRequest:
             "present_npcs": npc_payload,
             "relevant_clues": clue_payload,
             "focus_object": self.focus_object,
+            "player_standing": player_standing,
             "constraints": {
                 "scene_text_required": True,
                 "notable_details_count": "1 to 4",
@@ -192,6 +206,15 @@ class LocationInspectionGenerator:
             f"{TONE_SYSTEM_BLOCK}"
         )
         schema = LocationInspectionResult.model_json_schema()
+        standing_rule = (
+            "- if player_standing is present, calibrate depth to player_standing.interpretation_note:\n"
+            "  low lantern_understanding (Untrained/Informed): only note obvious anomalies, "
+            "do not explain causes or patterns;\n"
+            "  mid (Literate): may note that conditions seem unusual and could affect reliability;\n"
+            "  high (Expert/Deep Expert): may explain distortion type and investigative implications;\n"
+            "  low clue_mastery (Basic/Competent): clue_connection should be a simple observation;\n"
+            "  high clue_mastery (Sharp+): clue_connection may draw explicit investigative conclusions\n"
+        )
         if request.focus_object:
             task_line = (
                 f'Describe what the player observes when closely examining "{request.focus_object}" '
@@ -205,6 +228,7 @@ class LocationInspectionGenerator:
                 "- do not describe the broader room; stay on the object\n"
                 "- do not invent facts not supported by the provided context\n"
                 "- keep scene_text to 2-3 sentences\n"
+                f"{standing_rule}"
                 f"{SCENE_NARRATION_RULES}\n"
                 f"{COMMON_AVOID_RULES}\n"
             )
@@ -217,6 +241,7 @@ class LocationInspectionGenerator:
                 "- lantern_effect should describe how the current lantern state shapes what is visible\n"
                 "- do not invent facts not supported by the provided context\n"
                 "- keep scene_text to 2-4 sentences\n"
+                f"{standing_rule}"
                 f"{SCENE_NARRATION_RULES}\n"
                 f"{COMMON_AVOID_RULES}\n"
             )
