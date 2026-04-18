@@ -481,16 +481,35 @@ class LanternCityApp:
         pos = self._load_position()
         if pos is None or not pos.clue_ids:
             return "No clues acquired yet."
-        lines = [f"=== Acquired Clues ({len(pos.clue_ids)} tracked) ==="]
+
+        # Build case_id → title lookup
+        city = self._city()
+        case_titles: dict[str, str] = {}
+        if city is not None:
+            for cid in city.active_case_ids:
+                c = self.store.load_object("CaseState", cid)
+                if isinstance(c, CaseState):
+                    case_titles[cid] = c.title
+
+        # Group clues by their first related case (or "General" if none)
+        buckets: dict[str, list[ClueState]] = {}
         unresolved: list[str] = []
         for clue_id in pos.clue_ids:
             clue = self.store.load_object("ClueState", clue_id)
             if not isinstance(clue, ClueState):
                 unresolved.append(clue_id)
                 continue
-            label = _clue_label(clue_id)
-            lines.append(f"  [{clue.reliability}] {label}")
-            lines.append(f"    {clue.clue_text}")
+            bucket_key = clue.related_case_ids[0] if clue.related_case_ids else "__general__"
+            buckets.setdefault(bucket_key, []).append(clue)
+
+        lines = [f"=== Acquired Clues ({len(pos.clue_ids)} tracked) ==="]
+        for bucket_key, bucket_clues in buckets.items():
+            case_label = case_titles.get(bucket_key, "General") if bucket_key != "__general__" else "General"
+            lines.append(f"\n  — {case_label} —")
+            for clue in bucket_clues:
+                lines.append(f"  [{clue.reliability}] {clue.source_id.replace('_', ' ').title()}")
+                lines.append(f"    {clue.clue_text}")
+
         if unresolved:
             lines.append(f"\n  [dim] {len(unresolved)} tracked ID(s) not yet resolved:")
             for uid in unresolved:
