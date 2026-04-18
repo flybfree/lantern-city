@@ -199,6 +199,10 @@ class LanternCityApp:
     def talk_to_npc(self, npc_id: str, prompt: str) -> str:
         city = self._require_city()
         progress = self._require_progress()
+
+        # Peek at any pending case hook BEFORE generation so the LLM can weave it in
+        pending_case, case_intro_text = self._peek_npc_case_hook(npc_id)
+
         outcome = handle_player_request(
             self.store,
             city_id=city.id,
@@ -210,6 +214,7 @@ class LanternCityApp:
             ),
             llm_config=self.llm_config,
             progress=progress,
+            case_intro_text=case_intro_text,
         )
         npc = outcome.active_slice.npcs[0]
         self._save_position(npc_ids=[npc.id])
@@ -243,13 +248,16 @@ class LanternCityApp:
             city = self._require_city()
             propagation_notices = self._propagate_missingness(city, district, updated_at=TURN_TWO)
 
-        case_hook = self._check_npc_case_hook(npc_id, updated_at=TURN_TWO)
+        # Activate the pending case now that dialogue has surfaced it
+        if pending_case is not None:
+            activated = transition_case(pending_case, "active", updated_at=TURN_TWO)
+            self.store.save_object(activated)
 
         lines = [outcome.response.narrative_text]
         if clue is not None:
-            lines.append(f'[Clue — {clue.reliability}] "{clue.clue_text}"')
-        if case_hook:
-            lines.append(f"\n{case_hook}")
+            lines.append(f'[Noted: {_clue_label(clue.id)} — {clue.reliability}]')
+        if pending_case is not None:
+            lines.append(f'[{pending_case.title}]')
         lines.extend(propagation_notices)
         return "\n".join(lines)
 
@@ -735,6 +743,25 @@ class LanternCityApp:
             hook_text = case.discovery_hook or f"Something about this case demands your attention: {case.title}"
             return f"[New case: {case.title}]\n{hook_text}"
         return None
+
+    def _peek_npc_case_hook(self, npc_id: str) -> tuple[CaseState | None, str | None]:
+        """Look up any latent case this NPC introduces — without activating it.
+
+        Returns (case, discovery_hook_text) so the caller can pass the hook text to the
+        LLM before dialogue is generated, then activate the case afterwards.
+        """
+        city = self._require_city()
+        for case_id in city.active_case_ids:
+            case = self.store.load_object("CaseState", case_id)
+            if not isinstance(case, CaseState):
+                continue
+            if case.status != "latent":
+                continue
+            if case.hook_npc_id != npc_id:
+                continue
+            hook_text = case.discovery_hook or None
+            return case, hook_text
+        return None, None
 
     def _generate_latent_cases(self, count: int = 2) -> None:
         """Call the LLM to generate new latent cases and bootstrap them into the world."""

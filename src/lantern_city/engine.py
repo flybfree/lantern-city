@@ -53,6 +53,7 @@ def handle_player_request(
     request: PlayerRequest,
     llm_config: OpenAICompatibleConfig | None = None,
     progress: PlayerProgressState | None = None,
+    case_intro_text: str | None = None,
 ) -> EngineOutcome:
     orchestrated = orchestrate_request(store, city_id=city_id, request=request)
     state_update_engine = StateUpdateEngine(store)
@@ -71,6 +72,7 @@ def handle_player_request(
             request,
             llm_config=llm_config,
             progress=progress,
+            case_intro_text=case_intro_text,
         )
     elif orchestrated.intent == "inspect_location":
         response = _build_inspection_response(
@@ -137,12 +139,13 @@ def _handle_npc_conversation(
     *,
     llm_config: OpenAICompatibleConfig | None = None,
     progress: PlayerProgressState | None = None,
+    case_intro_text: str | None = None,
 ) -> tuple[ResponsePayload, list[str]]:
     npc = _require_npc(active_slice)
     clue = _first_clue(active_slice.clues)
     case_title = None if active_slice.case is None else active_slice.case.title
 
-    npc_line = _generate_npc_dialogue(active_slice, request, llm_config=llm_config, progress=progress)
+    npc_line = _generate_npc_dialogue(active_slice, request, llm_config=llm_config, progress=progress, case_intro_text=case_intro_text)
     if npc_line is None:
         public_identity = f", {npc.public_identity}" if npc.public_identity else ""
         quoted_input = request.input_text or "Ask a careful question."
@@ -337,6 +340,7 @@ def _generate_npc_dialogue(
     *,
     llm_config: OpenAICompatibleConfig | None,
     progress: PlayerProgressState | None = None,
+    case_intro_text: str | None = None,
 ) -> str | None:
     if llm_config is None or not active_slice.npcs:
         return None
@@ -348,6 +352,7 @@ def _generate_npc_dialogue(
             player_request=request,
             npc_id=request.target_id,
             progress=progress,
+            case_intro_text=case_intro_text,
         )
         result = NPCResponseGenerator(llm_client).generate(gen_request, max_tokens=2000)
         llm_client.close()

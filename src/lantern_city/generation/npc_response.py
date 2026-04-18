@@ -240,6 +240,7 @@ class NPCResponseGenerationRequest:
     player_request: PlayerRequest
     npc_id: str | None = None
     progress: PlayerProgressState | None = None
+    case_intro_text: str | None = None
 
     def __post_init__(self) -> None:
         if not self.request_id.strip():
@@ -311,6 +312,7 @@ class NPCResponseGenerationRequest:
             "player_intent": self.player_request.intent,
             "conversation_history": history,
             "player_standing": player_standing,
+            "case_intro_hook": self.case_intro_text,
             "npc": {
                 "id": npc.id,
                 "name": npc.name,
@@ -508,6 +510,13 @@ class NPCResponseGenerator:
             "- generate exactly one reply turn plus structured effects\n"
             "- if the NPC refuses, the refusal should still be informative or redirective\n"
             "- preserve the game's conversation model: useful quickly, easy to leave\n"
+            "- if relevant_clues are present, work the substance of applicable clues naturally into the NPC's words — "
+            "the player should learn the information through what the NPC says, not from a separate label; "
+            "do not quote clue_text verbatim; let the NPC express it in their own voice and register\n"
+            "- if case_intro_hook is present, the NPC is introducing this case organically through conversation — "
+            "weave the substance of the hook naturally into the NPC's dialogue in their own voice; "
+            "do not announce it as a system event or use phrases like 'a new case' or 'lead'; "
+            "the player should feel like the NPC is confiding in them, not handing them an assignment\n"
             "- if player_standing is present, use it to gate what the NPC can grant:\n"
             "  access tier Public/Restricted: NPC cannot grant entry to trusted or secret spaces;\n"
             "  reputation Wary/Known: NPC stays guarded, does not volunteer sensitive details;\n"
