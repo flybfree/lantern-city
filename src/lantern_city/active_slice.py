@@ -15,6 +15,9 @@ from lantern_city.models import (
     SceneState,
 )
 from lantern_city.store import SQLiteStore
+from lantern_city.log import get_logger
+
+log = get_logger(__name__)
 
 RequestIntent = Literal[
     "district_entry",
@@ -102,6 +105,7 @@ def build_active_slice(
     intent: RequestIntent | None = None,
 ) -> ActiveSlice:
     resolved_intent = intent or classify_request_intent(request)
+    log.debug("build_active_slice intent=%r target=%r", resolved_intent, request.target_id)
     city = _load_required(store, "CityState", city_id, CityState)
     request_target = _resolve_request_target(request, resolved_intent)
     _raise_for_unresolved_explicit_target(request, request_target)

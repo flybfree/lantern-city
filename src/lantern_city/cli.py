@@ -77,8 +77,10 @@ def main(argv: list[str] | None = None, *, stdout: TextIO | None = None) -> int:
     if hasattr(sys.stderr, "reconfigure"):
         sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
+    from lantern_city.log import configure as _configure_logging
     parser = build_parser()
     args = parser.parse_args(argv)
+    _configure_logging(args.database_path)
 
     if args.llm_url and args.llm_model:
         _save_llm_config(args.database_path, args.llm_url, args.llm_model)

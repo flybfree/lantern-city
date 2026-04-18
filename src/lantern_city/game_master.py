@@ -15,7 +15,10 @@ from dataclasses import dataclass, field
 
 from lantern_city.app import LanternCityApp
 from lantern_city.llm_client import OpenAICompatibleLLMClient
+from lantern_city.log import get_logger
 from lantern_city.models import CaseState, LocationState
+
+log = get_logger(__name__)
 
 
 _INTERPRET_SYSTEM = """\
@@ -43,13 +46,16 @@ ID rules — CRITICAL:
 - NEVER pass a district_id to "go" or "inspect" — those only accept location_ids
 - Use ONLY IDs that appear verbatim in the context block below
 
-Other rules:
-- Output 0–3 commands total.
+Output rules — CRITICAL:
+- The "commands" array contains 0–3 elements. Each element is ONE complete command string.
+- A command string includes the verb AND all arguments in a single string.
+  CORRECT:   ["enter district_golden_pagoda"]
+  WRONG:     ["enter", "district_golden_pagoda"]
 - For talk commands, carry the player's own phrasing into the prompt argument.
 - If the player asks a question answerable from context (e.g. "what cases do I have?"),
   output 0 commands — the narrator will answer from context alone.
 - If the requested action is impossible, output 0 commands.
-- Return JSON matching the schema exactly. No extra keys.
+- Return JSON matching the schema exactly. No extra keys. No reasoning text.
 """
 
 _NARRATE_SYSTEM = """\
@@ -87,10 +93,14 @@ class GameMaster:
 
     def process(self, player_input: str) -> str:
         """Full GM turn: interpret → execute → narrate. Returns prose narrative."""
+        log.debug("GM.process input=%r", player_input)
         context = self._build_context()
         commands = self._interpret(player_input, context)
+        log.debug("GM.interpret commands=%r", commands)
         results = self._execute(commands)
+        log.debug("GM.execute results=%r", results)
         narrative = self._narrate(player_input, commands, results, context)
+        log.debug("GM.narrate prose=%r", narrative[:120])
         self._append_history(player_input, narrative)
         return narrative
 
@@ -316,7 +326,8 @@ class GameMaster:
             )
             commands = result.get("commands", [])
             if isinstance(commands, list):
-                return [str(c).strip() for c in commands if str(c).strip()]
+                raw = [str(c).strip() for c in commands if str(c).strip()]
+                return _rejoin_split_commands(raw)
         except Exception:
             pass
         return []
@@ -410,6 +421,34 @@ class GameMaster:
             summary = turn["gm"][:120].replace("\n", " ")
             lines.append(f"  GM: {summary}…")
         return "\n".join(lines) + "\n\n"
+
+
+_KNOWN_VERBS: frozenset[str] = frozenset(
+    ["start", "overview", "look", "enter", "go", "inspect", "talk", "clues", "case"]
+)
+
+_TOOL_CALL_RE = re.compile(r"[`{}<|]|tool_call|```", re.IGNORECASE)
+
+
+def _rejoin_split_commands(commands: list[str]) -> list[str]:
+    """Recombine commands the LLM split into [verb, arg] pairs, and drop garbage strings."""
+    result: list[str] = []
+    i = 0
+    while i < len(commands):
+        token = commands[i]
+        # Drop any string that looks like a leaked tool-call or reasoning artifact
+        if _TOOL_CALL_RE.search(token) or len(token) > 200:
+            i += 1
+            continue
+        if token.lower() in _KNOWN_VERBS and i + 1 < len(commands):
+            next_token = commands[i + 1]
+            if not _TOOL_CALL_RE.search(next_token) and next_token.lower() not in _KNOWN_VERBS:
+                result.append(f"{token} {next_token}")
+                i += 2
+                continue
+        result.append(token)
+        i += 1
+    return result
 
 
 _THINK_TAG_RE = re.compile(r"<think>.*?</think>", re.DOTALL | re.IGNORECASE)

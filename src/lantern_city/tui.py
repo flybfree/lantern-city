@@ -1435,6 +1435,7 @@ def _run_city_picker(cities: list[Path]) -> Path | None:
 
 def main(argv: list[str] | None = None) -> int:
     import sys
+    from lantern_city.log import configure as _configure_logging
 
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -1462,6 +1463,7 @@ def main(argv: list[str] | None = None) -> int:
     else:
         llm_config = _load_llm_config(db_path)
 
+    _configure_logging(db_path)
     game = LanternCityApp(Path(db_path), llm_config=llm_config)
 
     gm: GameMaster | None = None

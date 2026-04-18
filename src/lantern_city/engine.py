@@ -25,6 +25,9 @@ from lantern_city.models import ClueState, DistrictState, NPCState, PlayerProgre
 from lantern_city.orchestrator import orchestrate_request
 from lantern_city.response import ResponsePayload, compose_response
 from lantern_city.store import SQLiteStore
+from lantern_city.log import get_logger
+
+log = get_logger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -55,7 +58,9 @@ def handle_player_request(
     progress: PlayerProgressState | None = None,
     case_intro_text: str | None = None,
 ) -> EngineOutcome:
+    log.debug("handle_player_request intent=%r target=%r", request.intent, request.target_id)
     orchestrated = orchestrate_request(store, city_id=city_id, request=request)
+    log.debug("handle_player_request resolved_intent=%r", orchestrated.intent)
     state_update_engine = StateUpdateEngine(store)
 
     if orchestrated.intent == "district_entry":

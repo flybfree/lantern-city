@@ -44,6 +44,9 @@ from lantern_city.models import (
 from lantern_city.progression import apply_progress_change, get_tier
 from lantern_city.seed_schema import validate_city_seed
 from lantern_city.store import SQLiteStore
+from lantern_city.log import get_logger
+
+log = get_logger(__name__)
 
 TURN_ZERO = "turn_0"
 TURN_ONE = "turn_1"
@@ -119,6 +122,7 @@ class LanternCityApp:
         )
 
     def run_command(self, command: str) -> str:
+        log.debug("run_command %r", command)
         parts = shlex.split(command)
         if not parts:
             raise ValueError("Command cannot be empty")
@@ -146,6 +150,7 @@ class LanternCityApp:
         raise ValueError(f"Unsupported command: {command}")
 
     def enter_district(self, district_id: str) -> str:
+        log.debug("enter_district %r", district_id)
         city = self._require_city()
         outcome = handle_player_request(
             self.store,
@@ -708,6 +713,7 @@ class LanternCityApp:
 
         Cases with hook_npc_id are introduced through NPC conversation, not district entry.
         """
+        log.debug("_check_case_discovery district=%r", district_id)
         city = self._require_city()
         for case_id in city.active_case_ids:
             case = self.store.load_object("CaseState", case_id)
@@ -719,6 +725,7 @@ class LanternCityApp:
                 continue  # This case is introduced via NPC conversation
             if district_id not in case.involved_district_ids:
                 continue
+            log.debug("_check_case_discovery activating case=%r", case_id)
             updated_case = transition_case(case, "active", updated_at=updated_at)
             self.store.save_object(updated_case)
             return case.discovery_hook or f"A new lead has emerged: {case.title}"
@@ -1660,6 +1667,7 @@ class LanternCityApp:
         return obj if isinstance(obj, ActiveWorkingSet) else None
 
     def _save_position(self, **updates: object) -> None:
+        log.debug("_save_position %r", updates)
         city = self._require_city()
         pos = self._load_position()
         if pos is None:
@@ -1707,6 +1715,7 @@ class LanternCityApp:
             return raw
         # Exact match first
         if self._district(raw) is not None:
+            log.debug("_resolve_district_id %r → exact match", raw)
             return raw
         # Fuzzy: compare lowercased name tokens against the raw string
         raw_lower = raw.lower().replace("_", " ").replace("-", " ")
@@ -1728,7 +1737,9 @@ class LanternCityApp:
             if score > best_score:
                 best_score = score
                 best = did
-        return best if best is not None and best_score > 0 else raw
+        resolved = best if best is not None and best_score > 0 else raw
+        log.debug("_resolve_district_id %r → %r (score=%d)", raw, resolved, best_score)
+        return resolved
 
     def _district(self, district_id: str) -> DistrictState | None:
         district = self.store.load_object("DistrictState", district_id)
