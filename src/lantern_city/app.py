@@ -193,9 +193,6 @@ class LanternCityApp:
             f"Available location IDs: {available_locations}",
             f"Summary: {outcome.response.narrative_text}",
         ]
-        lead = self._check_case_discovery(district_id, updated_at=TURN_ONE)
-        if lead:
-            lines.append(f"\nNew lead: {lead}")
         transient_text = self._maybe_transient_encounter(district_id, district, updated_at=TURN_ONE)
         if transient_text:
             lines.append(f"\n{transient_text}")
@@ -292,14 +289,20 @@ class LanternCityApp:
         )
         all_clues = outcome.active_slice.clues
 
-        # Only surface clues whose cases are already active — never reveal latent-case clues
+        # Non-hook cases are discovered through physical inspection (not district entry).
+        # Run discovery before clue filtering so newly activated cases get their clues surfaced.
+        discovered_lead = self._check_case_discovery(district.id, updated_at=TURN_THREE)
+        log.debug("inspect_location case_discovery=%r", discovered_lead)
+
+        # Only surface clues whose cases are active — never reveal latent-case clues.
+        # NPC clues are only revealed through talk_to_npc.
         active_case_ids: set[str] = {
             cid for cid in city.active_case_ids
             if _is_case_active(self.store, cid)
         }
         discoverable = [
             clue for clue in all_clues
-            if not clue.related_npc_ids  # NPC clues are only revealed through talk_to_npc
+            if not clue.related_npc_ids
             and (
                 not clue.related_case_ids
                 or any(cid in active_case_ids for cid in clue.related_case_ids)
@@ -346,11 +349,14 @@ class LanternCityApp:
             lines.append("Objects here:")
             for obj in location.scene_objects:
                 lines.append(f"  - {obj}")
-        clue_status = " | ".join(
-            f"{_clue_label(c.id)}: {c.reliability}" for c in updated_clues
-        )
-        status_suffix = f" | {clue_status}" if clue_status else ""
-        lines.append(f"[Lantern: {district.lantern_condition}{status_suffix}]")
+        if updated_clues:
+            clue_status = " | ".join(
+                f"{_clue_label(c.id)}: {c.reliability}" for c in updated_clues
+            )
+            lines.append(f"[Clue found: {clue_status}]")
+        if discovered_lead:
+            lines.append(f"[Case opened: {discovered_lead}]")
+        lines.append(f"[Lantern: {district.lantern_condition}]")
         lines.extend(propagation_notices)
         return "\n".join(lines)
 
