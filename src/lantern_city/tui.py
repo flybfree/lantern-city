@@ -213,6 +213,26 @@ CityPickerScreen, GenerateCityScreen {
     color: $error;
     margin-top: 1;
 }
+#gen-url-row {
+    height: 3;
+    align: left middle;
+}
+#gen-url-row Input {
+    width: 1fr;
+}
+#btn-fetch-gen {
+    width: 18;
+    margin-left: 1;
+}
+#gen-fetch-status {
+    height: 1;
+    color: $text-muted;
+}
+#gen-model-list {
+    height: 6;
+    border: solid $primary-darken-2;
+    margin-bottom: 0;
+}
 """
 
 
@@ -237,9 +257,13 @@ class GenerateCityScreen(Screen[Path | None]):
         with Vertical(id="gen-box"):
             yield Static("[bold yellow]GENERATE NEW CITY[/bold yellow]", markup=True, id="gen-title")
             yield Label("LLM URL  [bold red]*[/bold red]  [dim](required)[/dim]", markup=True)
-            yield Input(value=self._saved_url, placeholder="http://192.168.x.x:1234/v1", id="inp-url")
-            yield Label("Model  [bold red]*[/bold red]  [dim](required)[/dim]", markup=True)
-            yield Input(value=self._saved_model, placeholder="mistral or llama3 etc.", id="inp-model")
+            with Horizontal(id="gen-url-row"):
+                yield Input(value=self._saved_url, placeholder="http://192.168.x.x:1234/v1", id="inp-url")
+                yield Button("Fetch Models", variant="default", id="btn-fetch-gen")
+            yield Static("", id="gen-fetch-status", markup=True)
+            yield ListView(id="gen-model-list")
+            yield Label("Model  [bold red]*[/bold red]  [dim](select above or type)[/dim]", markup=True)
+            yield Input(value=self._saved_model, placeholder="model name", id="inp-model")
             yield Label("Concept  [dim](optional)[/dim]", markup=True)
             yield Input(placeholder="e.g. steampunk port city run by criminal gangs", id="inp-concept")
             yield Label("Output file")
@@ -250,19 +274,42 @@ class GenerateCityScreen(Screen[Path | None]):
                 yield Button("Generate", variant="primary", id="btn-gen-start")
 
     def on_mount(self) -> None:
-        # Focus URL if empty, otherwise concept
         url_field = self.query_one("#inp-url", Input)
-        if not url_field.value:
-            url_field.focus()
-        else:
+        if url_field.value:
+            self._do_fetch_gen(url_field.value)
             self.query_one("#inp-concept", Input).focus()
+        else:
+            url_field.focus()
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "btn-gen-cancel":
             if not self._generating:
                 self.dismiss(None)
+        elif event.button.id == "btn-fetch-gen":
+            url = self.query_one("#inp-url", Input).value.strip()
+            if url:
+                self._do_fetch_gen(url)
         elif event.button.id == "btn-gen-start":
             self._start_generation()
+
+    def on_list_view_selected(self, event: ListView.Selected) -> None:
+        if event.list_view.id == "gen-model-list":
+            label = event.item.query_one(Label)
+            self.query_one("#inp-model", Input).value = str(label.renderable).strip()
+
+    def on_list_view_highlighted(self, event: ListView.Highlighted) -> None:
+        if event.list_view.id != "gen-model-list" or event.item is None:
+            return
+        label = event.item.query_one(Label)
+        self.query_one("#inp-model", Input).value = str(label.renderable).strip()
+
+    def _do_fetch_gen(self, url: str) -> None:
+        self.query_one("#gen-fetch-status", Static).update("[dim]Fetching models…[/dim]")
+
+        async def _worker() -> list[str]:
+            return await asyncio.to_thread(_fetch_models_from_url, url)
+
+        self.run_worker(_worker(), exclusive=False, name="fetch-gen")
 
     def action_cancel(self) -> None:
         if not self._generating:
@@ -346,9 +393,29 @@ class GenerateCityScreen(Screen[Path | None]):
         self.run_worker(_worker(), exclusive=True, name="gen")
 
     def on_worker_state_changed(self, event: Worker.StateChanged) -> None:
-        if event.worker.name != "gen":
-            return
+        name = event.worker.name or ""
         if event.state not in (WorkerState.SUCCESS, WorkerState.ERROR, WorkerState.CANCELLED):
+            return
+
+        if name == "fetch-gen":
+            status = self.query_one("#gen-fetch-status", Static)
+            model_list = self.query_one("#gen-model-list", ListView)
+            if event.state == WorkerState.SUCCESS:
+                models: list[str] = event.worker.result or []
+                model_list.clear()
+                for m in models:
+                    model_list.append(ListItem(Label(m)))
+                status.update(f"[dim]{len(models)} model(s) found[/dim]")
+                current = self.query_one("#inp-model", Input).value.strip()
+                for i, m in enumerate(models):
+                    if m == current:
+                        model_list.index = i
+                        break
+            else:
+                status.update("[red]Fetch failed — type model name manually[/red]")
+            return
+
+        if name != "gen":
             return
 
         self._generating = False
@@ -467,6 +534,20 @@ class CityPickerScreen(Screen[Path | None]):
         self.dismiss(None)
 
 
+def _fetch_models_from_url(base_url: str) -> list[str]:
+    """Fetch the model list from an OpenAI-compatible /v1/models endpoint."""
+    import httpx
+
+    url = base_url.rstrip("/")
+    if not url.endswith("/v1"):
+        url = url + "/v1"
+    resp = httpx.get(f"{url}/models", timeout=8.0)
+    resp.raise_for_status()
+    data = resp.json()
+    models = [entry["id"] for entry in data.get("data", []) if isinstance(entry.get("id"), str)]
+    return sorted(models)
+
+
 class SettingsScreen(ModalScreen[tuple[str, str] | None]):
     """Modal overlay for configuring the LLM connection."""
 
@@ -475,7 +556,7 @@ class SettingsScreen(ModalScreen[tuple[str, str] | None]):
         align: center middle;
     }
     #settings-dialog {
-        width: 60;
+        width: 72;
         height: auto;
         background: $surface;
         border: solid $primary;
@@ -485,15 +566,37 @@ class SettingsScreen(ModalScreen[tuple[str, str] | None]):
         margin-top: 1;
         color: $text-muted;
     }
-    #settings-dialog Input {
-        margin-bottom: 0;
+    #url-row {
+        height: 3;
+        align: left middle;
+    }
+    #inp-settings-url {
+        width: 1fr;
+    }
+    #btn-fetch-settings {
+        width: 18;
+        margin-left: 1;
+    }
+    #settings-fetch-status {
+        height: 1;
+        color: $text-muted;
+        padding: 0 0;
+    }
+    #settings-model-list {
+        height: 8;
+        border: solid $primary-darken-2;
+        margin-bottom: 1;
+        display: none;
+    }
+    #settings-model-list.visible {
+        display: block;
     }
     #settings-buttons {
         height: 3;
         margin-top: 1;
         align: right middle;
     }
-    #btn-save {
+    #btn-settings-save {
         margin-left: 1;
     }
     """
@@ -506,35 +609,107 @@ class SettingsScreen(ModalScreen[tuple[str, str] | None]):
     def compose(self) -> ComposeResult:
         with Vertical(id="settings-dialog"):
             yield Static("[bold yellow]LLM Settings[/bold yellow]", markup=True)
-            yield Label("Base URL  (e.g. http://localhost:11434)")
-            yield Input(value=self._current_url, placeholder="http://host/v1", id="inp-url")
-            yield Label("Model name")
-            yield Input(value=self._current_model, placeholder="gpt-4o-mini", id="inp-model")
+            yield Label("Base URL")
+            with Horizontal(id="url-row"):
+                yield Input(
+                    value=self._current_url,
+                    placeholder="http://host:1234/v1",
+                    id="inp-settings-url",
+                )
+                yield Button("Fetch Models", variant="default", id="btn-fetch-settings")
+            yield Static("", id="settings-fetch-status", markup=True)
+            yield ListView(id="settings-model-list")
+            yield Label("Model  [dim](select above or type)[/dim]", markup=True)
+            yield Input(value=self._current_model, placeholder="model-name", id="inp-settings-model")
             with Horizontal(id="settings-buttons"):
-                yield Button("Cancel", variant="default", id="btn-cancel")
-                yield Button("Save", variant="primary", id="btn-save")
+                yield Button("Cancel", variant="default", id="btn-settings-cancel")
+                yield Button("Save", variant="primary", id="btn-settings-save")
 
     def on_mount(self) -> None:
-        self.query_one("#inp-url", Input).focus()
+        url_inp = self.query_one("#inp-settings-url", Input)
+        if url_inp.value:
+            self._do_fetch(url_inp.value)
+        else:
+            url_inp.focus()
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
-        if event.button.id == "btn-cancel":
+        if event.button.id == "btn-settings-cancel":
             self.dismiss(None)
-            return
-        url = self.query_one("#inp-url", Input).value.strip()
-        model = self.query_one("#inp-model", Input).value.strip()
-        if url and model:
-            self.dismiss((url, model))
-        else:
-            # Highlight missing fields
-            if not url:
-                self.query_one("#inp-url", Input).focus()
+        elif event.button.id == "btn-fetch-settings":
+            url = self.query_one("#inp-settings-url", Input).value.strip()
+            if url:
+                self._do_fetch(url)
             else:
-                self.query_one("#inp-model", Input).focus()
+                self.query_one("#inp-settings-url", Input).focus()
+        elif event.button.id == "btn-settings-save":
+            self._save()
+
+    def on_list_view_selected(self, event: ListView.Selected) -> None:
+        if event.list_view.id == "settings-model-list":
+            label = event.item.query_one(Label)
+            model_name = str(label.renderable).strip()
+            self.query_one("#inp-settings-model", Input).value = model_name
+
+    def on_list_view_highlighted(self, event: ListView.Highlighted) -> None:
+        if event.list_view.id != "settings-model-list" or event.item is None:
+            return
+        label = event.item.query_one(Label)
+        model_name = str(label.renderable).strip()
+        self.query_one("#inp-settings-model", Input).value = model_name
 
     def on_key(self, event) -> None:
         if event.key == "escape":
             self.dismiss(None)
+        elif event.key == "enter":
+            focused = self.focused
+            if focused and focused.id == "inp-settings-url":
+                url = self.query_one("#inp-settings-url", Input).value.strip()
+                if url:
+                    self._do_fetch(url)
+
+    def _save(self) -> None:
+        url = self.query_one("#inp-settings-url", Input).value.strip()
+        model = self.query_one("#inp-settings-model", Input).value.strip()
+        if url and model:
+            self.dismiss((url, model))
+        elif not url:
+            self.query_one("#inp-settings-url", Input).focus()
+        else:
+            self.query_one("#inp-settings-model", Input).focus()
+
+    def _do_fetch(self, url: str) -> None:
+        self.query_one("#settings-fetch-status", Static).update("[dim]Fetching models…[/dim]")
+        self.query_one("#settings-model-list", ListView).remove_class("visible")
+
+        async def _worker() -> list[str]:
+            return await asyncio.to_thread(_fetch_models_from_url, url)
+
+        self.run_worker(_worker(), exclusive=False, name="fetch-settings")
+
+    def on_worker_state_changed(self, event: Worker.StateChanged) -> None:
+        if event.worker.name != "fetch-settings":
+            return
+        if event.state not in (WorkerState.SUCCESS, WorkerState.ERROR, WorkerState.CANCELLED):
+            return
+        status = self.query_one("#settings-fetch-status", Static)
+        model_list = self.query_one("#settings-model-list", ListView)
+        if event.state == WorkerState.SUCCESS:
+            models: list[str] = event.worker.result or []
+            model_list.clear()
+            for m in models:
+                model_list.append(ListItem(Label(m)))
+            model_list.add_class("visible")
+            status.update(f"[dim]{len(models)} model(s) found[/dim]")
+            current = self.query_one("#inp-settings-model", Input).value.strip()
+            for i, m in enumerate(models):
+                if m == current:
+                    model_list.index = i
+                    break
+            if models and not current:
+                model_list.focus()
+        else:
+            status.update("[red]Fetch failed — type model name manually[/red]")
+            self.query_one("#inp-settings-model", Input).focus()
 
 
 class LanternCityTUI(App[None]):
