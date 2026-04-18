@@ -401,6 +401,31 @@ def _fix_faction_influences(
     return fixed
 
 
+def _fix_tension_map(
+    tension_map: dict[str, Any],
+    faction_ids: list[str],
+) -> dict[str, float]:
+    """Normalise tension_map keys from 'faction_a_id|faction_b_id' to real faction IDs.
+
+    Drops pairs where either side cannot be resolved.
+    """
+    fixed: dict[str, float] = {}
+    for key, val in tension_map.items():
+        parts = str(key).split("|", 1)
+        if len(parts) != 2:
+            continue
+        a = _resolve_id(parts[0].strip(), faction_ids, "faction_")
+        b = _resolve_id(parts[1].strip(), faction_ids, "faction_")
+        if a and b and a != b:
+            canonical = f"{a}|{b}"
+            if canonical not in fixed:
+                try:
+                    fixed[canonical] = float(val)
+                except (TypeError, ValueError):
+                    fixed[canonical] = 0.5
+    return fixed
+
+
 def _fix_id_list(id_list: list[str], valid_ids: list[str], prefix: str) -> list[str]:
     """Resolve a list of IDs against valid_ids, dropping unresolvable entries."""
     out: list[str] = []
@@ -423,6 +448,9 @@ def _assemble(framework: dict[str, Any], cases_npcs: dict[str, Any]) -> dict[str
 
     # Normalise cross-references so validation doesn't fail on LLM ID inconsistencies
     factions = _fix_faction_influences(factions, district_ids)
+    framework["tension_map"] = _fix_tension_map(
+        dict(framework.get("tension_map", {})), faction_ids
+    )
 
     for case in cases:
         case["involved_district_ids"] = _fix_id_list(
