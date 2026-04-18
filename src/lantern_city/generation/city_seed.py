@@ -285,7 +285,7 @@ class CitySeedGenerator:
             return self._llm.generate_json(
                 messages=[{"role": "system", "content": system}, {"role": "user", "content": user}],
                 temperature=0.65,
-                max_tokens=2200,
+                max_tokens=4000,
                 schema=_FRAMEWORK_SCHEMA,
             )
         except Exception as exc:
@@ -326,7 +326,7 @@ class CitySeedGenerator:
             return self._llm.generate_json(
                 messages=[{"role": "system", "content": system}, {"role": "user", "content": user}],
                 temperature=0.55,
-                max_tokens=2200,
+                max_tokens=3000,
                 schema=_CASES_NPCS_SCHEMA,
             )
         except Exception as exc:

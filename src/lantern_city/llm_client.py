@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass
 from typing import Any
 
@@ -118,6 +119,7 @@ class OpenAICompatibleLLMClient:
 
     def parse_json_content(self, response_payload: dict[str, Any]) -> dict[str, Any]:
         content = self.extract_content(response_payload)
+        content = self._clean_json_content(content)
         try:
             parsed = json.loads(content)
         except json.JSONDecodeError as exc:
@@ -125,6 +127,26 @@ class OpenAICompatibleLLMClient:
         if not isinstance(parsed, dict):
             raise LLMClientResponseError("Model response JSON must be an object")
         return parsed
+
+    @staticmethod
+    def _clean_json_content(content: str) -> str:
+        """Strip thinking blocks, markdown fences, and leading prose before parsing JSON."""
+        # Remove <think>...</think> blocks (Qwen and similar reasoning models)
+        content = re.sub(r"<think>.*?</think>", "", content, flags=re.DOTALL)
+        content = content.strip()
+        # Strip markdown code fences: ```json ... ``` or ``` ... ```
+        fence_match = re.search(r"```(?:json)?\s*([\s\S]*?)```", content)
+        if fence_match:
+            content = fence_match.group(1).strip()
+        # If there's still leading prose before the first {, trim it
+        brace_pos = content.find("{")
+        if brace_pos > 0:
+            content = content[brace_pos:]
+        # Trim trailing content after the last }
+        rbrace_pos = content.rfind("}")
+        if rbrace_pos != -1 and rbrace_pos < len(content) - 1:
+            content = content[: rbrace_pos + 1]
+        return content
 
     def extract_content(self, response_payload: dict[str, Any]) -> str:
         try:
