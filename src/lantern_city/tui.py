@@ -166,13 +166,23 @@ CityPickerScreen, GenerateCityScreen {
     align: center middle;
     background: $background;
 }
-#picker-box, #gen-box {
+#picker-box {
     width: 72;
     height: auto;
     max-height: 85vh;
     background: $surface;
     border: solid $primary;
     padding: 1 2;
+}
+#gen-box {
+    width: 72;
+    height: 85vh;
+    background: $surface;
+    border: solid $primary;
+    padding: 1 2;
+}
+#gen-form {
+    height: 1fr;
 }
 #picker-title, #gen-title {
     text-align: center;
@@ -256,19 +266,20 @@ class GenerateCityScreen(Screen[Path | None]):
         default_name = f"city-{datetime.datetime.now():%Y%m%d-%H%M}"
         with Vertical(id="gen-box"):
             yield Static("[bold yellow]GENERATE NEW CITY[/bold yellow]", markup=True, id="gen-title")
-            yield Label("LLM URL  [bold red]*[/bold red]  [dim](required)[/dim]", markup=True)
-            with Horizontal(id="gen-url-row"):
-                yield Input(value=self._saved_url, placeholder="http://192.168.x.x:1234/v1", id="inp-url")
-                yield Button("Fetch Models", variant="default", id="btn-fetch-gen")
-            yield Static("", id="gen-fetch-status", markup=True)
-            yield ListView(id="gen-model-list")
-            yield Label("Model  [bold red]*[/bold red]  [dim](select above or type)[/dim]", markup=True)
-            yield Input(value=self._saved_model, placeholder="model name", id="inp-model")
-            yield Label("Concept  [dim](optional)[/dim]", markup=True)
-            yield Input(placeholder="e.g. steampunk port city run by criminal gangs", id="inp-concept")
-            yield Label("Output file")
-            yield Input(value=default_name, id="inp-output")
-            yield RichLog(highlight=False, markup=False, wrap=True, id="gen-log")
+            with ScrollableContainer(id="gen-form"):
+                yield Label("LLM URL  [bold red]*[/bold red]  [dim](required)[/dim]", markup=True)
+                with Horizontal(id="gen-url-row"):
+                    yield Input(value=self._saved_url, placeholder="http://192.168.x.x:1234/v1", id="inp-url")
+                    yield Button("Fetch Models", variant="default", id="btn-fetch-gen")
+                yield Static("", id="gen-fetch-status", markup=True)
+                yield ListView(id="gen-model-list")
+                yield Label("Model  [bold red]*[/bold red]  [dim](select above or type)[/dim]", markup=True)
+                yield Input(value=self._saved_model, placeholder="model name", id="inp-model")
+                yield Label("Concept  [dim](optional)[/dim]", markup=True)
+                yield Input(placeholder="e.g. steampunk port city run by criminal gangs", id="inp-concept")
+                yield Label("Output file")
+                yield Input(value=default_name, id="inp-output")
+                yield RichLog(highlight=False, markup=False, wrap=True, id="gen-log")
             with Horizontal(id="gen-buttons"):
                 yield Button("Cancel", variant="default", id="btn-gen-cancel")
                 yield Button("Generate", variant="primary", id="btn-gen-start")
