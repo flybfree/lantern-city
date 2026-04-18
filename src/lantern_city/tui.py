@@ -1234,14 +1234,15 @@ class LanternCityTUI(App[None]):
         lines.append("")
 
         # ── Active cases (latent cases are hidden until discovered) ──
-        active_cases = [
-            self._game.store.load_object("CaseState", cid)
-            for cid in city.active_case_ids
-        ]
-        active_cases = [
-            c for c in active_cases
-            if isinstance(c, CaseState) and c.status != "latent"
-        ]
+        _seen_case_ids: set[str] = set()
+        active_cases = []
+        for cid in city.active_case_ids:
+            if cid in _seen_case_ids:
+                continue
+            _seen_case_ids.add(cid)
+            c = self._game.store.load_object("CaseState", cid)
+            if isinstance(c, CaseState) and c.status != "latent":
+                active_cases.append(c)
         if active_cases:
             lines.append("[bold]Cases:[/bold]")
             for case in active_cases:

@@ -202,7 +202,7 @@ def _build_case_state(seed: CitySeedDocument, case_id: str) -> CaseState:
         updated_at=TURN_ZERO,
         title=_humanize_identifier(case.id, prefix="case_"),
         case_type=case.type,
-        status="active",
+        status="latent",
         involved_district_ids=list(case.involved_district_ids),
         involved_npc_ids=list(case.key_npc_ids),
         involved_faction_ids=list(case.involved_faction_ids),

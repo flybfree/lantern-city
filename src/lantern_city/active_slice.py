@@ -147,9 +147,9 @@ def build_active_slice(
         raise MissingWorldObjectError(message)
 
     if resolved_intent == "district_entry" and district is not None:
-        npcs = _load_unique_required(store, "NPCState", district.relevant_npc_ids, NPCState)
+        npcs = _load_npcs_safe(store, district.relevant_npc_ids)
     elif resolved_intent == "inspect_location" and location is not None:
-        npcs = _load_unique_required(store, "NPCState", location.known_npc_ids, NPCState)
+        npcs = _load_npcs_safe(store, location.known_npc_ids)
 
     case_id = _resolve_case_id(store, request, city, scene, district, npcs, request_target)
     case = _load_optional(store, "CaseState", case_id, CaseState)
@@ -278,9 +278,10 @@ def _resolve_case_id(
     district_id = None if district is None else district.id
     npc_ids = {npc.id for npc in npcs}
     for case_id in city.active_case_ids:
-        case = _load_optional(store, "CaseState", case_id, CaseState)
-        if case is None:
+        _loaded = store.load_object("CaseState", case_id)
+        if not isinstance(_loaded, CaseState):
             continue
+        case = _loaded
         if district_id is not None and district_id in case.involved_district_ids:
             relevant_case_ids.append(case.id)
             continue
@@ -400,6 +401,20 @@ def _dedupe_preserve_order(values: list[str]) -> list[str]:
         seen.add(value)
         ordered.append(value)
     return ordered
+
+
+def _load_npcs_safe(store: SQLiteStore, npc_ids: list[str]) -> list[NPCState]:
+    """Load NPCs by ID, silently skipping any that are missing or wrong type."""
+    result: list[NPCState] = []
+    seen: set[str] = set()
+    for npc_id in npc_ids:
+        if npc_id in seen:
+            continue
+        seen.add(npc_id)
+        obj = store.load_object("NPCState", npc_id)
+        if isinstance(obj, NPCState):
+            result.append(obj)
+    return result
 
 
 def _load_optional[T](

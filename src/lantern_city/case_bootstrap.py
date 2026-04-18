@@ -201,7 +201,10 @@ def bootstrap_generated_case(
     # --- Update city ---
     updated_city = city.model_copy(
         update={
-            "active_case_ids": [*city.active_case_ids, case_id],
+            "active_case_ids": [
+                *city.active_case_ids,
+                *([case_id] if case_id not in city.active_case_ids else []),
+            ],
             "updated_at": updated_at,
         }
     )
