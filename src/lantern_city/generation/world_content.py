@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Protocol, runtime_checkable
 
 from lantern_city.models import (
@@ -66,6 +66,26 @@ _LOCATION_SCHEMA: dict[str, Any] = {
     "additionalProperties": False,
 }
 
+_CASE_BRIEFING_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "title": {
+            "type": "string",
+            "description": "Evocative case title (max 80 chars)",
+        },
+        "discovery_hook": {
+            "type": "string",
+            "description": "2-3 sentences: who brought you this case, what they said, what you know so far",
+        },
+        "objective_summary": {
+            "type": "string",
+            "description": "1-2 sentences: what you need to find out or accomplish",
+        },
+    },
+    "required": ["title", "discovery_hook", "objective_summary"],
+    "additionalProperties": False,
+}
+
 _CLUE_SCHEMA: dict[str, Any] = {
     "type": "object",
     "properties": {
@@ -97,6 +117,7 @@ class WorldContent:
     clues: list[ClueState]
     district_updates: list[DistrictState]
     npc_updates: list[NPCState]
+    case_updates: list[CaseState] = field(default_factory=list)
 
 
 class WorldContentGenerator:
@@ -146,8 +167,9 @@ class WorldContentGenerator:
                 "updated_at": TURN_ZERO,
             }))
 
-        # Generate clues for each starting case
+        # Generate clues and briefings for each starting case
         clues: list[ClueState] = []
+        case_updates: list[CaseState] = []
         for case in cases:
             case_locs = [loc for loc in location_map.values()
                          if loc.district_id in case.involved_district_ids]
@@ -164,6 +186,15 @@ class WorldContentGenerator:
                     location_map[clue.source_id] = loc.model_copy(
                         update={"clue_ids": [*loc.clue_ids, clue.id]}
                     )
+            _emit(f"[world] Generating case briefing for: {case.title}…")
+            briefing = self._generate_case_briefing(case, case_clues, case_npcs)
+            if briefing:
+                case_updates.append(case.model_copy(update={
+                    "title": briefing.get("title", case.title) or case.title,
+                    "discovery_hook": briefing.get("discovery_hook", "") or "",
+                    "objective_summary": briefing.get("objective_summary", case.objective_summary) or case.objective_summary,
+                    "updated_at": TURN_ZERO,
+                }))
 
         # Build NPC updates: assign location_id and known_clue_ids
         npc_clue_map: dict[str, list[str]] = {}
@@ -188,6 +219,7 @@ class WorldContentGenerator:
             clues=clues,
             district_updates=district_updates,
             npc_updates=npc_updates,
+            case_updates=case_updates,
         )
 
     # ── Location generation ───────────────────────────────────────────────────
@@ -358,6 +390,61 @@ class WorldContentGenerator:
             ))
 
         return out
+
+    # ── Case briefing ─────────────────────────────────────────────────────────
+
+    def _generate_case_briefing(
+        self,
+        case: CaseState,
+        clues: list[ClueState],
+        npcs: list[NPCState],
+    ) -> dict[str, str] | None:
+        npc_lines = "\n".join(
+            f"  {n.name} ({n.role_category}): {n.public_identity}" for n in npcs[:4]
+        ) or "  (no named contacts)"
+        clue_lines = "\n".join(
+            f"  [{c.source_type}, {c.reliability}] {c.clue_text}" for c in clues[:4]
+        ) or "  (no clues yet)"
+        district_names = ", ".join(
+            d.replace("district_", "").replace("_", " ").title()
+            for d in case.involved_district_ids
+        )
+
+        system = (
+            "You are writing the opening briefing for an investigation case in Lantern City, "
+            "a noir city where lanterns control memory and truth. "
+            "Write in second person, present tense, grounded and atmospheric. "
+            "Return valid JSON only."
+        )
+        user = (
+            "Write a case briefing for the player.\n\n"
+            f"Case type: {case.case_type}\n"
+            f"Involved districts: {district_names}\n"
+            f"Known contacts in this case:\n{npc_lines}\n\n"
+            f"Known clues (what exists in the world, not yet discovered by player):\n{clue_lines}\n\n"
+            "Rules:\n"
+            "- title: an evocative case name (not the ID), 4-8 words, present-tense or noun phrase\n"
+            "- discovery_hook: 2-3 sentences. Establish WHO brought this to you "
+            "(one of the contacts above, or an anonymous tip), WHAT they said or showed you, "
+            "and WHY you can't ignore it. Write as if the player just heard this.\n"
+            "- objective_summary: 1 sentence. What the player must find out or accomplish. "
+            "Keep it concrete and specific — not 'investigate' but 'find out what happened to X'.\n"
+            "- Do not reveal clue content directly — the discovery_hook sets atmosphere, "
+            "not a data dump. The player will discover clues through play.\n"
+            "- Keep language grounded, civic, noir. No magic. No fantasy clichés.\n"
+        )
+        try:
+            result = self._llm.generate_json(
+                messages=[{"role": "system", "content": system}, {"role": "user", "content": user}],
+                temperature=0.55,
+                max_tokens=600,
+                schema=_CASE_BRIEFING_SCHEMA,
+            )
+            if isinstance(result.get("title"), str) and isinstance(result.get("discovery_hook"), str):
+                return result
+        except Exception:
+            pass
+        return None
 
     # ── Fallback ──────────────────────────────────────────────────────────────
 

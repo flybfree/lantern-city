@@ -1079,23 +1079,49 @@ class LanternCityTUI(App[None]):
                     continue
                 if case.status == "latent":
                     continue
-                parts: list[str] = []
-                if case.objective_summary:
-                    parts.append(f"[italic]{escape(case.objective_summary)}[/italic]")
+
+                narrative = self.query_one("#narrative", RichLog)
+                narrative.write(Text.from_markup(
+                    f"[bold yellow]── Case: {escape(case.title)} ──[/bold yellow]"
+                ))
+
                 if case.discovery_hook:
-                    parts.append(escape(case.discovery_hook))
+                    narrative.write(Text.from_markup(
+                        f"\n{escape(case.discovery_hook)}"
+                    ))
+
+                if case.objective_summary:
+                    narrative.write(Text.from_markup(
+                        f"\n[dim]Objective:[/dim] [italic]{escape(case.objective_summary)}[/italic]"
+                    ))
+
+                # Show which districts to investigate
                 if case.involved_district_ids:
-                    district_name = (
-                        case.involved_district_ids[0]
-                        .replace("district_", "")
-                        .replace("_", " ")
-                        .title()
+                    district_names = ", ".join(
+                        did.replace("district_", "").replace("_", " ").title()
+                        for did in case.involved_district_ids[:3]
                     )
-                    parts.append(f"[dim]Start in: {district_name}[/dim]")
-                if parts:
-                    self.query_one("#narrative", RichLog).write(
-                        Text.from_markup("\n".join(parts))
-                    )
+                    narrative.write(Text.from_markup(
+                        f"[dim]Districts: {escape(district_names)}[/dim]"
+                    ))
+
+                # Show key NPCs as contacts
+                if case.involved_npc_ids:
+                    contacts: list[str] = []
+                    for npc_id in case.involved_npc_ids[:3]:
+                        from lantern_city.models import NPCState
+                        npc = self._game.store.load_object("NPCState", npc_id)
+                        if isinstance(npc, NPCState) and npc.name:
+                            identity = f" — {npc.public_identity}" if npc.public_identity and npc.public_identity != npc.role_category else ""
+                            contacts.append(f"{escape(npc.name)}{escape(identity)}")
+                    if contacts:
+                        narrative.write(Text.from_markup(
+                            f"[dim]Contacts: {', '.join(contacts)}[/dim]"
+                        ))
+
+                narrative.write(Text.from_markup(
+                    "\n[dim]Enter a district to begin your investigation.[/dim]"
+                ))
                 break
         except Exception:
             pass

@@ -874,6 +874,7 @@ class LanternCityApp:
             + content.clues
             + content.district_updates
             + content.npc_updates
+            + content.case_updates
         )
         self.store.save_objects_atomically(objects_to_save)
 

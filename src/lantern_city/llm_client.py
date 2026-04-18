@@ -21,7 +21,7 @@ class OpenAICompatibleConfig:
     base_url: str
     model: str
     api_key: str | None = None
-    timeout: float = 30.0
+    timeout: float = 180.0
 
     @property
     def normalized_base_url(self) -> str:
@@ -120,25 +120,71 @@ class OpenAICompatibleLLMClient:
     def parse_json_content(self, response_payload: dict[str, Any]) -> dict[str, Any]:
         content = self.extract_content(response_payload)
         content = self._clean_json_content(content)
-        try:
-            parsed = json.loads(content)
-        except json.JSONDecodeError as exc:
-            raise LLMClientResponseError("Model response contained invalid JSON") from exc
+        parsed = self._try_parse_json(content)
+        if parsed is None:
+            raise LLMClientResponseError("Model response contained invalid JSON")
         if not isinstance(parsed, dict):
             raise LLMClientResponseError("Model response JSON must be an object")
         return parsed
 
     @staticmethod
+    def _try_parse_json(content: str) -> Any:
+        """Try json.loads, then scan forward from each '{' to find a valid object."""
+        try:
+            return json.loads(content)
+        except json.JSONDecodeError:
+            pass
+        # Scan: try each '{' position as a potential start
+        pos = 0
+        while True:
+            start = content.find("{", pos)
+            if start == -1:
+                break
+            # Walk forward tracking depth to find the matching '}'
+            depth = 0
+            end = start
+            in_string = False
+            escape_next = False
+            for i, ch in enumerate(content[start:], start):
+                if escape_next:
+                    escape_next = False
+                    continue
+                if ch == "\\" and in_string:
+                    escape_next = True
+                    continue
+                if ch == '"':
+                    in_string = not in_string
+                    continue
+                if in_string:
+                    continue
+                if ch == "{":
+                    depth += 1
+                elif ch == "}":
+                    depth -= 1
+                    if depth == 0:
+                        end = i
+                        break
+            else:
+                break
+            candidate = content[start : end + 1]
+            try:
+                return json.loads(candidate)
+            except json.JSONDecodeError:
+                pass
+            pos = start + 1
+        return None
+
+    @staticmethod
     def _clean_json_content(content: str) -> str:
         """Strip thinking blocks, markdown fences, and leading prose before parsing JSON."""
-        # Remove <think>...</think> blocks (Qwen and similar reasoning models)
-        content = re.sub(r"<think>.*?</think>", "", content, flags=re.DOTALL)
+        # Remove <think>...</think> and <|thinking|>...</|thinking|> blocks
+        content = re.sub(r"<\|?think(?:ing)?\|?>.*?</\|?think(?:ing)?\|?>", "", content, flags=re.DOTALL | re.IGNORECASE)
         content = content.strip()
         # Strip markdown code fences: ```json ... ``` or ``` ... ```
         fence_match = re.search(r"```(?:json)?\s*([\s\S]*?)```", content)
         if fence_match:
             content = fence_match.group(1).strip()
-        # If there's still leading prose before the first {, trim it
+        # Trim leading prose before first {
         brace_pos = content.find("{")
         if brace_pos > 0:
             content = content[brace_pos:]
