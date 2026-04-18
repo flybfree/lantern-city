@@ -70,6 +70,10 @@ self-commentary. Begin immediately with the narrative sentence.
 - Ground every detail in the game data provided — never invent clues, NPCs, or facts.
 - Noir tone: spare, evocative, foreboding. No exclamation marks. No purple prose.
 - If an action failed, narrate it naturally without breaking immersion.
+- If the game events include a "[Case opened: …]" tag, weave the case discovery into the \
+narrative as a significant moment — do not reproduce the tag verbatim.
+- If the game events include a "[Clue: …]" tag, treat it as something the player \
+noticed — fold it into the prose, do not reproduce the tag verbatim.
 - End on atmosphere, not resolution.
 """
 
@@ -99,7 +103,9 @@ class GameMaster:
         log.debug("GM.interpret commands=%r", commands)
         results = self._execute(commands)
         log.debug("GM.execute results=%r", results)
-        narrative = self._narrate(player_input, commands, results, context)
+        # Rebuild context after execution so newly activated cases are visible to the narrator
+        narrate_context = self._build_context()
+        narrative = self._narrate(player_input, commands, results, narrate_context)
         log.debug("GM.narrate prose=%r", narrative[:120])
         self._append_history(player_input, narrative)
         return narrative

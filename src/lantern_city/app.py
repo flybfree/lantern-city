@@ -260,9 +260,9 @@ class LanternCityApp:
 
         lines = [outcome.response.narrative_text]
         if clue is not None:
-            lines.append(f'[Noted: {_clue_label(clue.id)} — {clue.reliability}]')
+            lines.append(f'[Clue: {_clue_label(clue.id)} — {clue.reliability}]')
         if pending_case is not None:
-            lines.append(f'[{pending_case.title}]')
+            lines.append(f'[Case opened: {pending_case.title}]')
         lines.extend(propagation_notices)
         return "\n".join(lines)
 
@@ -291,6 +291,21 @@ class LanternCityApp:
             missingness=_missingness_level(city.missingness_pressure),
         )
         all_clues = outcome.active_slice.clues
+
+        # Only surface clues whose cases are already active — never reveal latent-case clues
+        active_case_ids: set[str] = {
+            cid for cid in city.active_case_ids
+            if _is_case_active(self.store, cid)
+        }
+        discoverable = [
+            clue for clue in all_clues
+            if not clue.related_npc_ids  # NPC clues are only revealed through talk_to_npc
+            and (
+                not clue.related_case_ids
+                or any(cid in active_case_ids for cid in clue.related_case_ids)
+            )
+        ]
+
         inspected_location_id = location_id
         updated_clues = [
             _apply_physical_discovery(
@@ -303,7 +318,7 @@ class LanternCityApp:
                 location_id=inspected_location_id,
                 updated_at=TURN_THREE,
             )
-            for clue in all_clues
+            for clue in discoverable
         ]
         progress = self._require_progress()
         progress, _ = apply_progress_change(
@@ -1796,6 +1811,11 @@ class LanternCityApp:
 
     def _display_case_title(self, title: str) -> str:
         return title if title.lower().startswith("the ") else f"The {title}"
+
+
+def _is_case_active(store: SQLiteStore, case_id: str) -> bool:
+    c = store.load_object("CaseState", case_id)
+    return isinstance(c, CaseState) and c.status == "active"
 
 
 def _clue_label(clue_id: str) -> str:
