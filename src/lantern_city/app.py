@@ -136,7 +136,7 @@ class LanternCityApp:
         if verb == "look":
             return self.look(parts[1] if len(parts) >= 2 else None)
         if verb == "enter" and len(parts) >= 2:
-            return self.enter_district(parts[1])
+            return self.enter_district(self._resolve_district_id(parts[1]))
         if verb == "talk" and len(parts) >= 3:
             return self.talk_to_npc(parts[1], " ".join(parts[2:]))
         if verb == "inspect" and len(parts) >= 2:
@@ -1699,6 +1699,36 @@ class LanternCityApp:
         if city is None:
             raise LookupError("No active game. Run start first.")
         return city
+
+    def _resolve_district_id(self, raw: str) -> str:
+        """Return the canonical district_id for raw, falling back to name/fuzzy match."""
+        city = self._city()
+        if city is None:
+            return raw
+        # Exact match first
+        if self._district(raw) is not None:
+            return raw
+        # Fuzzy: compare lowercased name tokens against the raw string
+        raw_lower = raw.lower().replace("_", " ").replace("-", " ")
+        best: str | None = None
+        best_score = 0
+        for did in city.district_ids:
+            d = self._district(did)
+            if d is None:
+                continue
+            name_lower = d.name.lower()
+            # Count shared words
+            raw_words = set(raw_lower.split())
+            name_words = set(name_lower.split())
+            score = len(raw_words & name_words)
+            # Also check if raw is contained in the id or vice versa
+            did_lower = did.lower().replace("_", " ")
+            if raw_lower in did_lower or did_lower in raw_lower:
+                score += 2
+            if score > best_score:
+                best_score = score
+                best = did
+        return best if best is not None and best_score > 0 else raw
 
     def _district(self, district_id: str) -> DistrictState | None:
         district = self.store.load_object("DistrictState", district_id)
