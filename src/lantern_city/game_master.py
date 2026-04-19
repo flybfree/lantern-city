@@ -70,10 +70,13 @@ self-commentary. Begin immediately with the narrative sentence.
 - Ground every detail in the game data provided — never invent clues, NPCs, or facts.
 - Noir tone: spare, evocative, foreboding. No exclamation marks. No purple prose.
 - If an action failed, narrate it naturally without breaking immersion.
-- If the game events include a "[Case opened: …]" tag, weave the case discovery into the \
-narrative as a significant moment — do not reproduce the tag verbatim.
-- If the game events include a "[Clue: …]" tag, treat it as something the player \
-noticed — fold it into the prose, do not reproduce the tag verbatim.
+- If the game events include a "[Case opened: …]" tag, this is a pivotal moment. \
+You MUST make clear in the narrative that the player has just become aware of a new \
+investigation — name the case or its subject explicitly so the player understands \
+what they are now involved in. Do not bury it or leave it implied.
+- If the game events include a "[Clue: …]" tag, the player has just discovered \
+physical evidence — describe what they found in concrete sensory detail so it feels \
+earned, not administrative.
 - End on atmosphere, not resolution.
 """
 
@@ -220,10 +223,12 @@ class GameMaster:
                     f"  lanterns: {district.lantern_condition}{marker}"
                 )
 
-        # Cases
+        # Cases — only include cases the player has been introduced to
+        known_case_ids: set[str] = set(pos.known_case_ids) if pos is not None else set()
         active_cases = [
             self.app.store.load_object("CaseState", cid)
             for cid in city.active_case_ids
+            if cid in known_case_ids
         ]
         active_cases = [c for c in active_cases if isinstance(c, CaseState)]
         acquired_clue_ids: set[str] = set(pos.clue_ids) if pos is not None else set()

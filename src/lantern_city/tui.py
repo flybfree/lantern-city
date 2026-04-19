@@ -1233,11 +1233,12 @@ class LanternCityTUI(App[None]):
             lines.append(f"  [{lantern_color}]{lantern_icon}[/{lantern_color}] {name_markup}")
         lines.append("")
 
-        # ── Active cases (latent cases are hidden until discovered) ──
+        # ── Active cases — only show cases the player has been introduced to ──
+        known_ids: set[str] = set(pos.known_case_ids) if pos is not None else set()
         _seen_case_ids: set[str] = set()
         active_cases = []
         for cid in city.active_case_ids:
-            if cid in _seen_case_ids:
+            if cid in _seen_case_ids or cid not in known_ids:
                 continue
             _seen_case_ids.add(cid)
             c = self._game.store.load_object("CaseState", cid)

@@ -254,6 +254,7 @@ class LanternCityApp:
         if pending_case is not None:
             activated = transition_case(pending_case, "active", updated_at=TURN_TWO)
             self.store.save_object(activated)
+            self._introduce_case(pending_case.id)
 
         lines = [outcome.response.narrative_text]
         if clue is not None:
@@ -768,6 +769,7 @@ class LanternCityApp:
             log.debug("_check_case_discovery activating case=%r", case_id)
             updated_case = transition_case(case, "active", updated_at=updated_at)
             self.store.save_object(updated_case)
+            self._introduce_case(case_id)
             return case.discovery_hook or f"A new lead has emerged: {case.title}"
         return None
 
@@ -1686,6 +1688,15 @@ class LanternCityApp:
                 alteration_chamber,
                 updated_route_warden,
             ]
+        )
+
+    def _introduce_case(self, case_id: str) -> None:
+        """Mark a case as known to the player so it appears in the sidebar."""
+        pos = self._load_position()
+        if pos is None or case_id in pos.known_case_ids:
+            return
+        self.store.save_object(
+            pos.model_copy(update={"known_case_ids": [*pos.known_case_ids, case_id], "updated_at": TURN_ONE})
         )
 
     def _acquire_clues(self, clue_ids: list[str]) -> None:
