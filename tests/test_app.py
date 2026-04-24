@@ -359,8 +359,9 @@ def test_advance_case_warns_before_terminal_failure(tmp_path) -> None:
     case = app.store.load_object("CaseState", "case_gen_failure_warning_001")
 
     assert case is not None
-    assert case.status in {"active", "escalated"}
+    assert case.status == "escalated"
     assert case.pressure_level == "urgent"
+    assert case.active_resolution_window == "narrowing"
     assert "failure_warning_issued" in case.offscreen_risk_flags
     assert "Resolution attempt: not enough evidence yet" in output
     assert "This case is not failed yet" in output
@@ -423,6 +424,38 @@ def test_status_and_board_surface_failure_risk_warning(tmp_path) -> None:
     expected = "Failure risk: One more unsupported close attempt will bury the case."
     assert expected in status_output
     assert expected in board_output
+
+
+def test_last_chance_warning_state_survives_same_turn_progress_normalization(tmp_path) -> None:
+    app = LanternCityApp(tmp_path / "lantern-city.sqlite3")
+    app.start_new_game()
+    app.enter_district("district_old_quarter")
+    city = app._require_city()
+    app.store.save_object(
+        CaseState(
+            id="case_gen_failure_warning_003",
+            created_at="turn_0",
+            updated_at="turn_0",
+            title="Silent Filing",
+            case_type="records tampering",
+            status="active",
+            involved_district_ids=["district_old_quarter"],
+            objective_summary="Stop the quiet correction before it locks in.",
+        )
+    )
+    app.store.save_object(
+        city.model_copy(update={"active_case_ids": [*city.active_case_ids, "case_gen_failure_warning_003"]})
+    )
+    app._introduce_case("case_gen_failure_warning_003")
+
+    app.advance_case("case_gen_failure_warning_003")
+    case = app.store.load_object("CaseState", "case_gen_failure_warning_003")
+
+    assert case is not None
+    assert case.status == "escalated"
+    assert case.pressure_level == "urgent"
+    assert case.active_resolution_window == "narrowing"
+    assert "failure_warning_issued" in case.offscreen_risk_flags
 
 
 def test_journal_includes_stuck_recovery_actions(tmp_path) -> None:

@@ -82,7 +82,8 @@ def note_case_progress(
     updated_at: str,
     reason: str,
 ) -> CaseState:
-    next_status = "active" if case.status in {"stalled", "escalated"} else case.status
+    is_last_chance = "failure_warning_issued" in case.offscreen_risk_flags
+    next_status = case.status if is_last_chance else ("active" if case.status in {"stalled", "escalated"} else case.status)
     risk_flags = [flag for flag in case.offscreen_risk_flags if flag not in {"stalled_progress"}]
     district_effects = list(case.district_effects)
     progress_note = f"progress:{reason}"
@@ -91,11 +92,11 @@ def note_case_progress(
     return case.model_copy(
         update={
             "status": next_status,
-            "pressure_level": "low" if case.pressure_level == "rising" else case.pressure_level,
+            "pressure_level": case.pressure_level if is_last_chance else ("low" if case.pressure_level == "rising" else case.pressure_level),
             "time_since_last_progress": 0,
             "updated_at": updated_at,
             "offscreen_risk_flags": risk_flags,
-            "active_resolution_window": "open",
+            "active_resolution_window": "narrowing" if is_last_chance else "open",
             "district_effects": district_effects,
         }
     )
