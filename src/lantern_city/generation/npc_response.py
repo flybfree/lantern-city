@@ -335,6 +335,10 @@ class NPCResponseGenerationRequest:
                 "recent_events": npc.recent_events[-4:],
                 "player_flags": npc.player_flags,
                 "relationship_flags": npc.relationship_flags,
+                "player_relationship": _relationship_snapshot_payload(npc, "player"),
+                "loyalty_relationship": (
+                    None if not npc.loyalty else _relationship_snapshot_payload(npc, npc.loyalty)
+                ),
                 "emotional_register": _emotional_register(npc),
             },
             "scene": scene_payload,
@@ -384,6 +388,22 @@ def _emotional_register(npc: Any) -> str:
         parts.append("somewhat suspicious — watches for inconsistency in what the player says")
 
     return "; ".join(parts) if parts else "neutral"
+
+
+def _relationship_snapshot_payload(npc: Any, actor_id: str) -> dict[str, object] | None:
+    relationships = getattr(npc, "relationships", {})
+    snapshot = relationships.get(actor_id)
+    if snapshot is None:
+        return None
+    return {
+        "actor_id": actor_id,
+        "trust": snapshot.trust,
+        "suspicion": snapshot.suspicion,
+        "fear": snapshot.fear,
+        "status": snapshot.status,
+        "last_updated_at": snapshot.last_updated_at,
+        "last_changed_turn": snapshot.last_changed_turn,
+    }
 
 
 class NPCResponseGenerator:

@@ -20,6 +20,7 @@ from lantern_city.models import (
     DistrictState,
     NPCState,
     PlayerRequest,
+    RelationshipSnapshot,
     SceneState,
 )
 
@@ -234,6 +235,52 @@ def test_npc_response_request_payload_carries_recent_exit_lines_and_prompt_for_v
     assert '"recent_exit_lines"' in messages[1]["content"]
     assert "If that is all, I should get back to the ward glass." in messages[1]["content"]
     assert "do not reuse the same wording" in messages[1]["content"]
+
+
+def test_npc_response_request_payload_includes_social_pressure_snapshots() -> None:
+    active_slice = make_active_slice()
+    npc = active_slice.npcs[0].model_copy(
+        update={
+                "relationships": {
+                    "player": RelationshipSnapshot(
+                        trust=0.15,
+                        suspicion=0.55,
+                        fear=0.42,
+                        status="guarded",
+                        last_updated_at="turn_2",
+                        last_changed_turn="turn_2",
+                    ),
+                    "Memory Keepers": RelationshipSnapshot(
+                        trust=0.8,
+                        suspicion=0.1,
+                        fear=0.0,
+                        status="aligned",
+                        last_updated_at="turn_3",
+                        last_changed_turn="turn_3",
+                    ),
+                }
+            }
+        )
+    active_slice = ActiveSlice(
+        city=active_slice.city,
+        working_set=active_slice.working_set,
+        district=active_slice.district,
+        location=active_slice.location,
+        scene=active_slice.scene,
+        npcs=[npc],
+        clues=active_slice.clues,
+        case=active_slice.case,
+    )
+
+    payload = NPCResponseGenerationRequest(
+        request_id="req_npc_001",
+        active_slice=active_slice,
+        player_request=make_player_request(),
+    ).to_payload()
+
+    assert payload["npc"]["player_relationship"]["status"] == "guarded"
+    assert payload["npc"]["loyalty_relationship"]["status"] == "aligned"
+    assert payload["npc"]["loyalty_relationship"]["last_changed_turn"] == "turn_3"
 
 
 def test_npc_response_generator_builds_bounded_prompt_and_returns_validated_output() -> None:

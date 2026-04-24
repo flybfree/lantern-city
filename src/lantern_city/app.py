@@ -912,6 +912,9 @@ class LanternCityApp:
             lines.append(f"Case pressure: {cases[0].pressure_level}")
         else:
             lines.append("Current case: None")
+        social_pressure = self._current_social_pressure_summary(pos)
+        if social_pressure:
+            lines.append(f"Social pressure: {social_pressure}")
         lines.append(
             "Clues: "
             f"{len(clue_objects)} total / {credible_count} credible / "
@@ -1115,6 +1118,11 @@ class LanternCityApp:
             lines.append("Recent city movement:")
             for event in recent_npc_events:
                 lines.append(f"  - {event}")
+        relationship_shifts = self._recent_relationship_shifts(limit=4)
+        if relationship_shifts:
+            lines.append("Recent social pressure:")
+            for item in relationship_shifts:
+                lines.append(f"  - {item}")
         visible_case_clues = [
             clue
             for clue in clues
@@ -1186,6 +1194,9 @@ class LanternCityApp:
             lines.append("Local case pressure:")
             for case in local_cases[:3]:
                 lines.append(f"  - {case.title}: {case.pressure_level}")
+        social_pressure = self._current_social_pressure_summary(pos)
+        if social_pressure:
+            lines.append(f"Social pressure: {social_pressure}")
         standouts: list[str] = []
         for case in local_cases[:2]:
             standouts.extend(self._build_lead_lines(case=case, pos=pos, limit=2))
@@ -1487,6 +1498,46 @@ class LanternCityApp:
             if action not in deduped:
                 deduped.append(action)
         return deduped[:4]
+
+    def _current_social_pressure_summary(self, pos: ActiveWorkingSet | None) -> str:
+        if pos is None or not pos.npc_ids:
+            return ""
+        npc = self._npc(pos.npc_ids[0])
+        if npc is None:
+            return ""
+        parts = [f"{npc.name} is currently {npc.offscreen_state}"]
+        if npc.loyalty:
+            loyalty = npc.relationships.get(npc.loyalty)
+            if loyalty is not None and loyalty.status:
+                parts.append(f"{npc.loyalty}: {loyalty.status}")
+        player_rel = npc.relationships.get("player")
+        if player_rel is not None and player_rel.status:
+            parts.append(f"toward you: {player_rel.status}")
+        return "; ".join(parts)
+
+    def _recent_relationship_shifts(self, *, limit: int) -> list[str]:
+        reads: list[str] = []
+        for npc in sorted(
+            [
+                npc for npc in self.store.list_objects("NPCState")
+                if isinstance(npc, NPCState) and npc.memory_log
+            ],
+            key=lambda npc: npc.updated_at,
+            reverse=True,
+        ):
+            for entry in reversed(npc.memory_log[-3:]):
+                if not isinstance(entry, dict) or entry.get("memory_type") != "offscreen_event":
+                    continue
+                if npc.loyalty:
+                    loyalty = npc.relationships.get(npc.loyalty)
+                    if loyalty is not None and loyalty.status:
+                        reads.append(
+                            f"{npc.name}: {npc.loyalty} reads as {loyalty.status} while {npc.offscreen_state}."
+                        )
+                        break
+            if len(reads) >= limit:
+                break
+        return reads[:limit]
 
     def _matters_recovery_actions(
         self,

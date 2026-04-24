@@ -254,6 +254,36 @@ def test_build_context_includes_clue_readability_distinctions(tmp_path) -> None:
     assert "Why it matters:" in context
 
 
+def test_build_context_includes_social_pressure_for_current_npc(tmp_path) -> None:
+    llm = _RecordingLLM()
+    app = LanternCityApp(tmp_path / "lantern-city.sqlite3")
+    app.start_new_game()
+    app.enter_district("district_old_quarter")
+    app.go("location_shrine_lane")
+    npc = app._npc("npc_shrine_keeper")
+    assert npc is not None
+    app.store.save_object(
+        npc.model_copy(
+            update={
+                "offscreen_state": "obstructing",
+                "relationships": {
+                    **npc.relationships,
+                    "player": npc.relationships["player"].model_copy(update={"status": "guarded"}),
+                    npc.loyalty: npc.relationships[npc.loyalty].model_copy(update={"status": "aligned"}),
+                },
+            }
+        )
+    )
+    gm = GameMaster(app=app, llm=llm)
+
+    context = gm._build_context()
+
+    assert "Social pressure:" in context
+    assert "Ila Venn (npc_shrine_keeper) state=obstructing" in context
+    assert "player=guarded" in context
+    assert "loyalty=faction_memory_keepers:aligned" in context
+
+
 def test_narrate_system_prompt_mentions_clue_role_distinctions() -> None:
     llm = _RecordingLLM()
     gm = GameMaster(app=None, llm=llm)  # type: ignore[arg-type]

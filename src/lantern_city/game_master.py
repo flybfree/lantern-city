@@ -323,6 +323,25 @@ class GameMaster:
                         f"{case.discovery_hook}"
                     )
 
+        if current_npc_ids:
+            social_reads: list[str] = []
+            for npc_id in current_npc_ids[:2]:
+                npc = self.app._npc(npc_id)
+                if npc is None:
+                    continue
+                read = f"{npc.name} ({npc_id}) state={npc.offscreen_state}"
+                if npc.loyalty and npc.loyalty in npc.relationships:
+                    loyalty = npc.relationships[npc.loyalty]
+                    read += f" loyalty={npc.loyalty}:{loyalty.status or 'unknown'}"
+                if "player" in npc.relationships:
+                    player_rel = npc.relationships["player"]
+                    read += f" player={player_rel.status or 'unknown'}"
+                social_reads.append(read)
+            if social_reads:
+                lines.append("\nSocial pressure:")
+                for read in social_reads:
+                    lines.append(f"  {read}")
+
         # Clue count
         clue_count = len(pos.clue_ids) if pos is not None else 0
         lines.append(f"\nAcquired clues: {clue_count}")

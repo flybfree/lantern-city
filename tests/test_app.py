@@ -377,6 +377,45 @@ def test_status_summarizes_clue_picture(tmp_path) -> None:
     assert "support the case theory" in output
 
 
+def test_status_and_journal_surface_social_pressure(tmp_path) -> None:
+    app = LanternCityApp(tmp_path / "lantern-city.sqlite3")
+    app.start_new_game()
+    app.enter_district("district_old_quarter")
+    app.go("location_shrine_lane")
+    npc = app._npc("npc_shrine_keeper")
+    assert npc is not None
+    app.store.save_object(
+        npc.model_copy(
+            update={
+                "offscreen_state": "obstructing",
+                "memory_log": [
+                    *npc.memory_log,
+                    {
+                        "memory_type": "offscreen_event",
+                        "turn": "turn_3",
+                        "offscreen_state": "obstructing",
+                        "summary_text": "obstructing via location_shrine_lane",
+                        "source_actor_id": "world",
+                    },
+                ],
+                "relationships": {
+                    **npc.relationships,
+                    "player": npc.relationships["player"].model_copy(update={"status": "guarded"}),
+                    npc.loyalty: npc.relationships[npc.loyalty].model_copy(update={"status": "aligned"}),
+                },
+            }
+        )
+    )
+
+    status_output = app.status()
+    journal_output = app.journal()
+
+    assert "Social pressure: Ila Venn is currently obstructing;" in status_output
+    assert "toward you: guarded" in status_output
+    assert "Recent social pressure:" in journal_output
+    assert "Ila Venn: faction_memory_keepers reads as aligned while obstructing." in journal_output
+
+
 def test_what_matters_here_includes_exact_next_commands(tmp_path) -> None:
     app = LanternCityApp(tmp_path / "lantern-city.sqlite3")
     app.start_new_game()
