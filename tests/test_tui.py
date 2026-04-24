@@ -82,3 +82,15 @@ def test_recovery_panel_lines_fall_back_to_generic_scene_hint_without_location_o
     )
 
     assert any("- matters" in line for line in lines)
+
+
+def test_recovery_panel_lines_support_generated_case_ids() -> None:
+    lines = _recovery_panel_lines(
+        [SimpleNamespace(title="Borrowed Ledger", pressure_level="rising")],
+        clue_count=2,
+        credible_count=1,
+        current_case_id="case_gen_002",
+    )
+
+    assert any("Borrowed Ledger" in line for line in lines)
+    assert any("board case_gen_002" in line for line in lines)
