@@ -9,7 +9,7 @@ from pathlib import Path
 
 from lantern_city.bootstrap import bootstrap_city
 from lantern_city.case_bootstrap import bootstrap_generated_case
-from lantern_city.cases import transition_case
+from lantern_city.cases import advance_case_pressure, case_pressure_summary, note_case_progress, transition_case
 from lantern_city.clues import clarify_clue
 from lantern_city.engine import handle_player_request
 from lantern_city.generation.case_generation import (
@@ -197,6 +197,14 @@ class LanternCityApp:
         transient_text = self._maybe_transient_encounter(district_id, district, updated_at=TURN_ONE)
         if transient_text:
             lines.append(f"\n{transient_text}")
+        case_pressure_updates = self._run_case_pressure_updates(
+            updated_at=TURN_ONE,
+            progressed_case_ids=set(),
+            focus_district_id=district_id,
+        )
+        if case_pressure_updates:
+            lines.append("\nCase pressure:")
+            lines.extend(f"  - {line}" for line in case_pressure_updates[:4])
         offscreen_updates = self._run_offscreen_npc_updates(updated_at=TURN_ONE, focus_district_id=district_id)
         if offscreen_updates:
             lines.append("\nOffscreen movement:")
@@ -256,10 +264,14 @@ class LanternCityApp:
             propagation_notices = self._propagate_missingness(city, district, updated_at=TURN_TWO)
 
         # Activate the pending case now that dialogue has surfaced it
+        progressed_case_ids: set[str] = set()
         if pending_case is not None:
             activated = transition_case(pending_case, "active", updated_at=TURN_TWO)
             self.store.save_object(activated)
             self._introduce_case(pending_case.id)
+            progressed_case_ids.add(pending_case.id)
+        if clue is not None and clue.related_case_ids:
+            progressed_case_ids.update(clue.related_case_ids)
 
         lines = [outcome.response.narrative_text]
         if clue is not None:
@@ -267,6 +279,14 @@ class LanternCityApp:
         if pending_case is not None:
             lines.append(f'[Case opened: {pending_case.title}]')
         lines.extend(propagation_notices)
+        case_pressure_updates = self._run_case_pressure_updates(
+            updated_at=TURN_TWO,
+            progressed_case_ids=progressed_case_ids,
+            focus_district_id=outcome.active_slice.district.id if outcome.active_slice.district else None,
+        )
+        if case_pressure_updates:
+            lines.append("[Case pressure]")
+            lines.extend(case_pressure_updates[:4])
         offscreen_updates = self._run_offscreen_npc_updates(updated_at=TURN_TWO, focus_district_id=outcome.active_slice.district.id if outcome.active_slice.district else None, exclude_npc_ids={npc_id})
         if offscreen_updates:
             lines.append("[Offscreen shifts]")
@@ -368,6 +388,19 @@ class LanternCityApp:
             lines.append(f"[Case opened: {discovered_lead}]")
         lines.append(f"[Lantern: {district.lantern_condition}]")
         lines.extend(propagation_notices)
+        progressed_case_ids = {
+            case_id
+            for clue in updated_clues
+            for case_id in clue.related_case_ids
+        }
+        case_pressure_updates = self._run_case_pressure_updates(
+            updated_at=TURN_THREE,
+            progressed_case_ids=progressed_case_ids,
+            focus_district_id=district.id,
+        )
+        if case_pressure_updates:
+            lines.append("[Case pressure]")
+            lines.extend(case_pressure_updates[:4])
         offscreen_updates = self._run_offscreen_npc_updates(updated_at=TURN_THREE, focus_district_id=district.id)
         if offscreen_updates:
             lines.append("[Offscreen shifts]")
@@ -460,11 +493,59 @@ class LanternCityApp:
         ]
         if surfaced_hook:
             lines.append(f"\n{surfaced_hook}")
+        case_pressure_updates = self._run_case_pressure_updates(
+            updated_at=TURN_FOUR,
+            progressed_case_ids={case_id},
+        )
+        if case_pressure_updates:
+            lines.append("\nCase pressure:")
+            lines.extend(f"  - {line}" for line in case_pressure_updates[:4])
         offscreen_updates = self._run_offscreen_npc_updates(updated_at=TURN_FOUR)
         if offscreen_updates:
             lines.append("\nOffscreen shifts:")
             lines.extend(f"  - {line}" for line in offscreen_updates[:4])
         return "\n".join(lines)
+
+    def _run_case_pressure_updates(
+        self,
+        *,
+        updated_at: str,
+        progressed_case_ids: set[str],
+        focus_district_id: str | None = None,
+    ) -> list[str]:
+        city = self._require_city()
+        cases = [
+            case for case_id in city.active_case_ids
+            if isinstance(case := self.store.load_object("CaseState", case_id), CaseState)
+        ]
+
+        updated_cases: list[CaseState] = []
+        notices: list[str] = []
+        for case in cases:
+            if case.status == "latent":
+                continue
+            if focus_district_id is not None and focus_district_id not in case.involved_district_ids:
+                continue
+
+            current = case
+            if case.id in progressed_case_ids:
+                current = note_case_progress(
+                    current,
+                    updated_at=updated_at,
+                    reason="player advanced the investigation",
+                )
+                notices.append(f"{case.title}: {case_pressure_summary(current)}")
+            else:
+                current, pressure_notices = advance_case_pressure(current, updated_at=updated_at)
+                notices.extend(pressure_notices)
+                notices.append(f"{case.title}: {case_pressure_summary(current)}")
+
+            if current != case:
+                updated_cases.append(current.model_copy(update={"version": case.version + 1}))
+
+        if updated_cases:
+            self.store.save_objects_atomically(updated_cases)
+        return notices
 
     def _run_offscreen_npc_updates(
         self,

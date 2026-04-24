@@ -209,6 +209,12 @@ def _build_case_state(seed: CitySeedDocument, case_id: str) -> CaseState:
         involved_faction_ids=list(case.involved_faction_ids),
         open_questions=list(case.failure_modes),
         objective_summary=f"Resolve a {case.intensity} {case.type} case with {case.scope} scope.",
+        pressure_level="low",
+        time_since_last_progress=0,
+        offscreen_risk_flags=["latent_case"],
+        active_resolution_window="closed",
+        district_effects=[],
+        npc_pressure_targets=list(case.key_npc_ids),
     )
 
 

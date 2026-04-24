@@ -156,6 +156,12 @@ class CaseState(RuntimeModel):
     objective_summary: str = ""
     resolution_summary: str | None = None
     fallout_summary: str | None = None
+    pressure_level: str = "low"
+    time_since_last_progress: int = 0
+    offscreen_risk_flags: list[str] = Field(default_factory=list)
+    active_resolution_window: str = "open"
+    district_effects: list[str] = Field(default_factory=list)
+    npc_pressure_targets: list[str] = Field(default_factory=list)
     # Generated case fields
     discovery_hook: str = ""
     hook_npc_id: str = ""  # NPC who introduces the case through conversation; empty = district-entry trigger
