@@ -76,3 +76,36 @@ def test_cli_returns_helpful_error_for_unknown_npc_in_current_slice(tmp_path: Pa
 
     assert "Missing required world object NPCState:npc_sered_marr" in output
     assert "Hint: run `enter <district_id>` first and use one of the IDs shown in the district output." in output
+
+
+def test_cli_startup_mode_can_force_mvp_baseline_even_with_llm_config(tmp_path: Path) -> None:
+    database_path = tmp_path / "lantern-city.sqlite3"
+
+    output = run_cli(
+        "--db",
+        str(database_path),
+        "--llm-url",
+        "http://localhost:1234/v1",
+        "--llm-model",
+        "test-model",
+        "--startup-mode",
+        "mvp_baseline",
+        "start",
+    )
+
+    assert "Active case: The Missing Clerk" in output
+    assert "Model check:" not in output
+
+
+def test_cli_reports_invalid_generated_runtime_without_llm(tmp_path: Path) -> None:
+    database_path = tmp_path / "lantern-city.sqlite3"
+
+    output = run_cli(
+        "--db",
+        str(database_path),
+        "--startup-mode",
+        "generated_runtime",
+        "start",
+    )
+
+    assert "Error: startup_mode='generated_runtime' requires llm_config" in output

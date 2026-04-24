@@ -1,0 +1,4 @@
+{
+  "llm_url": "http://localhost:1234/v1",
+  "llm_model": "test-model"
+}

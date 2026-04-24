@@ -16,6 +16,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--db", dest="database_path", default="lantern-city.sqlite3")
     parser.add_argument("--llm-url", dest="llm_url", default=None)
     parser.add_argument("--llm-model", dest="llm_model", default=None)
+    parser.add_argument(
+        "--startup-mode",
+        dest="startup_mode",
+        choices=("auto", "mvp_baseline", "generated_runtime"),
+        default="auto",
+    )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     subparsers.add_parser("start")
@@ -88,7 +94,11 @@ def main(argv: list[str] | None = None, *, stdout: TextIO | None = None) -> int:
     else:
         llm_config = _load_llm_config(args.database_path)
 
-    app = LanternCityApp(Path(args.database_path), llm_config=llm_config)
+    app = LanternCityApp(
+        Path(args.database_path),
+        llm_config=llm_config,
+        startup_mode=args.startup_mode,
+    )
 
     try:
         if args.command == "start":
@@ -117,6 +127,8 @@ def main(argv: list[str] | None = None, *, stdout: TextIO | None = None) -> int:
             "Hint: run `enter <district_id>` first and use one of the IDs shown in the district output."
         )
     except LookupError as exc:
+        output = f"Error: {exc}"
+    except ValueError as exc:
         output = f"Error: {exc}"
 
     destination = stdout or sys.stdout

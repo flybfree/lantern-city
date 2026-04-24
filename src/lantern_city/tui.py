@@ -407,7 +407,11 @@ class GenerateCityScreen(Screen[Path | None]):
 
             llm_config = OpenAICompatibleConfig(base_url=url, model=model)
             _save_llm_config(str(output), url, model)
-            game = LanternCityApp(output, llm_config=llm_config)
+            game = LanternCityApp(
+                output,
+                llm_config=llm_config,
+                startup_mode="generated_runtime",
+            )
             try:
                 await asyncio.to_thread(
                     game.start_new_game, concept or None, _emit
@@ -1573,6 +1577,12 @@ def main(argv: list[str] | None = None) -> int:
                         help="Path to a city SQLite database. Omit to pick from available files.")
     parser.add_argument("--llm-url", dest="llm_url", default=None)
     parser.add_argument("--llm-model", dest="llm_model", default=None)
+    parser.add_argument(
+        "--startup-mode",
+        dest="startup_mode",
+        choices=("auto", "mvp_baseline", "generated_runtime"),
+        default="auto",
+    )
     args = parser.parse_args(argv)
 
     # Resolve database path — always show picker if not specified
@@ -1592,7 +1602,11 @@ def main(argv: list[str] | None = None) -> int:
         llm_config = _load_llm_config(db_path)
 
     _configure_logging(db_path)
-    game = LanternCityApp(Path(db_path), llm_config=llm_config)
+    game = LanternCityApp(
+        Path(db_path),
+        llm_config=llm_config,
+        startup_mode=args.startup_mode,
+    )
 
     gm: GameMaster | None = None
     if llm_config is not None:
