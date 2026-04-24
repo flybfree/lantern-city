@@ -76,6 +76,83 @@ def apply_player_flag(npc: NPCState, *, flag: str, updated_at: str) -> NPCState:
     )
 
 
+def append_memory_entry(
+    npc: NPCState,
+    *,
+    memory_entry: dict[str, object],
+    updated_at: str,
+    keep: int = 12,
+) -> NPCState:
+    return npc.model_copy(
+        update={
+            "memory_log": [*npc.memory_log, memory_entry][-keep:],
+            "updated_at": updated_at,
+        }
+    )
+
+
+def build_conversation_memory_entry(
+    *,
+    request_id: str,
+    input_text: str,
+    updated_at: str,
+    npc_response: str | None = None,
+    npc_exit_line: str | None = None,
+    dialogue_act: str | None = None,
+    npc_stance: str | None = None,
+    relationship_tag: str | None = None,
+    player_flag: str | None = None,
+    summary_text: str | None = None,
+    related_case_ids: list[str] | None = None,
+    related_clue_ids: list[str] | None = None,
+) -> dict[str, object]:
+    entry: dict[str, object] = {
+        "memory_type": "conversation",
+        "turn": updated_at,
+        "request_id": request_id,
+        "intent": "talk_to_npc",
+        "input_text": input_text,
+    }
+    if npc_response is not None:
+        entry["npc_response"] = npc_response
+    if npc_exit_line is not None:
+        entry["npc_exit_line"] = npc_exit_line
+    if dialogue_act is not None:
+        entry["dialogue_act"] = dialogue_act
+    if npc_stance is not None:
+        entry["npc_stance"] = npc_stance
+    if relationship_tag is not None:
+        entry["relationship_tag"] = relationship_tag
+    if player_flag is not None:
+        entry["player_flag"] = player_flag
+    if summary_text is not None:
+        entry["summary_text"] = summary_text
+    if related_case_ids:
+        entry["related_case_ids"] = related_case_ids
+    if related_clue_ids:
+        entry["related_clue_ids"] = related_clue_ids
+    return entry
+
+
+def build_offscreen_memory_entry(
+    *,
+    updated_at: str,
+    offscreen_state: str,
+    summary_text: str,
+    location_id: str | None = None,
+) -> dict[str, object]:
+    entry: dict[str, object] = {
+        "memory_type": "offscreen_event",
+        "turn": updated_at,
+        "offscreen_state": offscreen_state,
+        "summary_text": summary_text,
+        "source_actor_id": "world",
+    }
+    if location_id is not None:
+        entry["location_id"] = location_id
+    return entry
+
+
 def run_offscreen_npc_tick(
     npc: NPCState,
     *,
@@ -108,6 +185,18 @@ def run_offscreen_npc_tick(
         state_changes.append(f"{npc.name} is now {new_state}.")
     if new_location_id != npc.location_id and new_location_id is not None:
         state_changes.append(f"{npc.name} moved to {new_location_id}.")
+
+    if state_changes:
+        updated = append_memory_entry(
+            updated,
+            memory_entry=build_offscreen_memory_entry(
+                updated_at=updated_at,
+                offscreen_state=new_state,
+                summary_text=recent_event,
+                location_id=new_location_id,
+            ),
+            updated_at=updated_at,
+        )
 
     return SocialUpdateResult(npc=updated, state_changes=state_changes)
 
@@ -175,8 +264,11 @@ def _clamp01(value: float) -> float:
 
 __all__ = [
     "SocialUpdateResult",
+    "append_memory_entry",
     "apply_player_flag",
     "apply_relationship_shift",
+    "build_conversation_memory_entry",
+    "build_offscreen_memory_entry",
     "run_offscreen_npc_tick",
     "summarize_relationship",
 ]

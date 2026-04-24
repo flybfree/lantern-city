@@ -41,7 +41,7 @@ def test_end_to_end_flow_bootstraps_seed_and_advances_case_with_persistence(tmp_
     assert snapshot["case_status"] == "solved"
     assert snapshot["clue_reliability"] == "solid"
     assert snapshot["lantern_condition"] == "dim"
-    assert snapshot["npc_memory_count"] == 1
+    assert snapshot["npc_memory_count"] >= 2
     assert snapshot["lantern_understanding_score"] > 18
 
 

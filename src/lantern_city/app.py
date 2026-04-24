@@ -707,6 +707,7 @@ class LanternCityApp:
                 result.npc.offscreen_state != npc.offscreen_state
                 or result.npc.location_id != npc.location_id
                 or result.npc.recent_events != npc.recent_events
+                or result.npc.memory_log != npc.memory_log
             ):
                 updated_npcs.append(result.npc.model_copy(update={"version": npc.version + 1}))
                 changes.extend(result.state_changes)

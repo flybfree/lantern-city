@@ -25,7 +25,13 @@ from lantern_city.llm_client import OpenAICompatibleConfig, OpenAICompatibleLLMC
 from lantern_city.models import ClueState, DistrictState, NPCState, PlayerProgressState, PlayerRequest, RuntimeModel
 from lantern_city.orchestrator import orchestrate_request
 from lantern_city.response import ResponsePayload, compose_response
-from lantern_city.social import apply_player_flag, apply_relationship_shift, summarize_relationship
+from lantern_city.social import (
+    append_memory_entry,
+    apply_player_flag,
+    apply_relationship_shift,
+    build_conversation_memory_entry,
+    summarize_relationship,
+)
 from lantern_city.store import SQLiteStore
 from lantern_city.log import get_logger
 
@@ -197,6 +203,8 @@ def _handle_npc_conversation(
             updated_npc = apply_player_flag(updated_npc, flag=player_flag, updated_at=request.updated_at)
             state_changes.append(f"{npc.name} now remembers: {player_flag}.")
         state_changes.append(f"Relationship state: {summarize_relationship(updated_npc)}.")
+    else:
+        player_flag = None
 
     response = compose_response(
         narrative_text=narrative_text,
@@ -210,22 +218,38 @@ def _handle_npc_conversation(
         next_actions=_conversation_next_actions(case_title),
     )
 
-    memory_entry: dict[str, str] = {
-        "request_id": request.id,
-        "intent": "talk_to_npc",
-        "input_text": request.input_text,
-    }
-    if npc_line is not None:
-        memory_entry["npc_response"] = npc_line
-    if generation_result is not None and generation_result.cacheable_text.exit_line_if_needed is not None:
-        memory_entry["npc_exit_line"] = generation_result.cacheable_text.exit_line_if_needed
-
-    updated_npc = updated_npc.model_copy(
+    memory_entry = build_conversation_memory_entry(
+        request_id=request.id,
+        input_text=request.input_text,
+        updated_at=request.updated_at,
+        npc_response=npc_line,
+        npc_exit_line=(
+            None
+            if generation_result is None
+            else generation_result.cacheable_text.exit_line_if_needed
+        ),
+        dialogue_act=(
+            None if generation_result is None else generation_result.structured_updates.dialogue_act
+        ),
+        npc_stance=(
+            None if generation_result is None else generation_result.structured_updates.npc_stance
+        ),
+        relationship_tag=(
+            None
+            if generation_result is None
+            else generation_result.structured_updates.relationship_shift.tag
+        ),
+        player_flag=player_flag,
+        summary_text=None if generation_result is None else generation_result.summary_text,
+        related_case_ids=[] if clue is None else clue.related_case_ids,
+        related_clue_ids=[] if clue is None else [clue.id],
+    )
+    updated_npc = append_memory_entry(
+        updated_npc,
+        memory_entry=memory_entry,
+        updated_at=request.updated_at,
+    ).model_copy(
         update={
-            "memory_log": [
-                *updated_npc.memory_log,
-                memory_entry,
-            ],
             "version": updated_npc.version + 1,
             "updated_at": request.updated_at,
         }

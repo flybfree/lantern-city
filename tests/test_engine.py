@@ -318,9 +318,13 @@ def test_handle_player_request_returns_npc_conversation_response_and_only_mutate
     assert npc.updated_at == TURN_ONE
     assert npc.memory_log == [
         {
+            "memory_type": "conversation",
+            "turn": TURN_ONE,
             "request_id": request.id,
             "intent": "talk_to_npc",
             "input_text": "Ask about the outage.",
+            "related_case_ids": [CASE_ID],
+            "related_clue_ids": [CLUE_ID],
         }
     ]
     assert populated_store.load_cache(f"response:talk_to_npc:{NPC_ID}:ask about the outage") is None
@@ -374,9 +378,15 @@ def test_handle_player_request_persists_generated_exit_line_in_npc_memory(
 
     assert outcome.response.narrative_text == "He was afraid of how quickly a correction could become an erasure."
     assert isinstance(npc, NPCState)
+    assert npc.memory_log[-1]["memory_type"] == "conversation"
+    assert npc.memory_log[-1]["turn"] == TURN_ONE
     assert npc.memory_log[-1]["npc_exit_line"] == (
         "That is all I can risk saying while the lamps are still watching."
     )
+    assert npc.memory_log[-1]["dialogue_act"] == "answer_then_close"
+    assert npc.memory_log[-1]["npc_stance"] == "guarded"
+    assert npc.memory_log[-1]["relationship_tag"] == "steady"
+    assert npc.memory_log[-1]["summary_text"] == "Ila answers carefully, then closes the thread."
 
 
 def test_handle_player_request_returns_inspection_response_without_state_changes(
