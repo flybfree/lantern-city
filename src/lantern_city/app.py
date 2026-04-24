@@ -79,11 +79,11 @@ class LanternCityApp:
         existing_city = self._city()
         if existing_city is not None:
             case = self._active_case(existing_city)
-            case_title = "None" if case is None else self._display_case_title(case.title)
+            case_title = "None introduced yet" if case is None else self._display_case_title(case.title)
             return (
                 f"Existing game loaded: {existing_city.id}\n"
                 f"Districts: {', '.join(existing_city.district_ids)}\n"
-                f"Active case: {case_title}"
+                f"Introduced case: {case_title}"
             )
 
         if self.llm_config is not None:
@@ -109,7 +109,7 @@ class LanternCityApp:
 
         city = self._require_city()
         case = self._active_case(city)
-        case_title = "None" if case is None else self._display_case_title(case.title)
+        case_title = "None introduced yet" if case is None else self._display_case_title(case.title)
         first_district = (
             case.involved_district_ids[0]
             if case and case.involved_district_ids
@@ -118,7 +118,7 @@ class LanternCityApp:
         return (
             f"Lantern City ready: seeded {result.city_id}\n"
             f"Districts: {', '.join(result.district_ids)}\n"
-            f"Active case: {case_title}\n"
+            f"Introduced case: {case_title}\n"
             f"Next: enter {first_district}"
         )
 
@@ -351,11 +351,6 @@ class LanternCityApp:
         )
         all_clues = outcome.active_slice.clues
 
-        # Non-hook cases are discovered through physical inspection (not district entry).
-        # Run discovery before clue filtering so newly activated cases get their clues surfaced.
-        discovered_lead = self._check_case_discovery(district.id, updated_at=TURN_THREE)
-        log.debug("inspect_location case_discovery=%r", discovered_lead)
-
         # Only surface clues whose cases are active — never reveal latent-case clues.
         # NPC clues are only revealed through talk_to_npc.
         active_case_ids: set[str] = {
@@ -412,8 +407,6 @@ class LanternCityApp:
                 f"{_clue_label(c.id)}: {c.reliability}" for c in updated_clues
             )
             lines.append(f"[Clue found: {clue_status}]")
-        if discovered_lead:
-            lines.append(f"[Case opened: {discovered_lead}]")
         lines.append(f"[Lantern: {district.lantern_condition}]")
         lines.extend(propagation_notices)
         self._append_scene_affordances(
@@ -503,24 +496,6 @@ class LanternCityApp:
             if len(non_terminal) < 2:
                 self._generate_latent_cases(count=1)
 
-        # Surface a latent case if no active investigations remain after resolution
-        city = self._require_city()
-        still_active = [
-            obj
-            for cid in city.active_case_ids
-            if isinstance(obj := self.store.load_object("CaseState", cid), CaseState)
-            and obj.status not in {"solved", "partially solved", "failed", "latent"}
-        ]
-        surfaced_hook: str | None = None
-        if not still_active:
-            for cid in city.active_case_ids:
-                next_case = self.store.load_object("CaseState", cid)
-                if isinstance(next_case, CaseState) and next_case.status == "latent":
-                    activated = transition_case(next_case, "active", updated_at=TURN_FOUR)
-                    self.store.save_object(activated)
-                    surfaced_hook = activated.discovery_hook or f"A new lead has emerged: {activated.title}"
-                    break
-
         lines = [
             f"Case status: {updated_case.status}",
             f"Resolution: {path.replace('_', ' ')}",
@@ -529,8 +504,17 @@ class LanternCityApp:
             f"Access: {progress.access.score} ({progress.access.tier})",
             f"Leverage: {progress.leverage.score} ({progress.leverage.tier})",
         ]
-        if surfaced_hook:
-            lines.append(f"\n{surfaced_hook}")
+        city = self._require_city()
+        latent_remaining = [
+            obj
+            for cid in city.active_case_ids
+            if isinstance(obj := self.store.load_object("CaseState", cid), CaseState)
+            and obj.status == "latent"
+        ]
+        if latent_remaining:
+            lines.append("")
+            lines.append("No new case has been introduced yet.")
+            lines.append("Find the next lead through district context or NPC interaction.")
         lines.append("")
         lines.append("Follow-up:")
         lines.append("  - overview")
@@ -1462,27 +1446,12 @@ class LanternCityApp:
         return f"[Passing: {encounter.archetype}]\n{narrative}"
 
     def _check_case_discovery(self, district_id: str, *, updated_at: str) -> str | None:
-        """Transition latent cases to active on district entry — only for cases without a hook NPC.
+        """Ambient world traversal does not introduce cases.
 
-        Cases with hook_npc_id are introduced through NPC conversation, not district entry.
+        Cases must be surfaced explicitly through a hook NPC / contextual GM framing,
+        not by merely inspecting a relevant district or location.
         """
-        log.debug("_check_case_discovery district=%r", district_id)
-        city = self._require_city()
-        for case_id in city.active_case_ids:
-            case = self.store.load_object("CaseState", case_id)
-            if not isinstance(case, CaseState):
-                continue
-            if case.status != "latent":
-                continue
-            if case.hook_npc_id:
-                continue  # This case is introduced via NPC conversation
-            if district_id not in case.involved_district_ids:
-                continue
-            log.debug("_check_case_discovery activating case=%r", case_id)
-            updated_case = transition_case(case, "active", updated_at=updated_at)
-            self.store.save_object(updated_case)
-            self._introduce_case(case_id)
-            return case.discovery_hook or f"A new lead has emerged: {case.title}"
+        log.debug("_check_case_discovery disabled district=%r", district_id)
         return None
 
     def _check_npc_case_hook(self, npc_id: str, *, updated_at: str) -> str | None:
@@ -2343,6 +2312,23 @@ class LanternCityApp:
             }
         )
 
+        missing_clerk_case = self.store.load_object("CaseState", "case_missing_clerk")
+        updated_missing_clerk_case = (
+            missing_clerk_case.model_copy(
+                update={
+                    "hook_npc_id": updated_shrine_keeper.id,
+                    "discovery_hook": (
+                        "Ila Venn lowers her voice and admits that the archive lantern trouble "
+                        "is tied to a missing registry clerk named Tovin Vale. She needs someone "
+                        "outside the archive office to follow it before the record closes over him."
+                    ),
+                    "updated_at": TURN_ZERO,
+                }
+            )
+            if isinstance(missing_clerk_case, CaseState)
+            else None
+        )
+
         self.store.save_objects_atomically(
             [
                 updated_old_quarter,
@@ -2399,6 +2385,7 @@ class LanternCityApp:
                 conduit_run,
                 alteration_chamber,
                 updated_route_warden,
+                *([updated_missing_clerk_case] if updated_missing_clerk_case is not None else []),
             ]
         )
 
@@ -2515,7 +2502,11 @@ class LanternCityApp:
     def _active_case(self, city) -> object:
         if not city.active_case_ids:
             return None
-        return self.store.load_object("CaseState", city.active_case_ids[0])
+        for case_id in city.active_case_ids:
+            case = self.store.load_object("CaseState", case_id)
+            if isinstance(case, CaseState) and case.status != "latent":
+                return case
+        return None
 
     def _npc_clue(self, npc: NPCState) -> ClueState | None:
         """Return the first non-solid clue from this NPC's known_clue_ids, or the primary clue."""

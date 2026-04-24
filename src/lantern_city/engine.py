@@ -470,12 +470,12 @@ def _conversation_next_actions(case_title: str | None) -> list[str]:
 
 
 def _district_notable_objects(active_slice: ActiveSlice) -> list[str]:
-    objects: list[str] = []
-    for location in active_slice.locations[:3]:
-        for scene_object in location.scene_objects[:2]:
-            if scene_object not in objects:
-                objects.append(scene_object)
-    return objects[:4]
+    if active_slice.district is None:
+        return []
+    # District-entry slices do not carry a list of LocationState objects, only IDs.
+    # Surface those locations as the notable scene targets instead of crashing on
+    # a non-existent ActiveSlice.locations field.
+    return [_display_name(location_id) for location_id in active_slice.district.visible_locations[:4]]
 
 
 def _conversation_notable_objects(active_slice: ActiveSlice, npc: NPCState) -> list[str]:

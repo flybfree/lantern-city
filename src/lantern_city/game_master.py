@@ -80,6 +80,10 @@ self-commentary. Begin immediately with the narrative sentence.
 - If an action failed, narrate it naturally without breaking immersion.
 - If the game events contain "[action not possible:", treat the action as a failure. Do not narrate it as if it succeeded.
 - If no game actions executed, do not narrate movement or discovery as though the state changed.
+- If a game event contains "[command ok:", treat that command as successful.
+- If a successful game event contains direct dialogue text before tags like "[Clue:" or "What you learned:",
+  the NPC did respond. Do not narrate silence, refusal, or failed conversation in that case.
+- Never describe a turn as failure, refusal, silence, or resistance when all executed commands succeeded.
 - If the game events include a "[Case opened: …]" tag, this is a pivotal moment. \
 You MUST make clear in the narrative that the player has just become aware of a new \
 investigation — name the case or its subject explicitly so the player understands \
@@ -115,6 +119,7 @@ class GameMaster:
         log.debug("GM.process input=%r", player_input)
         context = self._build_context()
         commands = self._interpret(player_input, context)
+        commands = self._normalize_commands(commands, player_input)
         log.debug("GM.interpret commands=%r", commands)
         results = self._execute(commands)
         log.debug("GM.execute results=%r", results)
@@ -357,6 +362,41 @@ class GameMaster:
             pass
         return []
 
+    def _normalize_commands(self, commands: list[str], player_input: str) -> list[str]:
+        normalized: list[str] = []
+        for command in commands:
+            parts = command.split(maxsplit=1)
+            if not parts:
+                continue
+            verb = parts[0].lower()
+            arg = "" if len(parts) == 1 else parts[1]
+
+            if verb in {"enter", "look"} and arg:
+                district_id = self._match_district_from_player_text(player_input)
+                if district_id is not None:
+                    normalized.append(f"{verb} {district_id}")
+                    continue
+
+            normalized.append(command)
+        return normalized
+
+    def _match_district_from_player_text(self, player_input: str) -> str | None:
+        city = self.app._city()
+        if city is None:
+            return None
+        text = _normalize_match_text(player_input)
+        best_id: str | None = None
+        best_score = 0
+        for district_id in city.district_ids:
+            district = self.app._district(district_id)
+            if district is None:
+                continue
+            score = _score_named_target(text, district.name, district_id)
+            if score > best_score:
+                best_score = score
+                best_id = district_id
+        return best_id if best_score >= 6 else None
+
     # ------------------------------------------------------------------
     # Phase 2: execute
     # ------------------------------------------------------------------
@@ -382,11 +422,30 @@ class GameMaster:
         results: list[str],
         context: str,
     ) -> str:
+        success_count = sum(1 for result in results if "[command ok:" in result)
+        failure_count = sum(1 for result in results if "[command failed:" in result or "[action not possible:" in result)
+        direct_dialogue = any(
+            "[command ok:" in result
+            and "talk " in result
+            and "[Clue:" in result or "What you learned:" in result
+            for result in results
+        )
+        summary_lines = [
+            f"Executed commands: {len(commands)}",
+            f"Successful commands: {success_count}",
+            f"Failed commands: {failure_count}",
+        ]
+        if direct_dialogue:
+            summary_lines.append("A successful conversation happened and produced concrete information.")
         if commands and results:
             pairs = "\n".join(
                 f"  > {cmd}\n  {res}\n" for cmd, res in zip(commands, results)
             )
-            events_block = f"\nGame events this turn:\n{pairs}"
+            events_block = (
+                "\nResolution summary:\n"
+                + "\n".join(f"  - {line}" for line in summary_lines)
+                + f"\n\nGame events this turn:\n{pairs}"
+            )
         else:
             events_block = "\n(No game actions executed — answer from context and history.)"
 
@@ -470,6 +529,31 @@ _KNOWN_VERBS: frozenset[str] = frozenset(
 )
 
 _TOOL_CALL_RE = re.compile(r"[`{}<|]|tool_call|```", re.IGNORECASE)
+
+
+def _normalize_match_text(text: str) -> str:
+    lowered = text.lower().replace("_", " ").replace("-", " ")
+    lowered = re.sub(r"[^a-z0-9\s]", " ", lowered)
+    return " ".join(lowered.split())
+
+
+def _score_named_target(player_text: str, display_name: str, object_id: str) -> int:
+    name_text = _normalize_match_text(display_name)
+    id_text = _normalize_match_text(object_id)
+    score = 0
+
+    if name_text and name_text in player_text:
+        score += 100
+    if id_text and id_text in player_text:
+        score += 80
+
+    player_words = set(player_text.split())
+    name_words = set(name_text.split())
+    id_words = set(id_text.split())
+    score += 4 * len(player_words & name_words)
+    score += 2 * len(player_words & id_words)
+
+    return score
 
 
 def _rejoin_split_commands(commands: list[str]) -> list[str]:
