@@ -43,7 +43,7 @@ from lantern_city.cli import (
 )
 from lantern_city.game_master import GameMaster
 from lantern_city.llm_client import OpenAICompatibleConfig, OpenAICompatibleLLMClient
-from lantern_city.models import CaseState, CityState, LocationState, PlayerProgressState
+from lantern_city.models import CaseState, CityState, ClueState, LocationState, PlayerProgressState
 
 # Direct-command verbs whose output goes to the narrative pane (not info pane)
 _NARRATIVE_INFO_COMMANDS = frozenset({"clues", "look", "overview"})
@@ -1340,12 +1340,14 @@ class LanternCityTUI(App[None]):
         clue_color = "green" if clue_count > 0 else "dim"
         lines.append(f"[bold]Clues:[/bold] [{clue_color}]{clue_count} acquired[/{clue_color}]")
         credible_count = 0
+        clue_objects: list[ClueState] = []
         if clue_count > 0:
             uncertain_count = 0
             for clue_id in (pos.clue_ids if pos is not None else []):
                 try:
                     clue = self._game.store.load_object("ClueState", clue_id)
                     if isinstance(clue, ClueState):
+                        clue_objects.append(clue)
                         if clue.reliability in ("credible", "solid"):
                             credible_count += 1
                         elif clue.reliability != "contradicted":
@@ -1356,6 +1358,10 @@ class LanternCityTUI(App[None]):
                 f"  [green]{credible_count} credible[/green]"
                 f"  [dim]{uncertain_count} uncertain[/dim]"
             )
+            clue_reading = _clue_reading_lines(clue_objects)
+            if clue_reading:
+                lines.append("  [bold]Clue reading:[/bold]")
+                lines.extend(clue_reading)
             lines.append("  [dim]say 'show my clues' or use 'board' / 'leads' / 'journal'[/dim]")
 
         # ── What to do next ──────────────────────────────────────────
@@ -1507,6 +1513,47 @@ def _next_step_hint(active_cases: list, clue_count: int, credible_count: int) ->
     if credible_count == 0:
         return "Talk to NPCs to raise clue reliability before resolving. Use 'board' to review open questions."
     return f"Ready to attempt resolution — type: case {case.id} or use 'leads' for one more pass."
+
+
+def _clue_reading_lines(clues: list[ClueState]) -> list[str]:
+    if not clues:
+        return []
+    credible = [clue for clue in clues if clue.reliability in {"credible", "solid"}]
+    contradicted = [clue for clue in clues if clue.reliability == "contradicted"]
+    uncertain = [clue for clue in clues if clue.reliability not in {"credible", "solid", "contradicted"}]
+    lines: list[str] = []
+    parts: list[str] = []
+    if credible:
+        parts.append(f"{len(credible)} support")
+    if contradicted:
+        parts.append(f"{len(contradicted)} contradict")
+    if uncertain:
+        parts.append(f"{len(uncertain)} need follow-up")
+    if parts:
+        lines.append(f"  [dim]{' / '.join(parts)}[/dim]")
+    for clue in sorted(clues, key=lambda clue: (0 if clue.reliability in {"credible", "solid"} else 1 if clue.reliability == "contradicted" else 2, clue.id))[:3]:
+        lines.append(
+            f"  [dim]- {_clue_short_role(clue)}: {escape(_clue_label(clue.id))}[/dim]"
+        )
+    return lines
+
+
+def _clue_short_role(clue: ClueState) -> str:
+    if clue.reliability == "contradicted":
+        return "contradiction"
+    if clue.reliability in {"credible", "solid"}:
+        if clue.related_case_ids:
+            return "supports case"
+        return "credible lead"
+    if clue.source_type == "document":
+        return "paper trail"
+    if clue.source_type == "testimony":
+        return "lead to verify"
+    return "follow-up lead"
+
+
+def _clue_label(clue_id: str) -> str:
+    return clue_id.removeprefix("clue_").replace("_", " ").title()
 
 
 def _recovery_panel_lines(

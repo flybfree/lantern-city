@@ -2,7 +2,8 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from lantern_city.tui import _format_start_result_markup, _recovery_panel_lines
+from lantern_city.models import ClueState
+from lantern_city.tui import _clue_reading_lines, _format_start_result_markup, _recovery_panel_lines
 
 
 def test_format_start_result_markup_highlights_model_check_pass() -> None:
@@ -98,3 +99,47 @@ def test_recovery_panel_lines_support_generated_case_ids() -> None:
 
     assert any("Borrowed Ledger" in line for line in lines)
     assert any("board case_gen_002" in line for line in lines)
+
+
+def test_clue_reading_lines_surface_support_contradiction_and_follow_up() -> None:
+    lines = _clue_reading_lines(
+        [
+            ClueState(
+                id="clue_missing_clerk_ledgers",
+                created_at="turn_0",
+                updated_at="turn_0",
+                source_type="document",
+                source_id="location_shrine_lane",
+                clue_text="ledger clue",
+                reliability="credible",
+                related_case_ids=["case_missing_clerk"],
+            ),
+            ClueState(
+                id="clue_family_record_discrepancy",
+                created_at="turn_0",
+                updated_at="turn_0",
+                source_type="document",
+                source_id="location_archive_steps",
+                clue_text="contradicted clue",
+                reliability="contradicted",
+                related_case_ids=["case_missing_clerk"],
+            ),
+            ClueState(
+                id="clue_missing_maintenance_line",
+                created_at="turn_0",
+                updated_at="turn_0",
+                source_type="document",
+                source_id="location_ledger_room",
+                clue_text="follow-up clue",
+                reliability="uncertain",
+                related_case_ids=["case_missing_clerk"],
+            ),
+        ]
+    )
+
+    assert any("support" in line for line in lines)
+    assert any("contradict" in line for line in lines)
+    assert any("follow-up" in line for line in lines)
+    assert any("supports case" in line for line in lines)
+    assert any("contradiction" in line for line in lines)
+    assert any("paper trail" in line for line in lines)
