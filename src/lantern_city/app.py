@@ -597,6 +597,38 @@ class LanternCityApp:
             path = new_status.replace(" ", "_")
             gains = _gains_for_outcome(new_status)
 
+        if new_status == "failed" and self._should_issue_failure_warning(case):
+            warned_case = self._issue_failure_warning(case, updated_at=updated_at)
+            self.store.save_object(warned_case)
+            lines = [
+                f"Case status: {warned_case.status}",
+                f"Case: {warned_case.title}",
+                "Resolution attempt: not enough evidence yet",
+                "",
+                "This case is not failed yet, but the window is now closing hard.",
+                self._case_failure_guidance(warned_case, warned=True),
+                "",
+                "Do now:",
+            ]
+            for step in self._case_recovery_actions(case=warned_case, leads=[]):
+                lines.append(f"  - {step}")
+            turn_notices = self._apply_world_turn_plan(
+                turn_plan,
+                progressed_case_ids={case_id},
+            )
+            if turn_notices.catch_up_turns:
+                lines.append(f"\n[Time passes: {turn_notices.catch_up_turns} extra turn(s)]")
+            if turn_notices.faction_updates:
+                lines.append("\n[Faction pressure]")
+                lines.extend(_prioritized_faction_updates(turn_notices.faction_updates))
+            if turn_notices.case_pressure_updates:
+                lines.append("\n[Case pressure]")
+                lines.extend(turn_notices.case_pressure_updates[:4])
+            if turn_notices.offscreen_updates:
+                lines.append("\n[Offscreen shifts]")
+                lines.extend(turn_notices.offscreen_updates[:4])
+            return "\n".join(lines)
+
         updated_case = transition_case(
             case,
             new_status,
@@ -637,6 +669,8 @@ class LanternCityApp:
             f"Access: {progress.access.score} ({progress.access.tier})",
             f"Leverage: {progress.leverage.score} ({progress.leverage.tier})",
         ]
+        if updated_case.status == "failed":
+            lines.append(self._case_failure_guidance(updated_case, warned=False))
         city = self._require_city()
         latent_remaining = [
             obj
@@ -1468,6 +1502,9 @@ class LanternCityApp:
         if cases:
             lines.append(f"Current case: {cases[0].title} [{cases[0].status}]")
             lines.append(f"Case pressure: {cases[0].pressure_level}")
+            failure_risk = self._case_failure_risk_read(cases[0])
+            if failure_risk:
+                lines.append(f"Failure risk: {failure_risk}")
             institutional_pressure = self._case_institutional_pressure_read(cases[0])
             if institutional_pressure:
                 lines.append(f"Institutional pressure: {institutional_pressure}")
@@ -1605,6 +1642,9 @@ class LanternCityApp:
             lines.append("Signals:")
             for effect in case.district_effects[:4]:
                 lines.append(f"  - {effect}")
+        failure_risk = self._case_failure_risk_read(case)
+        if failure_risk:
+            lines.append(f"Failure risk: {failure_risk}")
         institutional_pressure = self._case_institutional_pressure_read(case)
         if institutional_pressure:
             lines.append(f"Institutional pressure: {institutional_pressure}")
@@ -2035,6 +2075,14 @@ class LanternCityApp:
 
     def _case_recovery_actions(self, *, case: CaseState, leads: list[str]) -> list[str]:
         actions: list[str] = []
+        if case.status == "failed":
+            actions.extend(
+                [
+                    f"Review 'board {case.id}' to see what hardened around the case.",
+                    "Use 'leads' to find the next thread that is still open.",
+                    "Use 'journal' to trace fallout into the next case or district.",
+                ]
+            )
         if leads:
             actions.append(leads[0])
         actions.extend(self._institutional_pressure_recovery_actions(case=case))
@@ -2071,6 +2119,44 @@ class LanternCityApp:
             if action not in deduped:
                 deduped.append(action)
         return deduped[:4]
+
+    def _should_issue_failure_warning(self, case: CaseState) -> bool:
+        return case.status != "failed" and "failure_warning_issued" not in case.offscreen_risk_flags
+
+    def _issue_failure_warning(self, case: CaseState, *, updated_at: str) -> CaseState:
+        risk_flags = list(case.offscreen_risk_flags)
+        if "failure_warning_issued" not in risk_flags:
+            risk_flags.append("failure_warning_issued")
+        if "urgent_window" not in risk_flags:
+            risk_flags.append("urgent_window")
+        return case.model_copy(
+            update={
+                "status": "escalated" if case.status != "partially solved" else case.status,
+                "pressure_level": "urgent",
+                "active_resolution_window": "narrowing",
+                "updated_at": updated_at,
+                "offscreen_risk_flags": risk_flags,
+            }
+        )
+
+    def _case_failure_risk_read(self, case: CaseState) -> str:
+        if case.status == "failed":
+            return "This case is already closed. You cannot continue solving it directly."
+        if "failure_warning_issued" in case.offscreen_risk_flags:
+            return "One more unsupported close attempt will bury the case."
+        if case.pressure_level == "urgent" or case.active_resolution_window == "narrowing":
+            return "The case is under heavy pressure. A weak close attempt now could harden the wrong version."
+        return ""
+
+    def _case_failure_guidance(self, case: CaseState, *, warned: bool) -> str:
+        if warned:
+            return (
+                "Final warning: if you try to close this case again without stronger evidence, "
+                "the official version will harden and the case will fail."
+            )
+        return (
+            "This case is now closed. You cannot keep solving it directly; follow the fallout into other open leads instead."
+        )
 
     def _institutional_pressure_recovery_actions(self, *, case: CaseState) -> list[str]:
         institutional_pressure = self._case_institutional_pressure_read(case)

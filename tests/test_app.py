@@ -333,6 +333,98 @@ def test_case_board_includes_actionable_recovery_section(tmp_path) -> None:
     assert "Use 'leads' to rank the strongest unresolved thread." in output
 
 
+def test_advance_case_warns_before_terminal_failure(tmp_path) -> None:
+    app = LanternCityApp(tmp_path / "lantern-city.sqlite3")
+    app.start_new_game()
+    app.enter_district("district_old_quarter")
+    city = app._require_city()
+    app.store.save_object(
+        CaseState(
+            id="case_gen_failure_warning_001",
+            created_at="turn_0",
+            updated_at="turn_0",
+            title="Quiet Ledger",
+            case_type="records tampering",
+            status="active",
+            involved_district_ids=["district_old_quarter"],
+            objective_summary="Prove the altered record trail before it closes.",
+        )
+    )
+    app.store.save_object(
+        city.model_copy(update={"active_case_ids": [*city.active_case_ids, "case_gen_failure_warning_001"]})
+    )
+    app._introduce_case("case_gen_failure_warning_001")
+
+    output = app.advance_case("case_gen_failure_warning_001")
+    case = app.store.load_object("CaseState", "case_gen_failure_warning_001")
+
+    assert case is not None
+    assert case.status in {"active", "escalated"}
+    assert case.pressure_level == "urgent"
+    assert "failure_warning_issued" in case.offscreen_risk_flags
+    assert "Resolution attempt: not enough evidence yet" in output
+    assert "This case is not failed yet" in output
+    assert "Final warning:" in output
+
+
+def test_advance_case_fails_after_warning_is_issued(tmp_path) -> None:
+    app = LanternCityApp(tmp_path / "lantern-city.sqlite3")
+    app.start_new_game()
+    app.enter_district("district_old_quarter")
+    city = app._require_city()
+    app.store.save_object(
+        CaseState(
+            id="case_gen_failure_warning_002",
+            created_at="turn_0",
+            updated_at="turn_0",
+            title="Borrowed Seal",
+            case_type="records tampering",
+            status="active",
+            involved_district_ids=["district_old_quarter"],
+            objective_summary="Catch the forged certification trail before it settles.",
+        )
+    )
+    app.store.save_object(
+        city.model_copy(update={"active_case_ids": [*city.active_case_ids, "case_gen_failure_warning_002"]})
+    )
+    app._introduce_case("case_gen_failure_warning_002")
+
+    app.advance_case("case_gen_failure_warning_002")
+    output = app.advance_case("case_gen_failure_warning_002")
+    case = app.store.load_object("CaseState", "case_gen_failure_warning_002")
+
+    assert case is not None
+    assert case.status == "failed"
+    assert "Case status: failed" in output
+    assert "This case is now closed. You cannot keep solving it directly" in output
+
+
+def test_status_and_board_surface_failure_risk_warning(tmp_path) -> None:
+    app = LanternCityApp(tmp_path / "lantern-city.sqlite3")
+    app.start_new_game()
+    app.enter_district("district_old_quarter")
+    app._introduce_case("case_missing_clerk")
+    case = app.store.load_object("CaseState", "case_missing_clerk")
+    assert case is not None
+    app.store.save_object(
+        case.model_copy(
+            update={
+                "status": "escalated",
+                "pressure_level": "urgent",
+                "active_resolution_window": "narrowing",
+                "offscreen_risk_flags": [*case.offscreen_risk_flags, "failure_warning_issued"],
+            }
+        )
+    )
+
+    status_output = app.status()
+    board_output = app.case_board("case_missing_clerk")
+
+    expected = "Failure risk: One more unsupported close attempt will bury the case."
+    assert expected in status_output
+    assert expected in board_output
+
+
 def test_journal_includes_stuck_recovery_actions(tmp_path) -> None:
     app = LanternCityApp(tmp_path / "lantern-city.sqlite3")
     app.start_new_game()
