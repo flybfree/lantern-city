@@ -44,7 +44,14 @@ from lantern_city.cli import (
 from lantern_city.factions import faction_style_label, faction_tactic_label
 from lantern_city.game_master import GameMaster
 from lantern_city.llm_client import OpenAICompatibleConfig, OpenAICompatibleLLMClient
-from lantern_city.models import CaseState, CityState, ClueState, LocationState, PlayerProgressState
+from lantern_city.models import (
+    CaseState,
+    CityState,
+    ClueState,
+    FactionState,
+    LocationState,
+    PlayerProgressState,
+)
 
 # Direct-command verbs whose output goes to the narrative pane (not info pane)
 _NARRATIVE_INFO_COMMANDS = frozenset({"clues", "look", "overview"})
