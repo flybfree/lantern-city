@@ -378,6 +378,104 @@ def test_status_summarizes_clue_picture(tmp_path) -> None:
     assert "support the case theory" in output
 
 
+def test_status_board_and_journal_surface_institutional_pressure_reads(tmp_path) -> None:
+    app = LanternCityApp(tmp_path / "lantern-city.sqlite3")
+    app.start_new_game()
+    app.enter_district("district_old_quarter")
+    city = app._require_city()
+    app.store.save_object(city.model_copy(update={"active_case_ids": ["case_gen_pressure_read_001"]}))
+    case = CaseState(
+        id="case_gen_pressure_read_001",
+        created_at="turn_0",
+        updated_at="turn_0",
+        title="Ledger Shadow",
+        case_type="records tampering",
+        status="active",
+        involved_district_ids=["district_old_quarter"],
+        involved_faction_ids=["faction_memory_keepers"],
+        known_clue_ids=["clue_records_pressure_001"],
+        pressure_level="rising",
+        offscreen_risk_flags=["records_drift:faction_memory_keepers", "coverup:faction_memory_keepers"],
+        district_effects=["coverup:faction_memory_keepers"],
+        objective_summary="Track a falsified corrections trail.",
+    )
+    app.store.save_object(case)
+    app._introduce_case(case.id)
+
+    status_output = app.status()
+    board_output = app.case_board(case.id)
+    journal_output = app.journal()
+
+    expected = "Memory Keepers is degrading paper certainty and smothering the record trail"
+    assert f"Institutional pressure: {expected}" in status_output
+    assert f"Institutional pressure: {expected}" in board_output
+    assert f"institutional pressure: {expected}" in journal_output
+
+
+def test_records_pressure_changes_recovery_guidance_across_surfaces(tmp_path) -> None:
+    app = LanternCityApp(tmp_path / "lantern-city.sqlite3")
+    app.start_new_game()
+    app.enter_district("district_old_quarter")
+    app._introduce_case("case_missing_clerk")
+    case = app.store.load_object("CaseState", "case_missing_clerk")
+    assert case is not None
+    app.store.save_object(
+        case.model_copy(
+            update={
+                "involved_faction_ids": ["faction_memory_keepers"],
+                "offscreen_risk_flags": [
+                    *case.offscreen_risk_flags,
+                    "records_drift:faction_memory_keepers",
+                    "coverup:faction_memory_keepers",
+                ],
+                "district_effects": [
+                    *case.district_effects,
+                    "coverup:faction_memory_keepers",
+                ],
+            }
+        )
+    )
+
+    status_output = app.status()
+    board_output = app.case_board("case_missing_clerk")
+    leads_output = app.strongest_leads()
+
+    expected = "Use 'matters' in Old Quarter to press on copies, ledgers, and corroborating records before they shift again."
+    assert expected in status_output
+    assert expected in board_output
+    assert expected in leads_output
+    assert "Use 'compare <clue_a> <clue_b>' to catch record inconsistencies before they settle into the official version." in status_output
+
+
+def test_civic_pressure_changes_recovery_guidance_across_surfaces(tmp_path) -> None:
+    app = LanternCityApp(tmp_path / "lantern-city.sqlite3")
+    app.start_new_game()
+    app.enter_district("district_old_quarter")
+    app._introduce_case("case_missing_clerk")
+    case = app.store.load_object("CaseState", "case_missing_clerk")
+    assert case is not None
+    app.store.save_object(
+        case.model_copy(
+            update={
+                "involved_faction_ids": ["faction_council_lights"],
+                "involved_npc_ids": ["npc_archive_clerk"],
+                "offscreen_risk_flags": [
+                    *case.offscreen_risk_flags,
+                    "isolation:faction_council_lights",
+                ],
+            }
+        )
+    )
+
+    status_output = app.status()
+    board_output = app.case_board("case_missing_clerk")
+    journal_output = app.journal()
+
+    assert "Talk to Sered Marr before procedure hardens the witness picture any further." in status_output
+    assert "Talk to Sered Marr before procedure hardens the witness picture any further." in board_output
+    assert "Use 'matters' in Old Quarter to see which people and places are still reachable before access closes." in journal_output
+
+
 def test_status_and_journal_surface_social_pressure(tmp_path) -> None:
     app = LanternCityApp(tmp_path / "lantern-city.sqlite3")
     app.start_new_game()
@@ -545,6 +643,7 @@ def test_civic_faction_drift_tightens_district_access_over_time(tmp_path) -> Non
             case_type="procedural obstruction",
             status="active",
             involved_district_ids=["district_the_docks"],
+            npc_pressure_targets=["npc_dockmaster"],
             involved_faction_ids=["faction_council_lights"],
             pressure_level="rising",
             time_since_last_progress=1,
@@ -559,11 +658,16 @@ def test_civic_faction_drift_tightens_district_access_over_time(tmp_path) -> Non
     )
 
     district = app.store.load_object("DistrictState", "district_the_docks")
+    npc = app.store.load_object("NPCState", "npc_dockmaster")
 
     assert district is not None
+    assert npc is not None
     assert district.current_access_level == "watched"
     assert "civic_pressure:faction_council_lights" in district.active_problems
     assert any("narrowing official access" in notice for notice in notices)
+    assert npc.offscreen_state == "obstructing"
+    assert npc.suspicion > 0.0
+    assert any("more procedural and guarded" in notice for notice in notices)
 
 
 def test_overview_and_status_surface_faction_posture(tmp_path) -> None:

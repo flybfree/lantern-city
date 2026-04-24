@@ -817,6 +817,37 @@ class LanternCityApp:
             )
             notices.append(f"{faction.name} is narrowing official access in {district.name}.")
             break
+        for npc_id in case.npc_pressure_targets[:1]:
+            npc = self.store.load_object("NPCState", npc_id)
+            if not isinstance(npc, NPCState):
+                continue
+            pressured = apply_relationship_shift(
+                npc,
+                trust_delta=-0.02,
+                suspicion_delta=0.05,
+                tag=f"civic_pressure_{faction.id}",
+                updated_at=updated_at,
+            ).npc
+            if pressured == npc:
+                continue
+            pressured = append_memory_entry(
+                pressured.model_copy(
+                    update={
+                        "offscreen_state": "obstructing",
+                        "updated_at": updated_at,
+                    }
+                ),
+                memory_entry=build_offscreen_memory_entry(
+                    updated_at=updated_at,
+                    offscreen_state="obstructing",
+                    summary_text=f"procedural pressure from {faction.name} over {case.title}",
+                    location_id=npc.location_id,
+                ),
+                updated_at=updated_at,
+            )
+            updates.append(pressured.model_copy(update={"version": npc.version + 1}))
+            notices.append(f"{faction.name} is making {npc.name} more procedural and guarded.")
+            break
         return updates, notices
 
     def _run_faction_updates(
@@ -1413,6 +1444,9 @@ class LanternCityApp:
         if cases:
             lines.append(f"Current case: {cases[0].title} [{cases[0].status}]")
             lines.append(f"Case pressure: {cases[0].pressure_level}")
+            institutional_pressure = self._case_institutional_pressure_read(cases[0])
+            if institutional_pressure:
+                lines.append(f"Institutional pressure: {institutional_pressure}")
         else:
             lines.append("Current case: None")
         faction_reads = self._faction_pressure_reads(current_district_id=pos.district_id if pos else None, limit=2)
@@ -1442,9 +1476,9 @@ class LanternCityApp:
         lines.append(f"  - Clue mastery: {progress.clue_mastery.score} ({progress.clue_mastery.tier})")
         lines.append("")
         lines.append("Recovery:")
-        lines.append("  - board")
-        lines.append("  - leads")
-        lines.append("  - matters")
+        primary_case = cases[0] if cases else None
+        for step in self._global_recovery_actions(case=primary_case, pos=pos):
+            lines.append(f"  - {step}")
         return "\n".join(lines)
 
     def clues(self) -> str:
@@ -1547,6 +1581,9 @@ class LanternCityApp:
             lines.append("Signals:")
             for effect in case.district_effects[:4]:
                 lines.append(f"  - {effect}")
+        institutional_pressure = self._case_institutional_pressure_read(case)
+        if institutional_pressure:
+            lines.append(f"Institutional pressure: {institutional_pressure}")
         if open_questions:
             lines.append("Open questions:")
             for question in open_questions[:5]:
@@ -1612,6 +1649,9 @@ class LanternCityApp:
             lines.append("Cases in motion:")
             for case in cases[:4]:
                 lines.append(f"  - {case.title}: {case.status}, pressure {case.pressure_level}")
+                institutional_pressure = self._case_institutional_pressure_read(case)
+                if institutional_pressure:
+                    lines.append(f"    institutional pressure: {institutional_pressure}")
         if clues:
             lines.append("Evidence ledger:")
             for clue in sorted(clues, key=_clue_sort_key)[:5]:
@@ -1973,6 +2013,7 @@ class LanternCityApp:
         actions: list[str] = []
         if leads:
             actions.append(leads[0])
+        actions.extend(self._institutional_pressure_recovery_actions(case=case))
         if case.involved_district_ids:
             district = self._district(case.involved_district_ids[0])
             if district is not None:
@@ -1992,6 +2033,8 @@ class LanternCityApp:
         pos: ActiveWorkingSet | None,
     ) -> list[str]:
         actions: list[str] = []
+        if case is not None:
+            actions.extend(self._institutional_pressure_recovery_actions(case=case))
         if pos is not None and pos.location_id:
             actions.append("matters")
         if case is not None:
@@ -2004,6 +2047,48 @@ class LanternCityApp:
             if action not in deduped:
                 deduped.append(action)
         return deduped[:4]
+
+    def _institutional_pressure_recovery_actions(self, *, case: CaseState) -> list[str]:
+        institutional_pressure = self._case_institutional_pressure_read(case)
+        if not institutional_pressure:
+            return []
+
+        lowered = institutional_pressure.lower()
+        district_name: str | None = None
+        if case.involved_district_ids:
+            district = self._district(case.involved_district_ids[0])
+            if district is not None:
+                district_name = district.name
+        npc_name: str | None = None
+        if case.involved_npc_ids:
+            npc = self._npc(case.involved_npc_ids[0])
+            if npc is not None:
+                npc_name = npc.name
+
+        if "paper certainty" in lowered or "record trail" in lowered or "records and certification" in lowered:
+            actions = [
+                "Use 'compare <clue_a> <clue_b>' to catch record inconsistencies before they settle into the official version.",
+            ]
+            if district_name is not None:
+                actions.insert(
+                    0,
+                    f"Use 'matters' in {district_name} to press on copies, ledgers, and corroborating records before they shift again.",
+                )
+            return actions
+
+        if "constricting access" in lowered or "hardening witnesses" in lowered or "tightening official access" in lowered:
+            actions: list[str] = []
+            if npc_name is not None:
+                actions.append(
+                    f"Talk to {npc_name} before procedure hardens the witness picture any further."
+                )
+            if district_name is not None:
+                actions.append(
+                    f"Use 'matters' in {district_name} to see which people and places are still reachable before access closes."
+                )
+            return actions
+
+        return []
 
     def _current_social_pressure_summary(self, pos: ActiveWorkingSet | None) -> str:
         if pos is None or not pos.npc_ids:
@@ -2076,6 +2161,33 @@ class LanternCityApp:
             if len(reads) >= limit:
                 break
         return reads[:limit]
+
+    def _case_institutional_pressure_read(self, case: CaseState) -> str:
+        reads: list[str] = []
+        for faction_id in case.involved_faction_ids:
+            faction = self.store.load_object("FactionState", faction_id)
+            if not isinstance(faction, FactionState):
+                continue
+            style = faction_style_label(faction)
+            if style == "records control" and any(
+                flag.startswith("records_drift:") or flag.startswith("coverup:")
+                for flag in case.offscreen_risk_flags
+            ):
+                reads.append(f"{faction.name} is degrading paper certainty and smothering the record trail")
+            elif style == "civic enforcement" and any(
+                flag.startswith("isolation:") or flag.startswith("faction_pressure:")
+                for flag in case.offscreen_risk_flags
+            ):
+                reads.append(f"{faction.name} is constricting access and hardening witnesses through procedure")
+            elif style == "civic enforcement" and any(
+                effect.startswith("civic_pressure:") for effect in case.district_effects
+            ):
+                reads.append(f"{faction.name} is tightening official access around the case")
+            elif style == "records control" and any(
+                effect.startswith("coverup:") for effect in case.district_effects
+            ):
+                reads.append(f"{faction.name} is covering its tracks through records and certification")
+        return "; ".join(reads[:2])
 
     def _matters_recovery_actions(
         self,

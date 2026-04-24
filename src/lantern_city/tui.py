@@ -1383,6 +1383,9 @@ class LanternCityTUI(App[None]):
             lines.append(f"[bold]Next:[/bold] [dim]{escape(hint)}[/dim]")
         current_npc_id = pos.npc_ids[0] if pos is not None and pos.npc_ids else None
         current_case_id = active_cases[0].id if active_cases else None
+        institutional_pressure = None
+        if active_cases:
+            institutional_pressure = self._game._case_institutional_pressure_read(active_cases[0])
         recovery = _recovery_panel_lines(
             active_cases,
             clue_count,
@@ -1390,6 +1393,7 @@ class LanternCityTUI(App[None]):
             current_location_id=None if pos is None else pos.location_id,
             current_npc_id=current_npc_id,
             current_case_id=current_case_id,
+            institutional_pressure=institutional_pressure,
         )
         if recovery:
             lines.append("")
@@ -1589,6 +1593,7 @@ def _recovery_panel_lines(
     current_location_id: str | None = None,
     current_npc_id: str | None = None,
     current_case_id: str | None = None,
+    institutional_pressure: str | None = None,
 ) -> list[str]:
     lines: list[str] = []
     if active_cases:
@@ -1596,6 +1601,10 @@ def _recovery_panel_lines(
         lines.append(
             f"  [yellow]{escape(case.title)}[/yellow] [dim]{escape(case.pressure_level)} pressure[/dim]"
         )
+    pressure_lines = _institutional_pressure_recovery_lines(
+        institutional_pressure=institutional_pressure,
+        current_npc_id=current_npc_id,
+    )
     if clue_count == 0:
         if current_location_id:
             lines.append(f"  [dim]- inspect {escape(current_location_id)}  to search the scene[/dim]")
@@ -1603,6 +1612,7 @@ def _recovery_panel_lines(
             lines.append(f"  [dim]- talk {escape(current_npc_id)} <question>  to pull on a lead[/dim]")
         else:
             lines.append("  [dim]- matters  to re-check the current scene[/dim]")
+        lines.extend(pressure_lines[:1])
         lines.append(
             f"  [dim]- board{'' if current_case_id is None else f' {escape(current_case_id)}'}"
             "  to review the active case[/dim]"
@@ -1614,12 +1624,14 @@ def _recovery_panel_lines(
             lines.append(f"  [dim]- talk {escape(current_npc_id)} <question>  to clarify an uncertain clue[/dim]")
         else:
             lines.append("  [dim]- talk <npc_id> <question>  to clarify an uncertain clue[/dim]")
+        lines.extend(pressure_lines[:1])
         lines.append(
             f"  [dim]- board{'' if current_case_id is None else f' {escape(current_case_id)}'}"
             "  to review open questions[/dim]"
         )
         lines.append("  [dim]- compare  to test two clues together[/dim]")
         return lines
+    lines.extend(pressure_lines[:2])
     lines.append("  [dim]- leads    to choose the strongest unresolved thread[/dim]")
     lines.append(
         f"  [dim]- board{'' if current_case_id is None else f' {escape(current_case_id)}'}"
@@ -1627,6 +1639,32 @@ def _recovery_panel_lines(
     )
     lines.append("  [dim]- compare  if two clues seem related or inconsistent[/dim]")
     return lines
+
+
+def _institutional_pressure_recovery_lines(
+    *,
+    institutional_pressure: str | None,
+    current_npc_id: str | None,
+) -> list[str]:
+    if not institutional_pressure:
+        return []
+    lowered = institutional_pressure.lower()
+    if "paper certainty" in lowered or "record trail" in lowered or "records and certification" in lowered:
+        return [
+            "  [dim]- compare  to catch record inconsistencies before they settle into the official version[/dim]",
+            "  [dim]- matters  to press on ledgers, copies, and corroborating records before they shift again[/dim]",
+        ]
+    if "constricting access" in lowered or "hardening witnesses" in lowered or "tightening official access" in lowered:
+        lines: list[str] = []
+        if current_npc_id:
+            lines.append(
+                f"  [dim]- talk {escape(current_npc_id)} <question>  before procedure hardens the witness picture[/dim]"
+            )
+        lines.append(
+            "  [dim]- matters  to see which people and places are still reachable before access closes[/dim]"
+        )
+        return lines
+    return []
 
 
 def _format_start_result_markup(result: str) -> str:

@@ -311,6 +311,111 @@ def test_build_context_includes_faction_posture_summary(tmp_path) -> None:
     )
 
 
+def test_build_context_includes_case_institutional_pressure_read(tmp_path) -> None:
+    llm = _RecordingLLM()
+    app = LanternCityApp(tmp_path / "lantern-city.sqlite3")
+    app.start_new_game()
+    app.enter_district("district_old_quarter")
+    app._introduce_case("case_missing_clerk")
+    case = app.store.load_object("CaseState", "case_missing_clerk")
+    assert case is not None
+    app.store.save_object(
+        case.model_copy(
+            update={
+                "involved_faction_ids": ["faction_memory_keepers"],
+                "offscreen_risk_flags": [
+                    *case.offscreen_risk_flags,
+                    "records_drift:faction_memory_keepers",
+                    "coverup:faction_memory_keepers",
+                ],
+            }
+        )
+    )
+    gm = GameMaster(app=app, llm=llm)
+
+    context = gm._build_context()
+
+    assert "Institutional pressure:" in context
+    assert (
+        "Institutional pressure: Memory Keepers is degrading paper certainty and smothering the record trail"
+        in context
+    )
+
+
+def test_narrate_recovery_guidance_mentions_institutional_pressure_when_present(tmp_path) -> None:
+    llm = _RecordingLLM()
+    app = LanternCityApp(tmp_path / "lantern-city.sqlite3")
+    app.start_new_game()
+    app.enter_district("district_old_quarter")
+    app.go("location_ledger_room")
+    app._introduce_case("case_missing_clerk")
+    case = app.store.load_object("CaseState", "case_missing_clerk")
+    assert case is not None
+    app.store.save_object(
+        case.model_copy(
+            update={
+                "pressure_level": "rising",
+                "involved_faction_ids": ["faction_memory_keepers"],
+                "offscreen_risk_flags": [
+                    *case.offscreen_risk_flags,
+                    "records_drift:faction_memory_keepers",
+                ],
+            }
+        )
+    )
+    gm = GameMaster(app=app, llm=llm)
+
+    gm._narrate(
+        "what should I do next?",
+        [],
+        [],
+        gm._build_context(),
+    )
+
+    user_prompt = llm.calls[0]["messages"][1]["content"]
+
+    assert "Institutional pressure around this case:" in user_prompt
+    assert "Memory Keepers is degrading paper certainty and smothering the record trail." in user_prompt
+    assert "press on records, copies, and corroborating documents" in user_prompt
+
+
+def test_narrate_recovery_guidance_mentions_civic_pressure_tactics_when_present(tmp_path) -> None:
+    llm = _RecordingLLM()
+    app = LanternCityApp(tmp_path / "lantern-city.sqlite3")
+    app.start_new_game()
+    app.enter_district("district_old_quarter")
+    app.go("location_ledger_room")
+    app._introduce_case("case_missing_clerk")
+    case = app.store.load_object("CaseState", "case_missing_clerk")
+    assert case is not None
+    app.store.save_object(
+        case.model_copy(
+            update={
+                "pressure_level": "rising",
+                "involved_faction_ids": ["faction_council_lights"],
+                "offscreen_risk_flags": [
+                    *case.offscreen_risk_flags,
+                    "isolation:faction_council_lights",
+                ],
+            }
+        )
+    )
+    gm = GameMaster(app=app, llm=llm)
+
+    gm._narrate(
+        "what should I do next?",
+        [],
+        [],
+        gm._build_context(),
+    )
+
+    user_prompt = llm.calls[0]["messages"][1]["content"]
+
+    assert "Institutional pressure around this case:" in user_prompt
+    assert "Council of Lights is constricting access and hardening witnesses through procedure." in user_prompt
+    assert "lean on witnesses, informal contacts, and vulnerable locations" in user_prompt
+
+
 def test_narrate_system_prompt_mentions_clue_role_distinctions() -> None:
     llm = _RecordingLLM()
     gm = GameMaster(app=None, llm=llm)  # type: ignore[arg-type]

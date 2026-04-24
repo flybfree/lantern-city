@@ -84,6 +84,34 @@ def test_recovery_panel_lines_show_resolution_support_when_credible_clues_exist(
     assert any("board case_missing_clerk" in line for line in lines)
 
 
+def test_recovery_panel_lines_surface_records_pressure_guidance() -> None:
+    lines = _recovery_panel_lines(
+        [SimpleNamespace(title="Missing Clerk", pressure_level="rising")],
+        clue_count=3,
+        credible_count=1,
+        current_case_id="case_missing_clerk",
+        institutional_pressure="Memory Keepers is degrading paper certainty and smothering the record trail",
+    )
+
+    assert any("catch record inconsistencies before they settle into the official version" in line for line in lines)
+    assert any("press on ledgers, copies, and corroborating records" in line for line in lines)
+
+
+def test_recovery_panel_lines_surface_civic_pressure_guidance() -> None:
+    lines = _recovery_panel_lines(
+        [SimpleNamespace(title="Missing Clerk", pressure_level="rising")],
+        clue_count=3,
+        credible_count=1,
+        current_case_id="case_missing_clerk",
+        current_npc_id="npc_archive_clerk",
+        institutional_pressure="Council of Lights is constricting access and hardening witnesses through procedure",
+    )
+
+    assert any("talk npc_archive_clerk <question>" in line for line in lines)
+    assert any("before procedure hardens the witness picture" in line for line in lines)
+    assert any("people and places are still reachable before access closes" in line for line in lines)
+
+
 def test_recovery_panel_lines_fall_back_to_generic_scene_hint_without_location_or_npc() -> None:
     lines = _recovery_panel_lines(
         [SimpleNamespace(title="Missing Clerk", pressure_level="low")],

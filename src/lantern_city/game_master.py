@@ -279,6 +279,9 @@ class GameMaster:
             for case in active_cases:
                 lines.append(f"  {case.title} ({case.id})  [{case.status}]")
                 lines.append(f"    Objective: {case.objective_summary}")
+                institutional_pressure = self.app._case_institutional_pressure_read(case)
+                if institutional_pressure:
+                    lines.append(f"    Institutional pressure: {institutional_pressure}")
                 if case.involved_district_ids:
                     lines.append(f"    Involved districts: {', '.join(case.involved_district_ids)}")
 
@@ -597,6 +600,14 @@ class GameMaster:
             lines.append(
                 f"The main active case is {case.title} ({case.id}) with {case.pressure_level} pressure."
             )
+            institutional_pressure = self.app._case_institutional_pressure_read(case)
+            if institutional_pressure:
+                lines.append(
+                    f"Institutional pressure around this case: {institutional_pressure}."
+                )
+                pressure_advice = _institutional_pressure_guidance(institutional_pressure)
+                if pressure_advice:
+                    lines.append(pressure_advice)
         else:
             lines.append("No case has been formally introduced to the player yet.")
 
@@ -778,6 +789,24 @@ def _is_recovery_request(player_input: str) -> bool:
         "help me recover",
     )
     return any(phrase in text for phrase in recovery_phrases)
+
+
+def _institutional_pressure_guidance(institutional_pressure: str) -> str:
+    text = institutional_pressure.lower()
+    if "paper certainty" in text or "record trail" in text or "records and certification" in text:
+        return (
+            "Treat the blocked channel as part of the case: the paper trail is being smothered, "
+            "so press on records, copies, and corroborating documents before they are corrected out from under you."
+        )
+    if "constricting access" in text or "hardening witnesses" in text or "tightening official access" in text:
+        return (
+            "Treat the blocked channel as part of the case: procedure is tightening, "
+            "so lean on witnesses, informal contacts, and vulnerable locations before access closes further."
+        )
+    return (
+        "Treat the blocked channel as part of the case rather than background pressure; "
+        "the obstruction itself tells you where the investigation is hurting them."
+    )
 
 
 _THINK_TAG_RE = re.compile(r"<think>.*?</think>", re.DOTALL | re.IGNORECASE)
