@@ -14,6 +14,7 @@ from lantern_city.case_bootstrap import bootstrap_generated_case
 from lantern_city.cases import advance_case_pressure, case_pressure_summary, note_case_progress, transition_case
 from lantern_city.clues import clarify_clue
 from lantern_city.engine import handle_player_request
+from lantern_city.factions import run_faction_turn
 from lantern_city.generation.case_generation import (
     CaseGenerationRequest,
     CaseGenerationError,
@@ -125,6 +126,7 @@ _MVP_BASELINE_CASE_IDS: frozenset[str] = frozenset({"case_missing_clerk"})
 class _AppliedWorldTurn:
     updated_at: str
     catch_up_turns: int
+    faction_updates: list[str]
     case_pressure_updates: list[str]
     offscreen_updates: list[str]
 
@@ -317,6 +319,9 @@ class LanternCityApp:
         )
         if turn_notices.catch_up_turns:
             lines.append(f"[Time passes: {turn_notices.catch_up_turns} extra turn(s)]")
+        if turn_notices.faction_updates:
+            lines.append("\nFaction pressure:")
+            lines.extend(f"  - {line}" for line in turn_notices.faction_updates[:4])
         if turn_notices.case_pressure_updates:
             lines.append("\nCase pressure:")
             lines.extend(f"  - {line}" for line in turn_notices.case_pressure_updates[:4])
@@ -415,6 +420,9 @@ class LanternCityApp:
         )
         if turn_notices.catch_up_turns:
             lines.append(f"[Time passes: {turn_notices.catch_up_turns} extra turn(s)]")
+        if turn_notices.faction_updates:
+            lines.append("[Faction pressure]")
+            lines.extend(turn_notices.faction_updates[:4])
         if turn_notices.case_pressure_updates:
             lines.append("[Case pressure]")
             lines.extend(turn_notices.case_pressure_updates[:4])
@@ -523,6 +531,9 @@ class LanternCityApp:
         )
         if turn_notices.catch_up_turns:
             lines.append(f"[Time passes: {turn_notices.catch_up_turns} extra turn(s)]")
+        if turn_notices.faction_updates:
+            lines.append("[Faction pressure]")
+            lines.extend(turn_notices.faction_updates[:4])
         if turn_notices.case_pressure_updates:
             lines.append("[Case pressure]")
             lines.extend(turn_notices.case_pressure_updates[:4])
@@ -622,6 +633,9 @@ class LanternCityApp:
         )
         if turn_notices.catch_up_turns:
             lines.append(f"\n[Time passes: {turn_notices.catch_up_turns} extra turn(s)]")
+        if turn_notices.faction_updates:
+            lines.append("\nFaction pressure:")
+            lines.extend(f"  - {line}" for line in turn_notices.faction_updates[:4])
         if turn_notices.case_pressure_updates:
             lines.append("\nCase pressure:")
             lines.extend(f"  - {line}" for line in turn_notices.case_pressure_updates[:4])
@@ -669,6 +683,42 @@ class LanternCityApp:
 
         if updated_cases:
             self.store.save_objects_atomically(updated_cases)
+        return notices
+
+    def _run_faction_updates(
+        self,
+        *,
+        city: CityState,
+        updated_at: str,
+        focus_district_id: str | None = None,
+    ) -> list[str]:
+        factions = [
+            faction
+            for faction_id in city.faction_ids
+            if isinstance(faction := self.store.load_object("FactionState", faction_id), FactionState)
+        ]
+        related_cases = [
+            case
+            for case_id in city.active_case_ids
+            if isinstance(case := self.store.load_object("CaseState", case_id), CaseState)
+            and case.status != "latent"
+            and (focus_district_id is None or focus_district_id in case.involved_district_ids)
+        ]
+        updated_factions: list[FactionState] = []
+        notices: list[str] = []
+        for faction in factions:
+            result = run_faction_turn(
+                faction,
+                city=city,
+                related_cases=[case for case in related_cases if faction.id in case.involved_faction_ids],
+                updated_at=updated_at,
+                focus_district_id=focus_district_id,
+            )
+            if result.faction != faction:
+                updated_factions.append(result.faction.model_copy(update={"version": faction.version + 1}))
+            notices.extend(result.notices)
+        if updated_factions:
+            self.store.save_objects_atomically(updated_factions)
         return notices
 
     def _run_offscreen_npc_updates(
@@ -742,6 +792,7 @@ class LanternCityApp:
     ) -> _AppliedWorldTurn:
         city = self._require_city()
         current_city = city
+        faction_updates: list[str] = []
         case_pressure_updates: list[str] = []
         offscreen_updates: list[str] = []
         progressed_ids = progressed_case_ids or set()
@@ -758,6 +809,14 @@ class LanternCityApp:
             )
             self.store.save_object(updated_city)
             current_city = updated_city
+
+            faction_updates.extend(
+                self._run_faction_updates(
+                    city=current_city,
+                    updated_at=updated_at,
+                    focus_district_id=focus_district_id,
+                )
+            )
 
             step_progress = progressed_ids if step_index == turn_plan.total_turns - 1 else set()
             case_pressure_updates.extend(
@@ -782,6 +841,7 @@ class LanternCityApp:
         return _AppliedWorldTurn(
             updated_at=current_city.updated_at,
             catch_up_turns=turn_plan.catch_up_turns,
+            faction_updates=faction_updates,
             case_pressure_updates=case_pressure_updates,
             offscreen_updates=offscreen_updates,
         )

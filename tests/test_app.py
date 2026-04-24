@@ -416,6 +416,20 @@ def test_status_and_journal_surface_social_pressure(tmp_path) -> None:
     assert "Ila Venn: faction_memory_keepers reads as aligned while obstructing." in journal_output
 
 
+def test_world_turn_output_surfaces_faction_pressure(tmp_path) -> None:
+    app = LanternCityApp(tmp_path / "lantern-city.sqlite3")
+    app.start_new_game()
+
+    output = app.enter_district("district_old_quarter")
+    faction = app.store.load_object("FactionState", "faction_memory_keepers")
+
+    assert "Faction pressure:" in output
+    assert "Memory Keepers is tightening its posture in district_old_quarter." in output
+    assert "Memory Keepers is now guarded toward you." in output
+    assert faction is not None
+    assert faction.attitude_toward_player == "guarded"
+
+
 def test_what_matters_here_includes_exact_next_commands(tmp_path) -> None:
     app = LanternCityApp(tmp_path / "lantern-city.sqlite3")
     app.start_new_game()
