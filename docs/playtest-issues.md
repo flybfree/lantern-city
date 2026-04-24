@@ -128,6 +128,32 @@ Related review surfaces like `clues`, `board`, `leads`, `journal`, and the TUI s
 
 ---
 
+### The world still reacts too little to delay and social history
+The repo now has partial ingredients for a living simulation:
+- NPC memory logs
+- relationship snapshots
+- offscreen NPC updates
+- case pressure
+- city time index
+
+But those systems are still too loosely connected to produce the intended feeling that people remember, institutions move, and time costs something.
+
+**Current limitation:** The player can still treat most of the world as paused between direct interactions. NPCs and factions do not yet feel active enough offscreen, and delay does not yet produce a broad enough set of visible consequences.
+
+**Impact:** The city risks feeling like a responsive mystery shell rather than a live social machine. Cases can have pressure, but the wider world still does not consistently communicate that time passed, relationships shifted, or opportunities narrowed because of it.
+
+**Fix direction:** Implement the post-MVP world-turn and social-simulation phase:
+- discrete world turns
+- bounded idle-delay catch-up
+- stronger NPC social memory and relationship persistence
+- faction operations and pressure
+- case evolution tied to elapsed turns and actor behavior
+- explicit player-facing reporting of offscreen change
+
+**Execution note:** This should primarily strengthen the evolved/generated runtime. The authored MVP baseline loop can keep lighter or partially bypassed simulation behavior if needed for onboarding and regression stability.
+
+---
+
 ### ~~Location inspection has no narrative or object-level interaction~~ ✅ Fixed
 `LocationInspectionGenerator` wired in for both whole-scene and object-level inspection. Each `LocationState` now has `scene_objects: list[str]`. Whole-scene inspect shows the object list; `inspect <location_id> <object>` focuses the generation on that object with a narrowed prompt and stays on the physical detail. CLI: `inspect location_ledger_room "maintenance log shelf"`.
 

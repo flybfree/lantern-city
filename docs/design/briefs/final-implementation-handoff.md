@@ -114,6 +114,34 @@ When there is tension between the two:
 - keep the deeper rule as the default direction for post-MVP systems
 - avoid mixing the two by accident inside shared logic without comment
 
+## Post-MVP Depth Direction
+
+The next major systems phase after current MVP/runtime stabilization should follow:
+
+- `briefs/world-turn-and-social-simulation-brief.md`
+
+That brief defines the next evolved-runtime target:
+
+- deterministic world turns
+- idle-delay catch-up when the player waits too long
+- deeper NPC memory and relationship persistence
+- faction pressure and offscreen action
+- case evolution tied to elapsed turns and social pressure
+
+### Implementation rule for that phase
+
+Do not introduce hidden real-time simulation first.
+Prefer a discrete, testable world-turn system that:
+
+- advances on meaningful player actions
+- can apply bounded catch-up turns
+- surfaces what changed to the player clearly
+
+### Baseline protection rule
+
+This depth work should primarily strengthen `generated_runtime` / evolved-runtime play.
+If the authored `mvp_baseline` loop needs lighter or partially disabled simulation behavior, preserve that intentionally rather than forcing the onboarding path into full simulation complexity by accident.
+
 ## MVP Build Boundaries
 
 Do build:
@@ -237,6 +265,7 @@ Use subagent-driven execution.
 - `briefs/implementation-plan.md`
 - `briefs/coding-agent-tasklist.md`
 - `briefs/subagent-execution-plan.md`
+- `briefs/world-turn-and-social-simulation-brief.md`
 
 ### Skill expectation
 When actually executing code work, follow the logic of:

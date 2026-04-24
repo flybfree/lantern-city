@@ -770,3 +770,41 @@ The MVP is done when:
 
 Implement Phase 1 first.
 Then stop and review the data model before building generation logic.
+
+---
+
+## Post-MVP Depth Direction
+
+Once the MVP/runtime stabilization work is complete, the next major execution phase should follow:
+
+- `briefs/world-turn-and-social-simulation-brief.md`
+
+That phase should be treated as the next systemic depth step for the repo.
+
+### Next recommended build order
+
+1. add a deterministic world-turn engine
+2. add idle-delay catch-up based on last meaningful player action
+3. expand NPC social persistence and relationship state
+4. add faction pressure and operation rules
+5. tie case progression to elapsed turns and actor pressure
+6. surface time passage and offscreen changes in command output and TUI
+
+### First implementation target
+
+Start with:
+
+- `src/lantern_city/simulation.py`
+- `src/lantern_city/app.py`
+- `tests/test_simulation.py`
+
+The first deliverable should:
+
+- advance one world turn per meaningful player action
+- apply bounded missed turns after player delay
+- emit clear player-facing notices about offscreen change
+
+### Runtime boundary
+
+This phase should primarily strengthen `generated_runtime` / evolved-runtime behavior.
+If `mvp_baseline` needs lighter or partially bypassed simulation behavior, keep that boundary explicit instead of letting the deeper rules silently become universal.
