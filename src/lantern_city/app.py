@@ -995,11 +995,10 @@ class LanternCityApp:
             lines.append(
                 f"Current synthesis: {self._summarize_case_clues(sorted(visible_case_clues, key=_clue_sort_key))}"
             )
-        lines.append("If you are stuck:")
-        lines.append("  - board")
-        lines.append("  - leads")
-        lines.append("  - matters")
-        lines.append("  - compare <clue_a> <clue_b>")
+        lines.append("Do next:")
+        primary_case = cases[0] if cases else None
+        for step in self._global_recovery_actions(case=primary_case, pos=pos):
+            lines.append(f"  - {step}")
         return "\n".join(lines)
 
     def strongest_leads(self) -> str:
@@ -1013,10 +1012,13 @@ class LanternCityApp:
             lines.append(f"{case.title} [{case.pressure_level}]")
             for lead in self._build_lead_lines(case=case, pos=pos, limit=3):
                 lines.append(f"  - {lead}")
-        lines.append("Recovery:")
-        lines.append("  - matters")
-        lines.append("  - board")
-        lines.append("  - compare <clue_a> <clue_b>")
+        primary_case = cases[0]
+        lines.append(
+            f"What this suggests: {primary_case.title} is still the strongest active thread, and the next move should either clarify a weak clue or tighten the case picture."
+        )
+        lines.append("Do next:")
+        for step in self._global_recovery_actions(case=primary_case, pos=pos):
+            lines.append(f"  - {step}")
         return "\n".join(lines)
 
     def what_matters_here(self) -> str:
@@ -1320,6 +1322,26 @@ class LanternCityApp:
                 actions.append(f"Use 'matters' in {district.name} to re-check the live scene.")
         actions.append("Use 'leads' to rank the strongest unresolved thread.")
         actions.append("Use 'compare <clue_a> <clue_b>' if two clues seem related or inconsistent.")
+        deduped: list[str] = []
+        for action in actions:
+            if action not in deduped:
+                deduped.append(action)
+        return deduped[:4]
+
+    def _global_recovery_actions(
+        self,
+        *,
+        case: CaseState | None,
+        pos: ActiveWorkingSet | None,
+    ) -> list[str]:
+        actions: list[str] = []
+        if pos is not None and pos.location_id:
+            actions.append("matters")
+        if case is not None:
+            actions.append(f"board {case.id}")
+        actions.append("leads")
+        if pos is not None and len(pos.clue_ids) >= 2:
+            actions.append("compare <clue_a> <clue_b>")
         deduped: list[str] = []
         for action in actions:
             if action not in deduped:

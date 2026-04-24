@@ -227,14 +227,15 @@ def test_journal_includes_stuck_recovery_actions(tmp_path) -> None:
     app = LanternCityApp(tmp_path / "lantern-city.sqlite3")
     app.start_new_game()
     app.enter_district("district_old_quarter")
+    app._introduce_case("case_missing_clerk")
 
     output = app.journal()
 
     assert "=== Journal ===" in output
-    assert "If you are stuck:" in output
-    assert "  - board" in output
+    assert "Do next:" in output
+    assert "  - board case_missing_clerk" in output
     assert "  - leads" in output
-    assert "  - matters" in output
+    assert "  - compare <clue_a> <clue_b>" not in output
 
 
 def test_strongest_leads_includes_recovery_footer(tmp_path) -> None:
@@ -246,9 +247,10 @@ def test_strongest_leads_includes_recovery_footer(tmp_path) -> None:
     output = app.strongest_leads()
 
     assert "=== Strongest Leads ===" in output
-    assert "Recovery:" in output
-    assert "  - matters" in output
-    assert "  - board" in output
+    assert "What this suggests:" in output
+    assert "Do next:" in output
+    assert "  - board case_missing_clerk" in output
+    assert "  - leads" in output
 
 
 def test_what_matters_here_includes_exact_next_commands(tmp_path) -> None:
