@@ -15,6 +15,7 @@ from lantern_city.models import (
     DistrictState,
     LocationState,
     NPCState,
+    RelationshipSnapshot,
 )
 from lantern_city.store import SQLiteStore
 
@@ -81,6 +82,17 @@ def bootstrap_generated_case(
                 trust_in_player=spec.trust_in_player,
                 suspicion=spec.suspicion,
                 fear=spec.fear,
+                relationships={
+                    "player": RelationshipSnapshot(
+                        trust=spec.trust_in_player,
+                        suspicion=spec.suspicion,
+                        fear=spec.fear,
+                        status="unknown",
+                        last_updated_at=updated_at,
+                    )
+                },
+                schedule_anchor=target_loc.id if target_loc else spec.district_id,
+                offscreen_state="idle",
                 relevance_rating=0.7,
             )
         )

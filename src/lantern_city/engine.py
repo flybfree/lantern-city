@@ -17,6 +17,7 @@ from lantern_city.generation.location_inspection import (
 )
 from lantern_city.generation.npc_response import (
     NPCResponseGenerationError,
+    NPCResponseGenerationResult,
     NPCResponseGenerationRequest,
     NPCResponseGenerator,
 )
@@ -24,6 +25,7 @@ from lantern_city.llm_client import OpenAICompatibleConfig, OpenAICompatibleLLMC
 from lantern_city.models import ClueState, DistrictState, NPCState, PlayerProgressState, PlayerRequest, RuntimeModel
 from lantern_city.orchestrator import orchestrate_request
 from lantern_city.response import ResponsePayload, compose_response
+from lantern_city.social import apply_player_flag, apply_relationship_shift, summarize_relationship
 from lantern_city.store import SQLiteStore
 from lantern_city.log import get_logger
 
@@ -150,7 +152,14 @@ def _handle_npc_conversation(
     clue = _first_clue(active_slice.clues)
     case_title = None if active_slice.case is None else active_slice.case.title
 
-    npc_line = _generate_npc_dialogue(active_slice, request, llm_config=llm_config, progress=progress, case_intro_text=case_intro_text)
+    generation_result = _generate_npc_dialogue(
+        active_slice,
+        request,
+        llm_config=llm_config,
+        progress=progress,
+        case_intro_text=case_intro_text,
+    )
+    npc_line = None if generation_result is None else generation_result.cacheable_text.npc_line
     if npc_line is None:
         public_identity = f", {npc.public_identity}" if npc.public_identity else ""
         quoted_input = request.input_text or "Ask a careful question."
@@ -161,9 +170,33 @@ def _handle_npc_conversation(
     else:
         narrative_text = npc_line
 
+    state_changes = [f"Recorded a new conversation beat with {npc.name}."] if npc.name else []
+    updated_npc = npc
+    if generation_result is not None:
+        shift = generation_result.structured_updates.relationship_shift
+        social_result = apply_relationship_shift(
+            updated_npc,
+            trust_delta=shift.trust_delta,
+            suspicion_delta=shift.suspicion_delta,
+            fear_delta=shift.fear_delta,
+            tag=shift.tag,
+            updated_at=request.updated_at,
+        )
+        updated_npc = social_result.npc
+        state_changes.extend(social_result.state_changes)
+        player_flag = _infer_player_flag(
+            request.input_text,
+            generation_result.structured_updates.dialogue_act,
+            generation_result.structured_updates.npc_stance,
+        )
+        if player_flag is not None:
+            updated_npc = apply_player_flag(updated_npc, flag=player_flag, updated_at=request.updated_at)
+            state_changes.append(f"{npc.name} now remembers: {player_flag}.")
+        state_changes.append(f"Relationship state: {summarize_relationship(updated_npc)}.")
+
     response = compose_response(
         narrative_text=narrative_text,
-        state_changes=[f"Recorded a new conversation beat with {npc.name}."] if npc.name else [],
+        state_changes=state_changes,
         learned=[] if clue is None else [clue.clue_text],
         now_available=_conversation_now_available(active_slice, npc),
         next_actions=_conversation_next_actions(case_title),
@@ -177,13 +210,13 @@ def _handle_npc_conversation(
     if npc_line is not None:
         memory_entry["npc_response"] = npc_line
 
-    updated_npc = npc.model_copy(
+    updated_npc = updated_npc.model_copy(
         update={
             "memory_log": [
-                *npc.memory_log,
+                *updated_npc.memory_log,
                 memory_entry,
             ],
-            "version": npc.version + 1,
+            "version": updated_npc.version + 1,
             "updated_at": request.updated_at,
         }
     )
@@ -346,7 +379,7 @@ def _generate_npc_dialogue(
     llm_config: OpenAICompatibleConfig | None,
     progress: PlayerProgressState | None = None,
     case_intro_text: str | None = None,
-) -> str | None:
+) -> NPCResponseGenerationResult | None:
     if llm_config is None or not active_slice.npcs:
         return None
     try:
@@ -361,10 +394,27 @@ def _generate_npc_dialogue(
         )
         result = NPCResponseGenerator(llm_client).generate(gen_request, max_tokens=2000)
         llm_client.close()
-        return result.cacheable_text.npc_line
+        return result
     except (NPCResponseGenerationError, Exception) as exc:
         print(f"[LLM] generation failed: {exc}", file=sys.stderr)
         return None
+
+
+def _infer_player_flag(
+    player_input: str,
+    dialogue_act: str,
+    npc_stance: str,
+) -> str | None:
+    normalized = f"{player_input} {dialogue_act} {npc_stance}".lower()
+    if any(token in normalized for token in ("promise", "swear", "i will", "you have my word")):
+        return "promise_made"
+    if any(token in normalized for token in ("threat", "pressure", "intimidat", "coerce")):
+        return "pressure_applied"
+    if any(token in normalized for token in ("help", "protect", "safe", "rescue")):
+        return "protective"
+    if any(token in normalized for token in ("lie", "deceiv", "mislead")):
+        return "deceptive"
+    return None
 
 
 def _district_now_available(district: DistrictState, npcs: list[NPCState]) -> list[str]:

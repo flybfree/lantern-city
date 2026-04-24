@@ -324,6 +324,11 @@ class NPCResponseGenerationRequest:
                 "suspicion": npc.suspicion,
                 "fear": npc.fear,
                 "loyalty": npc.loyalty,
+                "offscreen_state": npc.offscreen_state,
+                "schedule_anchor": npc.schedule_anchor,
+                "recent_events": npc.recent_events[-4:],
+                "player_flags": npc.player_flags,
+                "relationship_flags": npc.relationship_flags,
                 "emotional_register": _emotional_register(npc),
             },
             "scene": scene_payload,
@@ -507,6 +512,7 @@ class NPCResponseGenerator:
             "Rules:\n"
             "- stay within the NPC's known goals, fears, and knowledge\n"
             "- use npc.emotional_register to shape HOW the NPC speaks, not just what they reveal — it governs tone, deflection, and phrasing\n"
+            "- respect npc.offscreen_state, recent_events, and player_flags — they describe what changed since the last meeting and how the NPC currently approaches the player\n"
             "- generate exactly one reply turn plus structured effects\n"
             "- if the NPC refuses, the refusal should still be informative or redirective\n"
             "- preserve the game's conversation model: useful quickly, easy to leave\n"

@@ -12,6 +12,7 @@ from lantern_city.models import (
     LanternState,
     NPCState,
     PlayerProgressState,
+    RelationshipSnapshot,
     ScoreTier,
 )
 from lantern_city.progression import get_tier, get_tier_label
@@ -226,6 +227,17 @@ def _build_npc_state(seed: CitySeedDocument, npc_id: str) -> NPCState:
         current_objective=f"Maintain {npc.mobility_pattern} routine.",
         loyalty=_governing_faction_id(seed, npc.district_id),
         relationship_flags=[npc.relationship_density, npc.memory_depth, npc.secrecy_level],
+        relationships={
+            "player": RelationshipSnapshot(
+                trust=0.0,
+                suspicion=0.0,
+                fear=0.0,
+                status="unknown",
+                last_updated_at=TURN_ZERO,
+            )
+        },
+        schedule_anchor=npc.location_id or npc.district_id or "",
+        offscreen_state="idle",
         relevance_rating=RELEVANCE_RATINGS.get(npc.relevance_level, 0.5),
     )
 

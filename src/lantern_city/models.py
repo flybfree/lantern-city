@@ -26,6 +26,14 @@ class ScoreTier(LanternCityModel):
     tier: str
 
 
+class RelationshipSnapshot(LanternCityModel):
+    trust: float = 0.0
+    suspicion: float = 0.0
+    fear: float = 0.0
+    status: str = ""
+    last_updated_at: str = ""
+
+
 class CitySeed(RuntimeModel):
     type: Literal["CitySeed"] = "CitySeed"
     city_premise: str
@@ -98,7 +106,12 @@ class NPCState(RuntimeModel):
     known_clue_ids: list[str] = Field(default_factory=list)
     known_promises: list[str] = Field(default_factory=list)
     relationship_flags: list[str] = Field(default_factory=list)
+    relationships: dict[str, RelationshipSnapshot] = Field(default_factory=dict)
     memory_log: list[JSONObject] = Field(default_factory=list)
+    schedule_anchor: str = ""
+    offscreen_state: str = "idle"
+    recent_events: list[str] = Field(default_factory=list)
+    player_flags: list[str] = Field(default_factory=list)
     relevance_rating: float = 0.0
 
 
@@ -259,6 +272,7 @@ __all__ = [
     "PlayerProgressState",
     "PlayerRequest",
     "PlayerResponse",
+    "RelationshipSnapshot",
     "RuntimeModel",
     "SceneState",
     "ScoreTier",

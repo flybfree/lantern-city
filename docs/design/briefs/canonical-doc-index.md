@@ -248,11 +248,13 @@ Use `backend/llm-interface-spec.md` as the abstraction/interface source of truth
 - `briefs/implementation-plan.md`
 - `briefs/coding-agent-tasklist.md`
 - `briefs/subagent-execution-plan.md`
+- `briefs/post-mvp-execution-roadmap.md`
 
 ### Use these for
 - implementation sequencing
 - coding task decomposition
 - subagent-driven execution planning
+- post-MVP depth and simulation work
 
 ### Important note
 These are planning and handoff docs.

@@ -43,6 +43,7 @@ from lantern_city.models import (
 )
 from lantern_city.progression import apply_progress_change, get_tier
 from lantern_city.seed_schema import validate_city_seed
+from lantern_city.social import run_offscreen_npc_tick
 from lantern_city.store import SQLiteStore
 from lantern_city.log import get_logger
 
@@ -196,6 +197,10 @@ class LanternCityApp:
         transient_text = self._maybe_transient_encounter(district_id, district, updated_at=TURN_ONE)
         if transient_text:
             lines.append(f"\n{transient_text}")
+        offscreen_updates = self._run_offscreen_npc_updates(updated_at=TURN_ONE, focus_district_id=district_id)
+        if offscreen_updates:
+            lines.append("\nOffscreen movement:")
+            lines.extend(f"  - {line}" for line in offscreen_updates[:4])
         return "\n".join(lines)
 
     def talk_to_npc(self, npc_id: str, prompt: str) -> str:
@@ -262,6 +267,10 @@ class LanternCityApp:
         if pending_case is not None:
             lines.append(f'[Case opened: {pending_case.title}]')
         lines.extend(propagation_notices)
+        offscreen_updates = self._run_offscreen_npc_updates(updated_at=TURN_TWO, focus_district_id=outcome.active_slice.district.id if outcome.active_slice.district else None, exclude_npc_ids={npc_id})
+        if offscreen_updates:
+            lines.append("[Offscreen shifts]")
+            lines.extend(offscreen_updates[:4])
         return "\n".join(lines)
 
     def inspect_location(self, location_id: str, object_name: str | None = None) -> str:
@@ -359,6 +368,10 @@ class LanternCityApp:
             lines.append(f"[Case opened: {discovered_lead}]")
         lines.append(f"[Lantern: {district.lantern_condition}]")
         lines.extend(propagation_notices)
+        offscreen_updates = self._run_offscreen_npc_updates(updated_at=TURN_THREE, focus_district_id=district.id)
+        if offscreen_updates:
+            lines.append("[Offscreen shifts]")
+            lines.extend(offscreen_updates[:4])
         return "\n".join(lines)
 
     def advance_case(self, case_id: str) -> str:
@@ -447,7 +460,55 @@ class LanternCityApp:
         ]
         if surfaced_hook:
             lines.append(f"\n{surfaced_hook}")
+        offscreen_updates = self._run_offscreen_npc_updates(updated_at=TURN_FOUR)
+        if offscreen_updates:
+            lines.append("\nOffscreen shifts:")
+            lines.extend(f"  - {line}" for line in offscreen_updates[:4])
         return "\n".join(lines)
+
+    def _run_offscreen_npc_updates(
+        self,
+        *,
+        updated_at: str,
+        focus_district_id: str | None = None,
+        exclude_npc_ids: set[str] | None = None,
+    ) -> list[str]:
+        exclude = exclude_npc_ids or set()
+        districts = {
+            district.id: district
+            for district in self.store.list_objects("DistrictState")
+            if isinstance(district, DistrictState)
+        }
+        npcs = [
+            npc for npc in self.store.list_objects("NPCState")
+            if isinstance(npc, NPCState) and npc.id not in exclude
+        ]
+
+        updated_npcs: list[NPCState] = []
+        changes: list[str] = []
+        for npc in npcs:
+            if focus_district_id is not None and npc.district_id != focus_district_id:
+                continue
+            if npc.role_category == "informant" and npc.relevance_rating < 0.4:
+                continue
+            district = districts.get(npc.district_id or "")
+            visible_location_ids = [] if district is None else district.visible_locations
+            result = run_offscreen_npc_tick(
+                npc,
+                visible_location_ids=visible_location_ids,
+                updated_at=updated_at,
+            )
+            if (
+                result.npc.offscreen_state != npc.offscreen_state
+                or result.npc.location_id != npc.location_id
+                or result.npc.recent_events != npc.recent_events
+            ):
+                updated_npcs.append(result.npc.model_copy(update={"version": npc.version + 1}))
+                changes.extend(result.state_changes)
+
+        if updated_npcs:
+            self.store.save_objects_atomically(updated_npcs)
+        return changes
 
     def overview(self) -> str:
         city = self._require_city()
