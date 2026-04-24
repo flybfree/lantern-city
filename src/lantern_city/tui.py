@@ -1328,7 +1328,16 @@ class LanternCityTUI(App[None]):
         if hint:
             lines.append("")
             lines.append(f"[bold]Next:[/bold] [dim]{escape(hint)}[/dim]")
-        recovery = _recovery_panel_lines(active_cases, clue_count, credible_count)
+        current_npc_id = pos.npc_ids[0] if pos is not None and pos.npc_ids else None
+        current_case_id = active_cases[0].id if active_cases else None
+        recovery = _recovery_panel_lines(
+            active_cases,
+            clue_count,
+            credible_count,
+            current_location_id=None if pos is None else pos.location_id,
+            current_npc_id=current_npc_id,
+            current_case_id=current_case_id,
+        )
         if recovery:
             lines.append("")
             lines.append("[bold]Recovery:[/bold]")
@@ -1465,7 +1474,15 @@ def _next_step_hint(active_cases: list, clue_count: int, credible_count: int) ->
     return f"Ready to attempt resolution — type: case {case.id} or use 'leads' for one more pass."
 
 
-def _recovery_panel_lines(active_cases: list, clue_count: int, credible_count: int) -> list[str]:
+def _recovery_panel_lines(
+    active_cases: list,
+    clue_count: int,
+    credible_count: int,
+    *,
+    current_location_id: str | None = None,
+    current_npc_id: str | None = None,
+    current_case_id: str | None = None,
+) -> list[str]:
     lines: list[str] = []
     if active_cases:
         case = active_cases[0]
@@ -1473,17 +1490,34 @@ def _recovery_panel_lines(active_cases: list, clue_count: int, credible_count: i
             f"  [yellow]{escape(case.title)}[/yellow] [dim]{escape(case.pressure_level)} pressure[/dim]"
         )
     if clue_count == 0:
-        lines.append("  [dim]- matters  to re-check the current scene[/dim]")
-        lines.append("  [dim]- board    to review the active case[/dim]")
+        if current_location_id:
+            lines.append(f"  [dim]- inspect {escape(current_location_id)}  to search the scene[/dim]")
+        elif current_npc_id:
+            lines.append(f"  [dim]- talk {escape(current_npc_id)} <question>  to pull on a lead[/dim]")
+        else:
+            lines.append("  [dim]- matters  to re-check the current scene[/dim]")
+        lines.append(
+            f"  [dim]- board{'' if current_case_id is None else f' {escape(current_case_id)}'}"
+            "  to review the active case[/dim]"
+        )
         lines.append("  [dim]- leads    to pull the strongest thread[/dim]")
         return lines
     if credible_count == 0:
-        lines.append("  [dim]- talk to clarify an uncertain clue[/dim]")
-        lines.append("  [dim]- board    to review open questions[/dim]")
+        if current_npc_id:
+            lines.append(f"  [dim]- talk {escape(current_npc_id)} <question>  to clarify an uncertain clue[/dim]")
+        else:
+            lines.append("  [dim]- talk <npc_id> <question>  to clarify an uncertain clue[/dim]")
+        lines.append(
+            f"  [dim]- board{'' if current_case_id is None else f' {escape(current_case_id)}'}"
+            "  to review open questions[/dim]"
+        )
         lines.append("  [dim]- compare  to test two clues together[/dim]")
         return lines
     lines.append("  [dim]- leads    to choose the strongest unresolved thread[/dim]")
-    lines.append("  [dim]- board    to review pressure and open questions[/dim]")
+    lines.append(
+        f"  [dim]- board{'' if current_case_id is None else f' {escape(current_case_id)}'}"
+        "  to review pressure and open questions[/dim]"
+    )
     lines.append("  [dim]- compare  if two clues seem related or inconsistent[/dim]")
     return lines
 
