@@ -11,6 +11,7 @@ from lantern_city.models import (
     CityState,
     ClueState,
     DistrictState,
+    FactionState,
     LocationState,
     NPCState,
     PlayerRequest,
@@ -387,6 +388,159 @@ def test_handle_player_request_persists_generated_exit_line_in_npc_memory(
     assert npc.memory_log[-1]["npc_stance"] == "guarded"
     assert npc.memory_log[-1]["relationship_tag"] == "steady"
     assert npc.memory_log[-1]["summary_text"] == "Ila answers carefully, then closes the thread."
+
+
+def test_handle_player_request_biases_records_pressure_into_redirects_and_paper_trails(
+    populated_store: SQLiteStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from lantern_city import engine
+
+    city = populated_store.load_object("CityState", CITY_ID)
+    npc = populated_store.load_object("NPCState", NPC_ID)
+    assert isinstance(city, CityState)
+    assert isinstance(npc, NPCState)
+    populated_store.save_objects_atomically(
+        [
+            city.model_copy(update={"faction_ids": ["faction_memory_keepers"]}),
+            npc.model_copy(update={"loyalty": "faction_memory_keepers"}),
+            FactionState(
+                id="faction_memory_keepers",
+                created_at=TURN_ZERO,
+                updated_at=TURN_ZERO,
+                name="Memory Keepers",
+                public_goal="preserve continuity",
+                hidden_goal="control what the city remembers",
+                known_assets=["records", "certification"],
+                active_plans=["procedural delay"],
+            ),
+        ]
+    )
+
+    request = make_request(intent="conversation", target_id=NPC_ID, input_text="Ask who changed the ledger.")
+    monkeypatch.setattr(
+        engine,
+        "_generate_npc_dialogue",
+        lambda *args, **kwargs: NPCResponseGenerationResult.model_validate(
+            {
+                "task_type": "npc_response",
+                "request_id": request.id,
+                "summary_text": "Ila redirects you toward the annex record trail.",
+                "structured_updates": {
+                    "dialogue_act": "redirect_with_hint",
+                    "npc_stance": "careful and guarded",
+                    "relationship_shift": {
+                        "trust_delta": 0.0,
+                        "suspicion_delta": 0.0,
+                        "fear_delta": 0.0,
+                        "tag": "steady",
+                    },
+                    "clue_effects": [],
+                    "access_effects": [
+                        {
+                            "effect_type": "soft_unlock",
+                            "target_id": "location_shrine_lane",
+                            "note": "The record trail bends back through Shrine Lane.",
+                        }
+                    ],
+                    "redirect_targets": [
+                        {
+                            "target_type": "location",
+                            "target_id": "location_shrine_lane",
+                            "reason": "The annex corrections route through Shrine Lane.",
+                        }
+                    ],
+                },
+                "cacheable_text": {
+                    "npc_line": "If you want the correction, follow where the page was allowed to pass.",
+                    "follow_up_suggestions": ["Ask who certified the change."],
+                    "exit_line_if_needed": "That is all the record will tolerate from me.",
+                },
+                "confidence": 0.8,
+                "warnings": [],
+            }
+        ),
+    )
+
+    outcome = engine.handle_player_request(populated_store, city_id=CITY_ID, request=request)
+
+    assert "Follow the redirected paper trail to Shrine Lane" in outcome.response.now_available
+    assert "Check the record trail at Shrine Lane" in outcome.response.now_available
+    assert "Ask who certified the change." in outcome.response.next_actions
+    assert "The record trail bends back through Shrine Lane." in outcome.response.learned
+    assert any("reply favored omission, deflection, and paper trails" in line for line in outcome.response.state_changes)
+
+
+def test_handle_player_request_biases_civic_pressure_into_formal_routing(
+    populated_store: SQLiteStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from lantern_city import engine
+
+    city = populated_store.load_object("CityState", CITY_ID)
+    npc = populated_store.load_object("NPCState", NPC_ID)
+    assert isinstance(city, CityState)
+    assert isinstance(npc, NPCState)
+    populated_store.save_objects_atomically(
+        [
+            city.model_copy(update={"faction_ids": ["faction_council_lights"]}),
+            npc.model_copy(update={"loyalty": "faction_council_lights"}),
+            FactionState(
+                id="faction_council_lights",
+                created_at=TURN_ZERO,
+                updated_at=TURN_ZERO,
+                name="Council of Lights",
+                public_goal="maintain public order",
+                hidden_goal="monopolize lantern legitimacy",
+                known_assets=["compliance", "access permits"],
+                active_plans=["official review"],
+            ),
+        ]
+    )
+
+    request = make_request(intent="conversation", target_id=NPC_ID, input_text="Ask to enter the ward office.")
+    monkeypatch.setattr(
+        engine,
+        "_generate_npc_dialogue",
+        lambda *args, **kwargs: NPCResponseGenerationResult.model_validate(
+            {
+                "task_type": "npc_response",
+                "request_id": request.id,
+                "summary_text": "Ila routes you through official channels.",
+                "structured_updates": {
+                    "dialogue_act": "formal_refusal_with_route",
+                    "npc_stance": "official and guarded",
+                    "relationship_shift": {
+                        "trust_delta": 0.0,
+                        "suspicion_delta": 0.0,
+                        "fear_delta": 0.0,
+                        "tag": "steady",
+                    },
+                    "clue_effects": [],
+                    "access_effects": [
+                        {
+                            "effect_type": "soft_unlock",
+                            "target_id": "location_shrine_lane",
+                            "note": "Requests have to be logged through Shrine Lane first.",
+                        }
+                    ],
+                    "redirect_targets": [],
+                },
+                "cacheable_text": {
+                    "npc_line": "You can file the request, but it goes through the proper desk first.",
+                    "follow_up_suggestions": ["Ask for the proper desk."],
+                    "exit_line_if_needed": "That is the process.",
+                },
+                "confidence": 0.8,
+                "warnings": [],
+            }
+        ),
+    )
+
+    outcome = engine.handle_player_request(populated_store, city_id=CITY_ID, request=request)
+
+    assert "Request official access to Shrine Lane" in outcome.response.now_available
+    assert "Make a formal request: Ask for the proper desk." in outcome.response.next_actions
+    assert "Requests have to be logged through Shrine Lane first." in outcome.response.learned
+    assert any("reply stayed procedural and access-minded" in line for line in outcome.response.state_changes)
 
 
 def test_handle_player_request_returns_inspection_response_without_state_changes(

@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 import sys
 from dataclasses import dataclass
+from typing import Any
 
 from lantern_city.active_slice import ActiveSlice, RequestIntent
 from lantern_city.generation.writing_guardrails import (
@@ -52,6 +53,14 @@ class EngineOutcome:
     active_slice: ActiveSlice
     response: ResponsePayload
     changed_objects: list[str]
+
+
+@dataclass(frozen=True, slots=True)
+class _GeneratedNPCOutcomeRead:
+    learned: list[str]
+    now_available: list[str]
+    next_actions: list[str]
+    state_changes: list[str]
 
 
 @dataclass(slots=True)
@@ -169,6 +178,7 @@ def _handle_npc_conversation(
     npc = _require_npc(active_slice)
     clue = _first_clue(active_slice.clues)
     case_title = None if active_slice.case is None else active_slice.case.title
+    loyalty_faction = _load_loyalty_faction(active_slice, npc, state_update_engine.store)
 
     generation_result = _generate_npc_dialogue(
         state_update_engine.store,
@@ -177,6 +187,10 @@ def _handle_npc_conversation(
         llm_config=llm_config,
         progress=progress,
         case_intro_text=case_intro_text,
+    )
+    generation_read = _read_generated_npc_outcome(
+        generation_result,
+        loyalty_faction=loyalty_faction,
     )
     npc_line = None if generation_result is None else generation_result.cacheable_text.npc_line
     if npc_line is None:
@@ -212,19 +226,26 @@ def _handle_npc_conversation(
             updated_npc = apply_player_flag(updated_npc, flag=player_flag, updated_at=request.updated_at)
             state_changes.append(f"{npc.name} now remembers: {player_flag}.")
         state_changes.append(f"Relationship state: {summarize_relationship(updated_npc)}.")
+        state_changes.extend(generation_read.state_changes)
     else:
         player_flag = None
 
     response = compose_response(
         narrative_text=narrative_text,
         state_changes=state_changes,
-        learned=_learned_clues(active_slice, clue),
+        learned=_merge_unique_lines(_learned_clues(active_slice, clue), generation_read.learned),
         visible_npcs=[npc.name] if npc.name else [],
         notable_objects=_conversation_notable_objects(active_slice, npc),
         exits=_conversation_exits(active_slice),
         case_relevance=_case_relevance(active_slice, clue=clue),
-        now_available=_conversation_now_available(active_slice, npc),
-        next_actions=_conversation_next_actions(case_title),
+        now_available=_merge_unique_lines(
+            _conversation_now_available(active_slice, npc),
+            generation_read.now_available,
+        ),
+        next_actions=_merge_unique_lines(
+            generation_read.next_actions,
+            _conversation_next_actions(case_title),
+        ),
     )
 
     memory_entry = build_conversation_memory_entry(
@@ -455,6 +476,65 @@ def _generate_npc_dialogue(
         return None
 
 
+def _read_generated_npc_outcome(
+    generation_result: NPCResponseGenerationResult | None,
+    *,
+    loyalty_faction: FactionState | None,
+) -> _GeneratedNPCOutcomeRead:
+    if generation_result is None:
+        return _GeneratedNPCOutcomeRead([], [], [], [])
+
+    style = _faction_style(loyalty_faction)
+    updates = generation_result.structured_updates
+    learned = [effect.note for effect in updates.clue_effects if effect.note]
+    now_available: list[str] = []
+    next_actions: list[str] = []
+    state_changes: list[str] = []
+
+    for redirect in updates.redirect_targets:
+        target_label = _display_name(redirect.target_id)
+        if style == "records":
+            now_available.append(f"Follow the redirected paper trail to {target_label}")
+        elif style == "civic":
+            now_available.append(f"Accept the official reroute to {target_label}")
+        else:
+            now_available.append(f"Follow the lead to {target_label}")
+        next_actions.append(f"Go to {target_label}")
+
+    for access in updates.access_effects:
+        target_label = _display_name(access.target_id) if access.target_id else "the indicated office"
+        if style == "civic":
+            now_available.append(f"Request official access to {target_label}")
+            state_changes.append(f"Institutional pressure: civic routing now points through {target_label}.")
+        elif style == "records":
+            now_available.append(f"Check the record trail at {target_label}")
+            state_changes.append(f"Institutional pressure: the conversation was redirected into records and intermediaries.")
+        else:
+            now_available.append(f"Use the opening at {target_label}")
+        if access.note:
+            learned.append(access.note)
+
+    for suggestion in generation_result.cacheable_text.follow_up_suggestions:
+        if style == "civic" and _looks_like_question(suggestion):
+            next_actions.append(f"Make a formal request: {suggestion}")
+        else:
+            next_actions.append(suggestion)
+
+    dialogue_act = updates.dialogue_act.lower()
+    npc_stance = updates.npc_stance.lower()
+    if style == "civic" and any(token in dialogue_act or token in npc_stance for token in ("refus", "official", "guard", "procedur")):
+        state_changes.append("Institutional pressure: the reply stayed procedural and access-minded.")
+    if style == "records" and any(token in dialogue_act or token in npc_stance for token in ("redirect", "deflect", "guard", "careful")):
+        state_changes.append("Institutional pressure: the reply favored omission, deflection, and paper trails.")
+
+    return _GeneratedNPCOutcomeRead(
+        learned=_dedupe_preserve_order(learned),
+        now_available=_dedupe_preserve_order(now_available),
+        next_actions=_dedupe_preserve_order(next_actions),
+        state_changes=_dedupe_preserve_order(state_changes),
+    )
+
+
 def _load_loyalty_faction(
     active_slice: ActiveSlice,
     npc: NPCState,
@@ -470,6 +550,45 @@ def _load_loyalty_faction(
         if isinstance(candidate, FactionState) and candidate.name == npc.loyalty:
             return candidate
     return None
+
+
+def _faction_style(faction: FactionState | None) -> str:
+    if faction is None:
+        return "general"
+    text = " ".join(
+        [
+            faction.name,
+            faction.public_goal,
+            faction.hidden_goal,
+            *faction.known_assets,
+            *faction.active_plans,
+        ]
+    ).lower()
+    if any(token in text for token in ("records", "memory", "archive", "certification", "continuity")):
+        return "records"
+    if any(token in text for token in ("order", "compliance", "permit", "civic", "lantern", "public confidence")):
+        return "civic"
+    return "general"
+
+
+def _merge_unique_lines(left: list[str], right: list[str]) -> list[str]:
+    return _dedupe_preserve_order([*left, *right])
+
+
+def _dedupe_preserve_order(items: list[str]) -> list[str]:
+    seen: set[str] = set()
+    result: list[str] = []
+    for item in items:
+        if not item or item in seen:
+            continue
+        seen.add(item)
+        result.append(item)
+    return result
+
+
+def _looks_like_question(text: str) -> bool:
+    normalized = text.strip().lower()
+    return normalized.startswith(("ask ", "request ", "find out ", "go to ")) or normalized.endswith("?")
 
 
 def _infer_player_flag(

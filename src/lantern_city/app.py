@@ -668,6 +668,7 @@ class LanternCityApp:
         ]
 
         updated_cases: list[CaseState] = []
+        extra_updates: list[RuntimeModel] = []
         notices: list[str] = []
         for case in cases:
             if case.status == "latent":
@@ -686,14 +687,137 @@ class LanternCityApp:
             else:
                 current, pressure_notices = advance_case_pressure(current, updated_at=updated_at)
                 notices.extend(pressure_notices)
+                current, style_updates, style_notices = self._apply_case_faction_style_drift(
+                    current,
+                    updated_at=updated_at,
+                )
+                extra_updates.extend(style_updates)
+                notices.extend(style_notices)
                 notices.append(f"{case.title}: {case_pressure_summary(current)}")
 
             if current != case:
                 updated_cases.append(current.model_copy(update={"version": case.version + 1}))
 
-        if updated_cases:
-            self.store.save_objects_atomically(updated_cases)
+        if updated_cases or extra_updates:
+            self.store.save_objects_atomically([*updated_cases, *extra_updates])
         return notices
+
+    def _apply_case_faction_style_drift(
+        self,
+        case: CaseState,
+        *,
+        updated_at: str,
+    ) -> tuple[CaseState, list[RuntimeModel], list[str]]:
+        if _case_runtime_mode(case) != "evolved_runtime":
+            return case, [], []
+
+        current = case
+        updates: list[RuntimeModel] = []
+        notices: list[str] = []
+        for faction_id in current.involved_faction_ids:
+            faction = self.store.load_object("FactionState", faction_id)
+            if not isinstance(faction, FactionState):
+                continue
+            style = faction_style_label(faction)
+            if style == "records control":
+                current, clue_updates, clue_notices = self._apply_records_case_drift(
+                    current,
+                    faction=faction,
+                    updated_at=updated_at,
+                )
+                updates.extend(clue_updates)
+                notices.extend(clue_notices)
+            elif style == "civic enforcement":
+                district_updates, district_notices = self._apply_civic_case_drift(
+                    current,
+                    faction=faction,
+                    updated_at=updated_at,
+                )
+                updates.extend(district_updates)
+                notices.extend(district_notices)
+        return current, updates, notices
+
+    def _apply_records_case_drift(
+        self,
+        case: CaseState,
+        *,
+        faction: FactionState,
+        updated_at: str,
+    ) -> tuple[CaseState, list[RuntimeModel], list[str]]:
+        if case.pressure_level not in {"rising", "urgent"}:
+            return case, [], []
+        known_ids = list(case.known_clue_ids)
+        if not known_ids:
+            known_ids = [
+                clue.id
+                for clue in self.store.list_objects("ClueState")
+                if isinstance(clue, ClueState) and case.id in clue.related_case_ids
+            ]
+        for clue_id in known_ids:
+            clue = self.store.load_object("ClueState", clue_id)
+            if not isinstance(clue, ClueState):
+                continue
+            if clue.source_type != "document" or clue.reliability not in {"credible", "uncertain"}:
+                continue
+            next_reliability = "uncertain" if clue.reliability == "credible" else "unstable"
+            updated_clue = clue.model_copy(update={"reliability": next_reliability, "updated_at": updated_at})
+            risk_flag = f"records_drift:{faction.id}"
+            if risk_flag not in case.offscreen_risk_flags:
+                case = case.model_copy(
+                    update={
+                        "offscreen_risk_flags": [*case.offscreen_risk_flags, risk_flag],
+                        "updated_at": updated_at,
+                    }
+                )
+            return (
+                case,
+                [updated_clue.model_copy(update={"version": clue.version + 1})],
+                [
+                    f"{faction.name} is muddying the paper trail around {case.title}.",
+                    f"[Pressure: {_clue_label(clue.id)} is slipping - reliability now {next_reliability}]",
+                ],
+            )
+        return case, [], []
+
+    def _apply_civic_case_drift(
+        self,
+        case: CaseState,
+        *,
+        faction: FactionState,
+        updated_at: str,
+    ) -> tuple[list[RuntimeModel], list[str]]:
+        if case.pressure_level not in {"rising", "urgent"}:
+            return [], []
+        updates: list[RuntimeModel] = []
+        notices: list[str] = []
+        for district_id in case.involved_district_ids:
+            district = self.store.load_object("DistrictState", district_id)
+            if not isinstance(district, DistrictState):
+                continue
+            next_access = _surveil_district_access(district.current_access_level)
+            surveillance_flag = f"civic_pressure:{faction.id}"
+            active_problems = list(district.active_problems)
+            changed = False
+            if surveillance_flag not in active_problems:
+                active_problems = [*active_problems, surveillance_flag][-6:]
+                changed = True
+            if next_access != district.current_access_level:
+                changed = True
+            if not changed:
+                continue
+            updates.append(
+                district.model_copy(
+                    update={
+                        "active_problems": active_problems,
+                        "current_access_level": next_access,
+                        "updated_at": updated_at,
+                        "version": district.version + 1,
+                    }
+                )
+            )
+            notices.append(f"{faction.name} is narrowing official access in {district.name}.")
+            break
+        return updates, notices
 
     def _run_faction_updates(
         self,

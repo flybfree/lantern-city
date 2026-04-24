@@ -14,7 +14,7 @@ from lantern_city.generation.case_generation import (
     GeneratedResolutionPath,
 )
 from lantern_city.llm_client import OpenAICompatibleConfig
-from lantern_city.models import CaseState
+from lantern_city.models import CaseState, ClueState
 from lantern_city.response import compose_response
 from lantern_city.seed_schema import validate_city_seed
 
@@ -481,6 +481,89 @@ def test_faction_turn_operations_pressure_generated_case_and_targeted_npc(tmp_pa
     )
     assert "faction_surveillance:faction_council_lights" in district.active_problems
     assert district.current_access_level in {"controlled", "restricted"}
+
+
+def test_records_faction_drift_degrades_document_clue_over_time(tmp_path) -> None:
+    app = LanternCityApp(tmp_path / "lantern-city.sqlite3")
+    app.start_new_game()
+    city = app._require_city()
+    app.store.save_object(city.model_copy(update={"active_case_ids": ["case_gen_records_001"]}))
+    app.store.save_object(
+        CaseState(
+            id="case_gen_records_001",
+            created_at="turn_0",
+            updated_at="turn_0",
+            title="Ledger Shadow",
+            case_type="records tampering",
+            status="active",
+            involved_district_ids=["district_old_quarter"],
+            involved_faction_ids=["faction_memory_keepers"],
+            known_clue_ids=["clue_records_pressure_001"],
+            pressure_level="rising",
+            time_since_last_progress=1,
+            objective_summary="Track a falsified corrections trail.",
+        )
+    )
+    app.store.save_object(
+        ClueState(
+            id="clue_records_pressure_001",
+            created_at="turn_0",
+            updated_at="turn_0",
+            source_type="document",
+            source_id="location_ledger_room",
+            clue_text="A correction ledger was rewritten after dusk.",
+            reliability="credible",
+            related_case_ids=["case_gen_records_001"],
+        )
+    )
+
+    notices = app._run_case_pressure_updates(
+        updated_at="turn_2",
+        progressed_case_ids=set(),
+        focus_district_id="district_old_quarter",
+    )
+
+    clue = app.store.load_object("ClueState", "clue_records_pressure_001")
+
+    assert clue is not None
+    assert clue.reliability == "uncertain"
+    assert any("muddying the paper trail" in notice for notice in notices)
+    assert any("reliability now uncertain" in notice for notice in notices)
+
+
+def test_civic_faction_drift_tightens_district_access_over_time(tmp_path) -> None:
+    app = LanternCityApp(tmp_path / "lantern-city.sqlite3")
+    app.start_new_game()
+    city = app._require_city()
+    app.store.save_object(city.model_copy(update={"active_case_ids": ["case_gen_civic_001"]}))
+    app.store.save_object(
+        CaseState(
+            id="case_gen_civic_001",
+            created_at="turn_0",
+            updated_at="turn_0",
+            title="Dock Inquiry",
+            case_type="procedural obstruction",
+            status="active",
+            involved_district_ids=["district_the_docks"],
+            involved_faction_ids=["faction_council_lights"],
+            pressure_level="rising",
+            time_since_last_progress=1,
+            objective_summary="Work out who is constricting access at the docks.",
+        )
+    )
+
+    notices = app._run_case_pressure_updates(
+        updated_at="turn_2",
+        progressed_case_ids=set(),
+        focus_district_id="district_the_docks",
+    )
+
+    district = app.store.load_object("DistrictState", "district_the_docks")
+
+    assert district is not None
+    assert district.current_access_level == "watched"
+    assert "civic_pressure:faction_council_lights" in district.active_problems
+    assert any("narrowing official access" in notice for notice in notices)
 
 
 def test_overview_and_status_surface_faction_posture(tmp_path) -> None:
