@@ -15,6 +15,7 @@ from lantern_city.models import (
     NPCState,
     PlayerRequest,
 )
+from lantern_city.generation.npc_response import NPCResponseGenerationResult
 from lantern_city.orchestrator import OrchestratedRequest
 from lantern_city.store import SQLiteStore
 
@@ -323,6 +324,59 @@ def test_handle_player_request_returns_npc_conversation_response_and_only_mutate
         }
     ]
     assert populated_store.load_cache(f"response:talk_to_npc:{NPC_ID}:ask about the outage") is None
+
+
+def test_handle_player_request_persists_generated_exit_line_in_npc_memory(
+    populated_store: SQLiteStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from lantern_city import engine
+
+    request = make_request(
+        intent="conversation",
+        target_id=NPC_ID,
+        input_text="Ask what the clerk was afraid of.",
+    )
+
+    monkeypatch.setattr(
+        engine,
+        "_generate_npc_dialogue",
+        lambda *args, **kwargs: NPCResponseGenerationResult.model_validate(
+            {
+                "task_type": "npc_response",
+                "request_id": request.id,
+                "summary_text": "Ila answers carefully, then closes the thread.",
+                "structured_updates": {
+                    "dialogue_act": "answer_then_close",
+                    "npc_stance": "guarded",
+                    "relationship_shift": {
+                        "trust_delta": 0.0,
+                        "suspicion_delta": 0.0,
+                        "fear_delta": 0.0,
+                        "tag": "steady",
+                    },
+                    "clue_effects": [],
+                    "access_effects": [],
+                    "redirect_targets": [],
+                },
+                "cacheable_text": {
+                    "npc_line": "He was afraid of how quickly a correction could become an erasure.",
+                    "follow_up_suggestions": ["Ask who could authorize the erasure."],
+                    "exit_line_if_needed": "That is all I can risk saying while the lamps are still watching.",
+                },
+                "confidence": 0.8,
+                "warnings": [],
+            }
+        ),
+    )
+
+    outcome = engine.handle_player_request(populated_store, city_id=CITY_ID, request=request)
+    npc = populated_store.load_object("NPCState", NPC_ID)
+
+    assert outcome.response.narrative_text == "He was afraid of how quickly a correction could become an erasure."
+    assert isinstance(npc, NPCState)
+    assert npc.memory_log[-1]["npc_exit_line"] == (
+        "That is all I can risk saying while the lamps are still watching."
+    )
 
 
 def test_handle_player_request_returns_inspection_response_without_state_changes(

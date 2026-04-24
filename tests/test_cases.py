@@ -71,6 +71,29 @@ def test_transition_case_to_solved_requires_resolution_and_closes_questions(
     assert "city_change" in case_fallout_tags(updated.status)
 
 
+def test_transition_case_allows_stalled_case_to_resolve_when_evidence_arrives(
+    active_case: CaseState,
+) -> None:
+    stalled = transition_case(
+        active_case,
+        "stalled",
+        updated_at=TURN_ONE,
+        fallout_summary="Leads cooled while the district closed ranks.",
+    )
+
+    solved = transition_case(
+        stalled,
+        "solved",
+        updated_at="turn_2",
+        resolution_summary="Delayed evidence still proved the clerk was hidden deliberately.",
+        fallout_summary="The case closes once the proof finally lands.",
+    )
+
+    assert solved.status == "solved"
+    assert solved.open_questions == []
+    assert solved.resolution_summary.startswith("Delayed evidence")
+
+
 def test_transition_case_rejects_invalid_or_terminal_backtracking(active_case: CaseState) -> None:
     with pytest.raises(ValueError, match="Invalid case status"):
         transition_case(active_case, "obsolete", updated_at=TURN_ONE)

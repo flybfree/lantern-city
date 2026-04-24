@@ -49,6 +49,21 @@ to:
 - lantern and Missingness conditions drive actual play consequences
 - case outcomes leave visible, persistent civic fallout
 
+## Boundary With The MVP Loop
+
+The repo still carries an authored MVP vertical slice that serves as:
+- the onboarding path
+- the regression-test path
+- the shortest proof that the loop works at all
+
+That baseline should remain playable.
+But post-MVP work should not treat its simplified assumptions as the default rule for the full game.
+
+In practical terms:
+- the authored Missing Clerk shortcut path can remain as a controlled baseline
+- deeper runtime systems should be free to demand more friction, broader evidence, and stronger offscreen evolution
+- when shared logic must support both, the distinction should be explicit rather than accidental
+
 ## Priority Order
 
 Implement in this order:

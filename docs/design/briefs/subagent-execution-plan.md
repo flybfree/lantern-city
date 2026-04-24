@@ -38,6 +38,25 @@
 - docs baseline committed
 - virtual environment available
 
+## Architectural Note
+
+This plan was originally written around the MVP vertical slice.
+The runtime has since evolved toward a deeper simulation model.
+
+Treat these as two separate layers:
+
+- `MVP baseline loop`
+  The short, deterministic authored path that proves the game works end to end.
+  This is the loop used for onboarding, core regression tests, and first-play validation.
+
+- `Evolved runtime`
+  The broader simulation layer with latent cases, offscreen pressure, deeper clue interpretation, and stronger social/systemic state changes.
+
+Execution rule:
+- do not let MVP shortcut assumptions silently define the general runtime
+- do not let newer simulation rules accidentally break the authored MVP proof-of-loop path
+- if a task touches shared logic, explicitly decide whether it belongs to MVP baseline behavior, evolved runtime behavior, or both
+
 ## Task Grouping Strategy
 
 This plan is arranged to reduce file contention and keep progress safe:

@@ -194,6 +194,48 @@ def make_valid_payload() -> dict[str, object]:
     }
 
 
+def test_npc_response_request_payload_carries_recent_exit_lines_and_prompt_for_variation() -> None:
+    active_slice = make_active_slice()
+    npc = active_slice.npcs[0]
+    active_slice = ActiveSlice(
+        city=active_slice.city,
+        working_set=active_slice.working_set,
+        district=active_slice.district,
+        location=active_slice.location,
+        scene=active_slice.scene,
+        npcs=[
+            npc.model_copy(
+                update={
+                    "memory_log": [
+                        {
+                            "input_text": "Can you help?",
+                            "npc_response": "Only a little.",
+                            "npc_exit_line": "If that is all, I should get back to the ward glass.",
+                        }
+                    ]
+                }
+            )
+        ],
+        clues=active_slice.clues,
+        case=active_slice.case,
+    )
+    client = StubLLMClient(make_valid_payload())
+    generator = NPCResponseGenerator(client)
+
+    generator.generate(
+        NPCResponseGenerationRequest(
+            request_id="req_npc_001",
+            active_slice=active_slice,
+            player_request=make_player_request(),
+        )
+    )
+
+    messages = client.calls[0]["messages"]
+    assert '"recent_exit_lines"' in messages[1]["content"]
+    assert "If that is all, I should get back to the ward glass." in messages[1]["content"]
+    assert "do not reuse the same wording" in messages[1]["content"]
+
+
 def test_npc_response_generator_builds_bounded_prompt_and_returns_validated_output() -> None:
     client = StubLLMClient(make_valid_payload())
     generator = NPCResponseGenerator(client)

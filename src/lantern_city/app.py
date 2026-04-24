@@ -6,6 +6,7 @@ import sys
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
+from time import perf_counter
 
 from lantern_city.bootstrap import bootstrap_city
 from lantern_city.case_bootstrap import bootstrap_generated_case
@@ -22,6 +23,7 @@ from lantern_city.generation.city_seed import (
     CitySeedGenerationRequest,
     CitySeedGenerator,
 )
+from lantern_city.generation.npc_response import NPCResponseGenerationResult
 from lantern_city.generation.world_content import WorldContentGenerator
 from lantern_city.generation.transient_response import (
     TransientGenerationError,
@@ -57,6 +59,67 @@ TURN_FOUR = "turn_4"
 
 _AWS_ID = "aws_player_001"
 
+_MODEL_QUALITY_PROBE_SCHEMA: dict[str, object] = {
+    "type": "object",
+    "properties": {
+        "task_type": {"type": "string"},
+        "request_id": {"type": "string"},
+        "summary_text": {"type": "string"},
+        "structured_updates": {
+            "type": "object",
+            "properties": {
+                "dialogue_act": {"type": "string"},
+                "npc_stance": {"type": "string"},
+                "relationship_shift": {
+                    "type": "object",
+                    "properties": {
+                        "trust_delta": {"type": "number"},
+                        "suspicion_delta": {"type": "number"},
+                        "fear_delta": {"type": "number"},
+                        "tag": {"type": ["string", "null"]},
+                    },
+                    "required": ["trust_delta", "suspicion_delta", "fear_delta", "tag"],
+                    "additionalProperties": False,
+                },
+                "clue_effects": {"type": "array"},
+                "access_effects": {"type": "array"},
+                "redirect_targets": {"type": "array"},
+            },
+            "required": [
+                "dialogue_act",
+                "npc_stance",
+                "relationship_shift",
+                "clue_effects",
+                "access_effects",
+                "redirect_targets",
+            ],
+            "additionalProperties": False,
+        },
+        "cacheable_text": {
+            "type": "object",
+            "properties": {
+                "npc_line": {"type": "string"},
+                "follow_up_suggestions": {"type": "array", "items": {"type": "string"}},
+                "exit_line_if_needed": {"type": ["string", "null"]},
+            },
+            "required": ["npc_line", "follow_up_suggestions", "exit_line_if_needed"],
+            "additionalProperties": False,
+        },
+        "confidence": {"type": "number"},
+        "warnings": {"type": "array", "items": {"type": "string"}},
+    },
+    "required": [
+        "task_type",
+        "request_id",
+        "summary_text",
+        "structured_updates",
+        "cacheable_text",
+        "confidence",
+        "warnings",
+    ],
+    "additionalProperties": False,
+}
+
 
 @dataclass(slots=True)
 class LanternCityApp:
@@ -83,10 +146,14 @@ class LanternCityApp:
             return (
                 f"Existing game loaded: {existing_city.id}\n"
                 f"Districts: {', '.join(existing_city.district_ids)}\n"
-                f"Introduced case: {case_title}"
+                f"Active case: {case_title}"
             )
 
+        model_check_summary: str | None = None
         if self.llm_config is not None:
+            _emit("[llm] Running model quality check…")
+            model_check_summary = self._probe_llm_quality()
+            _emit(f"[llm] {model_check_summary}")
             _emit("[city] Generating city seed via LLM…")
             seed = self._generate_city_seed(concept, on_progress=on_progress)
         else:
@@ -106,6 +173,7 @@ class LanternCityApp:
         else:
             _emit("[city] Seeding authored scene objects…")
             self._seed_authored_scene_objects()
+            self._activate_authored_start_case()
 
         city = self._require_city()
         case = self._active_case(city)
@@ -118,7 +186,8 @@ class LanternCityApp:
         return (
             f"Lantern City ready: seeded {result.city_id}\n"
             f"Districts: {', '.join(result.district_ids)}\n"
-            f"Introduced case: {case_title}\n"
+            f"Active case: {case_title}\n"
+            f"{'' if model_check_summary is None else model_check_summary + chr(10)}"
             f"Next: enter {first_district}"
         )
 
@@ -1614,6 +1683,48 @@ class LanternCityApp:
         )
         self.store.save_objects_atomically(objects_to_save)
 
+    def _activate_authored_start_case(self) -> None:
+        case = self.store.load_object("CaseState", "case_missing_clerk")
+        if not isinstance(case, CaseState) or case.status != "latent":
+            return
+        activated = transition_case(case, "active", updated_at=TURN_ZERO)
+        self.store.save_object(activated)
+        self._introduce_case(case.id)
+
+    def _probe_llm_quality(self) -> str:
+        assert self.llm_config is not None
+        client = OpenAICompatibleLLMClient(self.llm_config)
+        started_at = perf_counter()
+        try:
+            payload = client.generate_json(
+                messages=_model_probe_messages(),
+                temperature=0.1,
+                max_tokens=600,
+                schema=_MODEL_QUALITY_PROBE_SCHEMA,
+            )
+            elapsed = perf_counter() - started_at
+            result = NPCResponseGenerationResult.model_validate(payload)
+        except Exception as exc:
+            log.warning("llm quality probe failed: %s", exc)
+            return (
+                "Model check: warning — startup probe failed, so NPC generation quality is uncertain. "
+                "You may see template fallback text."
+            )
+        finally:
+            client.close()
+
+        if elapsed > 20.0:
+            return (
+                f"Model check: warning — startup probe validated the response schema, "
+                f"but it took {elapsed:.1f}s. Expect slow NPC turns."
+            )
+        if result.confidence < 0.35:
+            return (
+                "Model check: warning — startup probe returned a low-confidence NPC response. "
+                "Conversation quality may be weak."
+            )
+        return f"Model check: pass — startup probe validated NPC response quality in {elapsed:.1f}s."
+
     def _seed_authored_scene_objects(self) -> None:
         old_quarter = self._district("district_old_quarter")
         lantern_ward = self._district("district_lantern_ward")
@@ -2629,6 +2740,12 @@ _CASE_CLUE_IDS = [
 _CREDIBLE_RELIABILITIES = {"credible", "solid"}
 # (track, amount, reason)
 _RESOLUTION_GAINS: dict[str, list[tuple[str, int, str]]] = {
+    "mvp_vertical_slice": [
+        ("reputation", 8, "Recovered the missing clerk and established the core truth of the case."),
+        ("city_impact", 6, "A deliberate disappearance failed to hold."),
+        ("lantern_understanding", 6, "Confirmed how lantern distortion shaped the evidence trail."),
+        ("clue_mastery", 6, "Turned one confirmed lead into a workable resolution."),
+    ],
     "clean_exposure": [
         ("reputation", 10, "Public exposure of lantern manipulation and records fraud."),
         ("city_impact", 12, "Truth entered civic memory; district accountability forced."),
@@ -2670,6 +2787,28 @@ def _assess_resolution(
     has_clue_f = clue_f is not None and clue_f.reliability in _CREDIBLE_RELIABILITIES
     access_tier = get_tier(progress.access.score)
     leverage_tier = get_tier(progress.leverage.score)
+    primary_clue = store.load_object("ClueState", "clue_missing_clerk_ledgers")
+    shrine_keeper = store.load_object("NPCState", "npc_shrine_keeper")
+
+    if (
+        isinstance(primary_clue, ClueState)
+        and primary_clue.reliability == "solid"
+        and isinstance(shrine_keeper, NPCState)
+        and len(shrine_keeper.memory_log) >= 1
+    ):
+        return (
+            "mvp_vertical_slice",
+            "solved",
+            (
+                "The altered ledger line was confirmed and Ila Venn's account held together under scrutiny. "
+                "That was enough to recover Tovin Vale and prove the disappearance was engineered, even if the "
+                "full civic fallout remains smaller than it would be in a broader case."
+            ),
+            (
+                "The Missing Clerk case closes in MVP form. Tovin survives, the immediate distortion is broken, "
+                "and the city now carries a recoverable scar instead of a total erasure."
+            ),
+        )
 
     if has_clue_f and len(credible_clues) >= 2 and (access_tier >= 2 or leverage_tier >= 2):
         return (
@@ -3148,6 +3287,27 @@ def _default_seed_payload() -> dict[str, object]:
             "replayability_profile": "district_pressure_and_faction_topology",
         },
     }
+
+
+def _model_probe_messages() -> list[dict[str, str]]:
+    return [
+        {
+            "role": "system",
+            "content": (
+                "You are validating whether a Lantern City-compatible model can produce one "
+                "short, schema-compliant NPC response. Return valid JSON only."
+            ),
+        },
+        {
+            "role": "user",
+            "content": (
+                "Produce one bounded npc_response object for this scene.\n"
+                "A cautious archive witness is asked who altered a maintenance ledger after dusk.\n"
+                "The reply should be usable, concrete, and short. Avoid placeholders, ellipses, "
+                "and transcript formatting. Include one useful follow-up suggestion."
+            ),
+        },
+    ]
 
 
 __all__ = ["LanternCityApp"]

@@ -217,6 +217,8 @@ def _handle_npc_conversation(
     }
     if npc_line is not None:
         memory_entry["npc_response"] = npc_line
+    if generation_result is not None and generation_result.cacheable_text.exit_line_if_needed is not None:
+        memory_entry["npc_exit_line"] = generation_result.cacheable_text.exit_line_if_needed
 
     updated_npc = updated_npc.model_copy(
         update={

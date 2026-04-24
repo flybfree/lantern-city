@@ -71,6 +71,49 @@ Implementation is successful when a player can:
 9. resolve the case through at least one meaningful ending path
 10. see the city remember the consequences
 
+## MVP Baseline vs Evolved Runtime
+
+Lantern City now has two valid design layers that must not be conflated:
+
+### 1. MVP vertical slice baseline
+
+This is the short, controlled authored loop used to prove the game works end to end.
+
+Its purpose is:
+- onboarding
+- regression testing
+- fast verification that the core loop still functions
+- preserving a deterministic proof-of-play path for The Missing Clerk
+
+This baseline is allowed to be simpler than the eventual full game.
+In particular, it may keep:
+- a shorter clue chain
+- a faster case introduction
+- a narrower resolution path
+- less friction than the full simulation would eventually use
+
+### 2. Evolved simulation runtime
+
+This is the deeper game layer where:
+- latent cases can stay hidden until properly surfaced
+- offscreen pressure can move a case from active to stalled or escalated
+- broader clue interpretation matters
+- NPC and district state can evolve independently of the player
+- resolution can demand more than the vertical-slice shortcut path
+
+### Rule for future implementation
+
+Do not let assumptions from the MVP vertical slice silently hard-code the full runtime.
+If a behavior exists only to preserve the MVP showcase loop, treat it as authored baseline behavior, not as the general rule for all future cases and systems.
+
+Likewise, do not let deeper simulation rules accidentally erase the baseline proof-of-loop path that the current tests and onboarding flow still depend on.
+
+When there is tension between the two:
+- preserve the MVP baseline intentionally
+- document the shortcut clearly
+- keep the deeper rule as the default direction for post-MVP systems
+- avoid mixing the two by accident inside shared logic without comment
+
 ## MVP Build Boundaries
 
 Do build:

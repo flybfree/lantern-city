@@ -287,6 +287,11 @@ class NPCResponseGenerationRequest:
             for entry in npc.memory_log[-6:]
             if "input_text" in entry and "npc_response" in entry
         ]
+        recent_exit_lines = [
+            entry["npc_exit_line"]
+            for entry in npc.memory_log[-6:]
+            if "npc_exit_line" in entry and isinstance(entry["npc_exit_line"], str)
+        ]
 
         player_standing: dict[str, object] | None = None
         if self.progress is not None:
@@ -311,6 +316,7 @@ class NPCResponseGenerationRequest:
             "player_input": self.player_request.input_text,
             "player_intent": self.player_request.intent,
             "conversation_history": history,
+            "recent_exit_lines": recent_exit_lines,
             "player_standing": player_standing,
             "case_intro_hook": self.case_intro_text,
             "npc": {
@@ -516,6 +522,8 @@ class NPCResponseGenerator:
             "- generate exactly one reply turn plus structured effects\n"
             "- if the NPC refuses, the refusal should still be informative or redirective\n"
             "- preserve the game's conversation model: useful quickly, easy to leave\n"
+            "- if recent_exit_lines are present and you produce a closing or exit line, do not reuse the same wording; "
+            "vary the closure language while preserving the same social meaning\n"
             "- if relevant_clues are present, work the substance of applicable clues naturally into the NPC's words — "
             "the player should learn the information through what the NPC says, not from a separate label; "
             "do not quote clue_text verbatim; let the NPC express it in their own voice and register\n"

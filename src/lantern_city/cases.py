@@ -16,7 +16,7 @@ _TERMINAL_STATUSES = {"solved", "partially solved", "failed"}
 _ALLOWED_TRANSITIONS = {
     "latent": {"active"},
     "active": {"stalled", "escalated", "solved", "partially solved", "failed"},
-    "stalled": {"active", "escalated", "partially solved", "failed"},
+    "stalled": {"active", "escalated", "solved", "partially solved", "failed"},
     "escalated": {"active", "solved", "partially solved", "failed"},
     "solved": set(),
     "partially solved": {"solved", "failed"},

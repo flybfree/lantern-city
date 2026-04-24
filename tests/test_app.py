@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 from lantern_city.active_slice import ActiveSlice
-from lantern_city.app import LanternCityApp
+from lantern_city.app import LanternCityApp, _load_default_seed
 from lantern_city.engine import EngineOutcome
+from lantern_city.llm_client import OpenAICompatibleConfig
 from lantern_city.response import compose_response
+from lantern_city.seed_schema import validate_city_seed
 
 
 def test_talk_to_npc_surfaces_pre_case_clue_as_new_lead(tmp_path, monkeypatch) -> None:
@@ -118,3 +120,89 @@ def test_inspect_location_surfaces_pre_case_clue_as_new_lead(tmp_path, monkeypat
     assert "[Clue found:" in output
     assert "[New lead]" in output
     assert "Someone maintained this route after it should have gone dark." in output
+
+
+def test_start_new_game_reports_successful_model_check(tmp_path, monkeypatch) -> None:
+    class _PassingProbeClient:
+        def __init__(self, config) -> None:
+            self.config = config
+
+        def generate_json(self, **kwargs):
+            return {
+                "task_type": "npc_response",
+                "request_id": "probe_npc_response",
+                "summary_text": "The witness answers carefully but provides a usable route.",
+                "structured_updates": {
+                    "dialogue_act": "answer_with_hint",
+                    "npc_stance": "guarded but cooperative",
+                    "relationship_shift": {
+                        "trust_delta": 0.05,
+                        "suspicion_delta": 0.0,
+                        "fear_delta": 0.0,
+                        "tag": "measured_cooperation",
+                    },
+                    "clue_effects": [],
+                    "access_effects": [],
+                    "redirect_targets": [],
+                },
+                "cacheable_text": {
+                    "npc_line": "The route is still usable, but only if you move before the ward shutters close.",
+                    "follow_up_suggestions": ["Ask who still watches the route."],
+                    "exit_line_if_needed": "That is all I can risk saying here.",
+                },
+                "confidence": 0.82,
+                "warnings": [],
+            }
+
+        def close(self) -> None:
+            return None
+
+    monkeypatch.setattr("lantern_city.app.OpenAICompatibleLLMClient", _PassingProbeClient)
+    monkeypatch.setattr(
+        LanternCityApp,
+        "_generate_city_seed",
+        lambda self, concept=None, on_progress=None: validate_city_seed(_load_default_seed()),
+    )
+    monkeypatch.setattr(LanternCityApp, "_generate_world_content", lambda self, on_progress=None: None)
+    monkeypatch.setattr(LanternCityApp, "_generate_latent_cases", lambda self, count=2: None)
+
+    app = LanternCityApp(
+        tmp_path / "lantern-city.sqlite3",
+        llm_config=OpenAICompatibleConfig(base_url="http://localhost:1234/v1", model="test-model"),
+    )
+
+    output = app.start_new_game()
+
+    assert "Lantern City ready:" in output
+    assert "Model check: pass" in output
+
+
+def test_start_new_game_reports_warning_when_model_probe_fails(tmp_path, monkeypatch) -> None:
+    class _FailingProbeClient:
+        def __init__(self, config) -> None:
+            self.config = config
+
+        def generate_json(self, **kwargs):
+            raise RuntimeError("bad schema output")
+
+        def close(self) -> None:
+            return None
+
+    monkeypatch.setattr("lantern_city.app.OpenAICompatibleLLMClient", _FailingProbeClient)
+    monkeypatch.setattr(
+        LanternCityApp,
+        "_generate_city_seed",
+        lambda self, concept=None, on_progress=None: validate_city_seed(_load_default_seed()),
+    )
+    monkeypatch.setattr(LanternCityApp, "_generate_world_content", lambda self, on_progress=None: None)
+    monkeypatch.setattr(LanternCityApp, "_generate_latent_cases", lambda self, count=2: None)
+
+    app = LanternCityApp(
+        tmp_path / "lantern-city.sqlite3",
+        llm_config=OpenAICompatibleConfig(base_url="http://localhost:1234/v1", model="test-model"),
+    )
+
+    output = app.start_new_game()
+
+    assert "Lantern City ready:" in output
+    assert "Model check: warning" in output

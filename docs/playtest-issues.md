@@ -62,6 +62,26 @@ The case resolves immediately once the clue is solid and Ila's memory log is non
 
 **Location:** `app.py:advance_case`
 
+**Architecture note:** This should now be treated as an explicit MVP baseline shortcut, not as the default rule for the evolved simulation. Future case-depth work should preserve this path intentionally for onboarding/regression purposes while allowing broader systems to require more friction.
+
+---
+
+### MVP vertical slice assumptions and evolved runtime rules are still easy to mix up
+The repo now contains both:
+- a short authored MVP proof-of-loop path
+- a deeper simulation direction with latent cases, pressure, and stronger state evolution
+
+Those are both valid, but they serve different purposes. Problems arise when:
+- the vertical-slice shortcut silently becomes the default rule for all cases
+- or newer simulation logic accidentally breaks the baseline authored loop that tests and onboarding still rely on
+
+**Impact:** This creates recurring regressions and design confusion. A change can be locally reasonable but still be wrong because it applies the assumptions of one layer to the other.
+
+**Fix direction:** Keep the distinction explicit in docs, tests, and shared logic:
+- MVP baseline behavior should remain a controlled, intentional shortcut
+- deeper runtime behavior should be the default direction for post-MVP systems
+- shared logic should not blend the two accidentally
+
 ---
 
 ### Small models degrade badly with the full JSON schema
