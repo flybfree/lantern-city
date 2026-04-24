@@ -1060,10 +1060,9 @@ class LanternCityApp:
         lines.append("Standouts:")
         for item in standouts[:4]:
             lines.append(f"  - {item}")
-        lines.append("Recovery:")
-        lines.append("  - inspect <location_id>")
-        lines.append("  - talk <npc_id> <question>")
-        lines.append("  - board")
+        lines.append("Do next:")
+        for action in self._matters_recovery_actions(pos=pos, local_cases=local_cases):
+            lines.append(f"  - {action}")
         return "\n".join(lines)
 
     def compare_clues(self, left_ref: str, right_ref: str) -> str:
@@ -1102,6 +1101,15 @@ class LanternCityApp:
         lines.append(f"  - {_clue_label(left.id)}: {left.clue_text}")
         lines.append(f"  - {_clue_label(right.id)}: {right.clue_text}")
         lines.append(f"Synthesis: {self._compare_synthesis(left, right, set(pos.known_case_ids))}")
+        lines.append("Do next:")
+        for action in self._compare_recovery_actions(
+            left=left,
+            right=right,
+            pos=pos,
+            shared_cases=shared_cases,
+            shared_districts=shared_districts,
+        ):
+            lines.append(f"  - {action}")
         return "\n".join(lines)
 
     def go(self, location_id: str) -> str:
@@ -1318,6 +1326,28 @@ class LanternCityApp:
                 deduped.append(action)
         return deduped[:4]
 
+    def _matters_recovery_actions(
+        self,
+        *,
+        pos: ActiveWorkingSet,
+        local_cases: list[CaseState],
+    ) -> list[str]:
+        actions: list[str] = []
+        if pos.location_id:
+            actions.append(f"inspect {pos.location_id}")
+        if pos.npc_ids:
+            actions.append(f"talk {pos.npc_ids[0]} <question>")
+        if local_cases:
+            actions.append("board")
+        if len(pos.clue_ids) >= 2:
+            actions.append("compare <clue_a> <clue_b>")
+        actions.append("leads")
+        deduped: list[str] = []
+        for action in actions:
+            if action not in deduped:
+                deduped.append(action)
+        return deduped[:4]
+
     def _summarize_case_clues(self, clues: list[ClueState]) -> str:
         if not clues:
             return ""
@@ -1437,6 +1467,49 @@ class LanternCityApp:
         if set(left.related_district_ids) & set(right.related_district_ids):
             return "These clues may reveal district pattern rather than direct causation. Use them to test pressure, not just sequence."
         return "These clues are better treated as parallel signals until a case, district, or NPC ties them together."
+
+    def _compare_recovery_actions(
+        self,
+        *,
+        left: ClueState,
+        right: ClueState,
+        pos: ActiveWorkingSet,
+        shared_cases: list[str],
+        shared_districts: list[str],
+    ) -> list[str]:
+        actions: list[str] = []
+        if shared_cases:
+            actions.append("board")
+        stronger: ClueState | None = None
+        weaker: ClueState | None = None
+        if left.reliability in _CREDIBLE_RELIABILITIES and right.reliability not in _CREDIBLE_RELIABILITIES:
+            stronger, weaker = left, right
+        elif right.reliability in _CREDIBLE_RELIABILITIES and left.reliability not in _CREDIBLE_RELIABILITIES:
+            stronger, weaker = right, left
+        if stronger is not None and weaker is not None:
+            label = _clue_label(stronger.id).lower()
+            if weaker.related_npc_ids:
+                actions.append(f"talk {weaker.related_npc_ids[0]} about why {label} and {_clue_label(weaker.id).lower()} do not line up yet")
+            else:
+                actions.append(f"Treat {_clue_label(stronger.id)} as the anchor and test {_clue_label(weaker.id).lower()} against a second source.")
+        elif left.reliability == "contradicted" or right.reliability == "contradicted":
+            contradicted = left if left.reliability == "contradicted" else right
+            if contradicted.related_npc_ids:
+                actions.append(f"talk {contradicted.related_npc_ids[0]} about why {_clue_label(contradicted.id).lower()} breaks down")
+            else:
+                actions.append(f"Find a second source before relying on {_clue_label(contradicted.id).lower()}.")
+        if shared_districts and pos.district_id is not None:
+            current_district = self._district(pos.district_id)
+            if current_district is not None and current_district.name in shared_districts:
+                actions.append("matters")
+        if not actions:
+            actions.append("leads")
+        actions.append("compare <clue_a> <clue_b>")
+        deduped: list[str] = []
+        for action in actions:
+            if action not in deduped:
+                deduped.append(action)
+        return deduped[:4]
 
     def _propagate_missingness(
         self,

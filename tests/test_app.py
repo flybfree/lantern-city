@@ -249,3 +249,34 @@ def test_strongest_leads_includes_recovery_footer(tmp_path) -> None:
     assert "Recovery:" in output
     assert "  - matters" in output
     assert "  - board" in output
+
+
+def test_what_matters_here_includes_exact_next_commands(tmp_path) -> None:
+    app = LanternCityApp(tmp_path / "lantern-city.sqlite3")
+    app.start_new_game()
+    app.enter_district("district_old_quarter")
+    app.go("location_ledger_room")
+
+    output = app.what_matters_here()
+
+    assert "=== What Matters Here: Old Quarter ===" in output
+    assert "Do next:" in output
+    assert "  - inspect location_ledger_room" in output
+    assert "  - talk npc_archive_clerk <question>" in output
+    assert "  - leads" in output
+
+
+def test_compare_clues_includes_recovery_guidance(tmp_path) -> None:
+    app = LanternCityApp(tmp_path / "lantern-city.sqlite3")
+    app.start_new_game()
+    app.enter_district("district_old_quarter")
+    app._acquire_clues(["clue_missing_clerk_ledgers", "clue_missing_maintenance_line"])
+    app._introduce_case("case_missing_clerk")
+
+    output = app.compare_clues("clue_missing_clerk_ledgers", "clue_missing_maintenance_line")
+
+    assert "=== Compare Clues ===" in output
+    assert "Do next:" in output
+    assert "  - board" in output
+    assert "  - talk npc_brin_hesse" in output
+    assert "  - matters" in output
