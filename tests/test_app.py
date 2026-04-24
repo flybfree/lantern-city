@@ -250,10 +250,12 @@ def test_journal_includes_stuck_recovery_actions(tmp_path) -> None:
     app.start_new_game()
     app.enter_district("district_old_quarter")
     app._introduce_case("case_missing_clerk")
+    app._acquire_clues(["clue_missing_clerk_ledgers"])
 
     output = app.journal()
 
     assert "=== Journal ===" in output
+    assert "role: supports current case" in output
     assert "Do next:" in output
     assert "  - board case_missing_clerk" in output
     assert "  - leads" in output
@@ -265,14 +267,36 @@ def test_strongest_leads_includes_recovery_footer(tmp_path) -> None:
     app.start_new_game()
     app.enter_district("district_old_quarter")
     app._introduce_case("case_missing_clerk")
+    app._acquire_clues(["clue_missing_clerk_ledgers"])
 
     output = app.strongest_leads()
 
     assert "=== Strongest Leads ===" in output
+    assert "Read:" in output
     assert "What this suggests:" in output
     assert "Do next:" in output
     assert "  - board case_missing_clerk" in output
     assert "  - leads" in output
+
+
+def test_status_summarizes_clue_picture(tmp_path) -> None:
+    app = LanternCityApp(tmp_path / "lantern-city.sqlite3")
+    app.start_new_game()
+    app.enter_district("district_old_quarter")
+    app._introduce_case("case_missing_clerk")
+    app._acquire_clues(
+        [
+            "clue_missing_clerk_ledgers",
+            "clue_family_record_discrepancy",
+            "clue_missing_maintenance_line",
+        ]
+    )
+
+    output = app.status()
+
+    assert "=== Investigator Status ===" in output
+    assert "Clue picture:" in output
+    assert "support the case theory" in output
 
 
 def test_what_matters_here_includes_exact_next_commands(tmp_path) -> None:

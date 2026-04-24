@@ -813,6 +813,10 @@ class LanternCityApp:
             f"{len(clue_objects)} total / {credible_count} credible / "
             f"{uncertain_count} uncertain / {contradicted_count} contradicted"
         )
+        if clue_objects:
+            lines.append(
+                f"Clue picture: {self._summarize_case_clues(sorted(clue_objects, key=_clue_sort_key))}"
+            )
         lines.append("")
         lines.append("Progress:")
         lines.append(f"  - Reputation: {progress.reputation.score} ({progress.reputation.tier})")
@@ -1002,6 +1006,7 @@ class LanternCityApp:
                     f"  - {_clue_label(clue.id)} [{clue.reliability}]"
                     f" from {clue.source_type}"
                 )
+                lines.append(f"    role: {self._clue_readability_tag(clue)}")
         if recent_npc_events:
             lines.append("Recent city movement:")
             for event in recent_npc_events:
@@ -1030,6 +1035,9 @@ class LanternCityApp:
         lines = ["=== Strongest Leads ==="]
         for case in cases[:3]:
             lines.append(f"{case.title} [{case.pressure_level}]")
+            case_clues = self._clues_for_case(case, pos)
+            if case_clues:
+                lines.append(f"  Read: {self._summarize_case_clues(sorted(case_clues, key=_clue_sort_key))}")
             for lead in self._build_lead_lines(case=case, pos=pos, limit=3):
                 lines.append(f"  - {lead}")
         primary_case = cases[0]
