@@ -245,6 +245,9 @@ class WorldContentGenerator:
             f"District role: {district.tone}\n"
             f"Lantern condition: {district.lantern_condition}\n"
             f"Access level: {district.current_access_level}\n\n"
+            f"District social rule: {district.summary_cache.get('social_rule', 'speak carefully')}\n"
+            f"Investigation pressure: {district.summary_cache.get('investigation_pressure', 'contradiction')}\n"
+            f"Case-pattern biases: {', '.join(district.active_problems) if district.active_problems else 'none'}\n\n"
             f"NPCs to place (assign each to exactly one location; use exact IDs):\n{npc_lines}\n\n"
             "Rules:\n"
             "  - id_slug: unique snake_case suffix, e.g. 'archive_steps'\n"
@@ -252,6 +255,7 @@ class WorldContentGenerator:
             "  - npc_ids: ONLY IDs listed above; each NPC in exactly one location\n"
             "  - scene_objects: 2–5 specific, evocative physical items\n"
             "  - is_hidden: true for at most 1 location (only if access is restricted)\n"
+            "  - Make the location set reflect the district's investigation pressure and social rule, not just its name\n"
         )
 
         try:
@@ -328,6 +332,7 @@ class WorldContentGenerator:
             f"Case title: {case.title}\n"
             f"Case type: {case.case_type}\n"
             f"Objective: {case.objective_summary}\n\n"
+            f"Case pressure tags: {', '.join(case.district_effects) if case.district_effects else 'none'}\n\n"
             f"Available locations (use ONLY these exact IDs):\n{loc_lines}\n\n"
             f"Relevant NPCs (use ONLY these exact IDs):\n{npc_lines}\n\n"
             "Rules:\n"

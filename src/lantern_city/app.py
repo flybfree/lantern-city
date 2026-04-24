@@ -2219,6 +2219,9 @@ def _default_seed_payload() -> dict[str, object]:
                     "lantern_state": "dim",
                     "access_pattern": "restricted",
                     "hidden_location_density": "medium",
+                    "social_rule": "speak carefully and never accuse without support",
+                    "investigation_pressure": "contradiction",
+                    "case_pattern_biases": ["records_tampering", "hidden_routes", "institutional_denial"],
                 },
                 {
                     "id": "district_lantern_ward",
@@ -2228,6 +2231,9 @@ def _default_seed_payload() -> dict[str, object]:
                     "lantern_state": "bright",
                     "access_pattern": "controlled",
                     "hidden_location_density": "low",
+                    "social_rule": "use proper channels and maintain composure",
+                    "investigation_pressure": "legitimacy",
+                    "case_pattern_biases": ["procedural_denial", "political_bargains", "official_reframing"],
                 },
                 {
                     "id": "district_the_docks",
@@ -2237,6 +2243,9 @@ def _default_seed_payload() -> dict[str, object]:
                     "lantern_state": "flickering",
                     "access_pattern": "informal",
                     "hidden_location_density": "medium",
+                    "social_rule": "pay attention to who owes whom before asking questions",
+                    "investigation_pressure": "rumor_velocity",
+                    "case_pattern_biases": ["smuggling", "displaced_witnesses", "shifting_testimony"],
                 },
                 {
                     "id": "district_market_spires",
@@ -2246,6 +2255,9 @@ def _default_seed_payload() -> dict[str, object]:
                     "lantern_state": "bright",
                     "access_pattern": "commercial",
                     "hidden_location_density": "low",
+                    "social_rule": "status and transaction shape every conversation",
+                    "investigation_pressure": "competitive_secrecy",
+                    "case_pattern_biases": ["commercial_fraud", "records_brokers", "selective_access"],
                 },
                 {
                     "id": "district_salt_barrens",
@@ -2255,6 +2267,9 @@ def _default_seed_payload() -> dict[str, object]:
                     "lantern_state": "extinguished",
                     "access_pattern": "uncontrolled",
                     "hidden_location_density": "high",
+                    "social_rule": "survival outranks procedure",
+                    "investigation_pressure": "physical_hazard",
+                    "case_pattern_biases": ["buried_evidence", "salvage_conflict", "memory_gaps"],
                 },
                 {
                     "id": "district_underways",
@@ -2264,6 +2279,9 @@ def _default_seed_payload() -> dict[str, object]:
                     "lantern_state": "altered",
                     "access_pattern": "restricted",
                     "hidden_location_density": "high",
+                    "social_rule": "everyone knows more than they say about the routes below",
+                    "investigation_pressure": "route_instability",
+                    "case_pattern_biases": ["access_distortion", "maintenance_coverups", "selective_missingness"],
                 },
             ],
         },
@@ -2285,6 +2303,8 @@ def _default_seed_payload() -> dict[str, object]:
                         "district_underways": 0.45,
                     },
                     "attitude_toward_player": "wary",
+                    "methods": ["access control", "procedural delay", "controlled correction"],
+                    "preferred_leverage": ["records", "certification", "legitimacy"],
                 },
                 {
                     "id": "faction_council_lights",
@@ -2301,6 +2321,8 @@ def _default_seed_payload() -> dict[str, object]:
                         "district_underways": 0.35,
                     },
                     "attitude_toward_player": "guarded",
+                    "methods": ["official review", "public reassurance", "incident classification"],
+                    "preferred_leverage": ["compliance", "public confidence", "access permits"],
                 },
             ],
             "tension_map": {"faction_memory_keepers|faction_council_lights": 0.58},
@@ -2320,6 +2342,13 @@ def _default_seed_payload() -> dict[str, object]:
             "lantern_social_effect_profile": ["legitimacy", "restricted movement"],
             "lantern_memory_effect_profile": ["clearer testimony", "contradictory accounts"],
             "lantern_tampering_probability": 0.22,
+            "altered_target_domain_weights": {
+                "physical": 0.1,
+                "records": 0.35,
+                "testimony": 0.3,
+                "composite": 0.15,
+                "access": 0.1,
+            },
         },
         "missingness_configuration": {
             "missingness_pressure": 0.42,
@@ -2328,6 +2357,7 @@ def _default_seed_payload() -> dict[str, object]:
             "missingness_style": "edited records and contradictory witness accounts",
             "missingness_targets": ["families", "archives"],
             "missingness_risk_level": "medium",
+            "propagation_style": "person_to_record_to_event",
         },
         "case_configuration": {
             "starting_case_count": 1,
@@ -2509,6 +2539,7 @@ def _default_seed_payload() -> dict[str, object]:
             "consequence_severity": "medium",
             "revelation_delay": "medium",
             "narrative_strangeness": "medium",
+            "replayability_profile": "district_pressure_and_faction_topology",
         },
     }
 

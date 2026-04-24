@@ -152,10 +152,15 @@ def _build_district_state(seed: CitySeedDocument, district_id: str) -> DistrictS
         stability=district.stability_baseline,
         lantern_condition=district.lantern_state,
         governing_power=_governing_faction_id(seed, district.id),
+        active_problems=[district.investigation_pressure, *district.case_pattern_biases[:2]],
         relevant_npc_ids=sorted(
             npc.id for npc in seed.npc_configuration.npcs if npc.district_id == district.id
         ),
         current_access_level=district.access_pattern,
+        summary_cache={
+            "social_rule": district.social_rule,
+            "investigation_pressure": district.investigation_pressure,
+        },
     )
 
 
@@ -171,7 +176,8 @@ def _build_faction_state(seed: CitySeedDocument, faction_id: str) -> FactionStat
         influence_by_district=dict(faction.influence_by_district),
         tension_with_other_factions=_tension_map_for_faction(seed, faction.id),
         attitude_toward_player=faction.attitude_toward_player,
-        known_assets=[faction.role],
+        known_assets=[faction.role, *faction.preferred_leverage],
+        active_plans=[*faction.methods[:2], faction.hidden_goal],
     )
 
 
@@ -187,7 +193,10 @@ def _build_lantern_state(seed: CitySeedDocument, district_id: str) -> LanternSta
         owner_faction=_governing_faction_id(seed, district.id),
         maintainer_group=lantern_configuration.lantern_maintenance_structure,
         condition_state=district.lantern_state,
-        reach_scope_notes=lantern_configuration.lantern_reach_profile,
+        reach_scope_notes=(
+            f"{lantern_configuration.lantern_reach_profile}; "
+            f"altered bias={_top_altered_domain(seed)}"
+        ),
         social_effects=list(lantern_configuration.lantern_social_effect_profile),
         memory_effects=list(lantern_configuration.lantern_memory_effect_profile),
         access_effects=[district.access_pattern],
@@ -197,6 +206,12 @@ def _build_lantern_state(seed: CitySeedDocument, district_id: str) -> LanternSta
 
 def _build_case_state(seed: CitySeedDocument, case_id: str) -> CaseState:
     case = _case_by_id(seed, case_id)
+    district_biases = [
+        bias
+        for district in seed.district_configuration.districts
+        if district.id in case.involved_district_ids
+        for bias in district.case_pattern_biases[:1]
+    ]
     return CaseState(
         id=case.id,
         created_at=TURN_ZERO,
@@ -208,12 +223,15 @@ def _build_case_state(seed: CitySeedDocument, case_id: str) -> CaseState:
         involved_npc_ids=list(case.key_npc_ids),
         involved_faction_ids=list(case.involved_faction_ids),
         open_questions=list(case.failure_modes),
-        objective_summary=f"Resolve a {case.intensity} {case.type} case with {case.scope} scope.",
+        objective_summary=(
+            f"Resolve a {case.intensity} {case.type} case with {case.scope} scope. "
+            f"Likely pressure patterns: {', '.join(district_biases) if district_biases else 'local contradiction'}."
+        ),
         pressure_level="low",
         time_since_last_progress=0,
         offscreen_risk_flags=["latent_case"],
         active_resolution_window="closed",
-        district_effects=[],
+        district_effects=district_biases[:3],
         npc_pressure_targets=list(case.key_npc_ids),
     )
 
@@ -303,7 +321,8 @@ def _build_city_premise(seed: CitySeedDocument) -> str:
     mood = ", ".join(seed.city_identity.dominant_mood)
     return (
         f"{seed.city_identity.city_name} is a {mood} city shaped by "
-        f"{seed.missingness_configuration.missingness_style}."
+        f"{seed.missingness_configuration.missingness_style}. "
+        f"It favors {seed.tone_and_difficulty.replayability_profile}."
     )
 
 
@@ -342,10 +361,17 @@ def _tension_map_for_faction(seed: CitySeedDocument, faction_id: str) -> dict[st
 
 def _lantern_anomaly_flags(seed: CitySeedDocument, lantern_state: str) -> list[str]:
     if lantern_state in {"altered", "extinguished"}:
-        return ["seeded_instability"]
+        return ["seeded_instability", f"altered_bias_{_top_altered_domain(seed)}"]
     if seed.lantern_configuration.lantern_tampering_probability >= 0.5:
         return ["elevated_tampering_risk"]
     return []
+
+
+def _top_altered_domain(seed: CitySeedDocument) -> str:
+    weights = seed.lantern_configuration.altered_target_domain_weights
+    if not weights:
+        return "records"
+    return max(weights.items(), key=lambda item: item[1])[0]
 
 
 

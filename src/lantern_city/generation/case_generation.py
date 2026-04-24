@@ -460,6 +460,9 @@ class CaseGenerator:
                 "lantern_condition": d.lantern_condition,
                 "access_level": d.current_access_level,
                 "stability": d.stability,
+                "active_problems": d.active_problems,
+                "social_rule": d.summary_cache.get("social_rule", ""),
+                "investigation_pressure": d.summary_cache.get("investigation_pressure", ""),
             }
             for d in request.districts
         ]
@@ -472,6 +475,8 @@ class CaseGenerator:
                 "attitude_toward_player": f.attitude_toward_player,
                 "district_influence": f.influence_by_district,
                 "tensions": f.tension_with_other_factions,
+                "methods": f.active_plans,
+                "assets": f.known_assets,
             }
             for f in request.factions
         ]
@@ -496,6 +501,8 @@ class CaseGenerator:
             f"Existing NPC names already in world (do not reuse): {request.existing_npc_names}\n\n"
             "Generation rules:\n"
             "- case must involve 2-3 districts from the available list\n"
+            "- district active_problems and investigation_pressure should materially shape the case structure\n"
+            "- faction methods and assets should materially shape who can hide, expose, or redirect the truth\n"
             "- each NPC spec must specify a district_id from the available districts\n"
             "- each clue spec must specify a district_id from the available districts\n"
             "- location_type_hint: describe the kind of physical space "

@@ -39,7 +39,10 @@
         "stability_baseline": 0.47,
         "lantern_state": "dim",
         "access_pattern": "restricted",
-        "hidden_location_density": "medium"
+        "hidden_location_density": "medium",
+        "social_rule": "speak carefully and never accuse without support",
+        "investigation_pressure": "contradiction",
+        "case_pattern_biases": ["records_tampering", "hidden_routes", "institutional_denial"]
       },
       {
         "id": "district_lantern_ward",
@@ -48,7 +51,10 @@
         "stability_baseline": 0.71,
         "lantern_state": "bright",
         "access_pattern": "controlled",
-        "hidden_location_density": "low"
+        "hidden_location_density": "low",
+        "social_rule": "use proper channels and maintain composure",
+        "investigation_pressure": "legitimacy",
+        "case_pattern_biases": ["procedural_denial", "political_bargains", "official_reframing"]
       },
       {
         "id": "district_the_docks",
@@ -57,7 +63,10 @@
         "stability_baseline": 0.38,
         "lantern_state": "flickering",
         "access_pattern": "informal",
-        "hidden_location_density": "medium"
+        "hidden_location_density": "medium",
+        "social_rule": "pay attention to who owes whom before asking questions",
+        "investigation_pressure": "rumor_velocity",
+        "case_pattern_biases": ["smuggling", "displaced_witnesses", "shifting_testimony"]
       },
       {
         "id": "district_market_spires",
@@ -66,7 +75,10 @@
         "stability_baseline": 0.62,
         "lantern_state": "bright",
         "access_pattern": "commercial",
-        "hidden_location_density": "low"
+        "hidden_location_density": "low",
+        "social_rule": "status and transaction shape every conversation",
+        "investigation_pressure": "competitive_secrecy",
+        "case_pattern_biases": ["commercial_fraud", "records_brokers", "selective_access"]
       },
       {
         "id": "district_salt_barrens",
@@ -75,7 +87,10 @@
         "stability_baseline": 0.18,
         "lantern_state": "extinguished",
         "access_pattern": "uncontrolled",
-        "hidden_location_density": "high"
+        "hidden_location_density": "high",
+        "social_rule": "survival outranks procedure",
+        "investigation_pressure": "physical_hazard",
+        "case_pattern_biases": ["buried_evidence", "salvage_conflict", "memory_gaps"]
       },
       {
         "id": "district_underways",
@@ -84,7 +99,10 @@
         "stability_baseline": 0.25,
         "lantern_state": "altered",
         "access_pattern": "restricted",
-        "hidden_location_density": "high"
+        "hidden_location_density": "high",
+        "social_rule": "everyone knows more than they say about the routes below",
+        "investigation_pressure": "route_instability",
+        "case_pattern_biases": ["access_distortion", "maintenance_coverups", "selective_missingness"]
       }
     ]
   },
@@ -105,7 +123,9 @@
           "district_salt_barrens": 0.08,
           "district_underways": 0.45
         },
-        "attitude_toward_player": "wary"
+        "attitude_toward_player": "wary",
+        "methods": ["access control", "procedural delay", "controlled correction"],
+        "preferred_leverage": ["records", "certification", "legitimacy"]
       },
       {
         "id": "faction_council_lights",
@@ -121,7 +141,9 @@
           "district_salt_barrens": 0.12,
           "district_underways": 0.35
         },
-        "attitude_toward_player": "guarded"
+        "attitude_toward_player": "guarded",
+        "methods": ["official review", "public reassurance", "incident classification"],
+        "preferred_leverage": ["compliance", "public confidence", "access permits"]
       }
     ],
     "tension_map": {
@@ -148,7 +170,14 @@
       "clearer testimony",
       "contradictory accounts"
     ],
-    "lantern_tampering_probability": 0.22
+    "lantern_tampering_probability": 0.22,
+    "altered_target_domain_weights": {
+      "physical": 0.1,
+      "records": 0.35,
+      "testimony": 0.3,
+      "composite": 0.15,
+      "access": 0.1
+    }
   },
   "missingness_configuration": {
     "missingness_pressure": 0.42,
@@ -159,7 +188,8 @@
       "families",
       "archives"
     ],
-    "missingness_risk_level": "medium"
+    "missingness_risk_level": "medium",
+    "propagation_style": "person_to_record_to_event"
   },
   "case_configuration": {
     "starting_case_count": 1,
@@ -353,6 +383,7 @@
     "investigation_pace": "moderate",
     "consequence_severity": "medium",
     "revelation_delay": "medium",
-    "narrative_strangeness": "medium"
+    "narrative_strangeness": "medium",
+    "replayability_profile": "district_pressure_and_faction_topology"
   }
 }

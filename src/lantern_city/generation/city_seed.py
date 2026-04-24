@@ -43,8 +43,11 @@ _DISTRICT_SCHEMA = {
         "lantern_state": {"type": "string", "enum": ["bright", "dim", "flickering", "extinguished", "altered"]},
         "access_pattern": {"type": "string"},
         "hidden_location_density": {"type": "string", "enum": ["low", "medium", "high"]},
+        "social_rule": {"type": "string"},
+        "investigation_pressure": {"type": "string"},
+        "case_pattern_biases": {"type": "array", "items": {"type": "string"}},
     },
-    "required": ["id", "name", "role", "stability_baseline", "lantern_state", "access_pattern", "hidden_location_density"],
+    "required": ["id", "name", "role", "stability_baseline", "lantern_state", "access_pattern", "hidden_location_density", "social_rule", "investigation_pressure", "case_pattern_biases"],
     "additionalProperties": False,
 }
 
@@ -62,8 +65,10 @@ _FACTION_SCHEMA = {
             "description": "district_id → influence float 0.0–1.0",
         },
         "attitude_toward_player": {"type": "string"},
+        "methods": {"type": "array", "items": {"type": "string"}},
+        "preferred_leverage": {"type": "array", "items": {"type": "string"}},
     },
-    "required": ["id", "name", "role", "public_goal", "hidden_goal", "influence_by_district", "attitude_toward_player"],
+    "required": ["id", "name", "role", "public_goal", "hidden_goal", "influence_by_district", "attitude_toward_player", "methods", "preferred_leverage"],
     "additionalProperties": False,
 }
 
@@ -104,12 +109,17 @@ _FRAMEWORK_SCHEMA: dict[str, Any] = {
         "lantern_social_effect_profile": {"type": "array", "items": {"type": "string"}},
         "lantern_memory_effect_profile": {"type": "array", "items": {"type": "string"}},
         "lantern_tampering_probability": {"type": "number"},
+        "altered_target_domain_weights": {
+            "type": "object",
+            "additionalProperties": {"type": "number"},
+        },
         "missingness_pressure": {"type": "number"},
         "missingness_scope": {"type": "string"},
         "missingness_visibility": {"type": "string"},
         "missingness_style": {"type": "string"},
         "missingness_targets": {"type": "array", "items": {"type": "string"}},
         "missingness_risk_level": {"type": "string", "enum": ["low", "medium", "high"]},
+        "propagation_style": {"type": "string"},
         "story_density": {"type": "string"},
         "mystery_complexity": {"type": "string"},
         "social_resistance": {"type": "string"},
@@ -117,6 +127,7 @@ _FRAMEWORK_SCHEMA: dict[str, Any] = {
         "consequence_severity": {"type": "string"},
         "revelation_delay": {"type": "string"},
         "narrative_strangeness": {"type": "string"},
+        "replayability_profile": {"type": "string"},
     },
     "required": [
         "city_name", "dominant_mood", "weather_pattern", "architectural_style",
@@ -125,11 +136,11 @@ _FRAMEWORK_SCHEMA: dict[str, Any] = {
         "lantern_system_style", "lantern_ownership_structure", "lantern_maintenance_structure",
         "lantern_condition_distribution", "lantern_reach_profile",
         "lantern_social_effect_profile", "lantern_memory_effect_profile",
-        "lantern_tampering_probability",
+        "lantern_tampering_probability", "altered_target_domain_weights",
         "missingness_pressure", "missingness_scope", "missingness_visibility",
-        "missingness_style", "missingness_targets", "missingness_risk_level",
+        "missingness_style", "missingness_targets", "missingness_risk_level", "propagation_style",
         "story_density", "mystery_complexity", "social_resistance", "investigation_pace",
-        "consequence_severity", "revelation_delay", "narrative_strangeness",
+        "consequence_severity", "revelation_delay", "narrative_strangeness", "replayability_profile",
     ],
     "additionalProperties": False,
 }
@@ -272,14 +283,19 @@ class CitySeedGenerator:
             "Requirements:\n"
             "- Give the city a distinct name (not 'Lantern City')\n"
             "- 3–6 districts, each with a distinct role and lantern condition\n"
+            "- For each district, include one social rule, one investigation pressure, and 2–4 case pattern biases\n"
             "- 2–3 factions with conflicting hidden goals\n"
+            "- For each faction, include concrete methods and preferred leverage types\n"
             "- District IDs: snake_case starting with district_\n"
             "- Faction IDs: snake_case starting with faction_\n"
             "- influence_by_district: every faction must list every district ID\n"
             "- tension_map keys: 'faction_a_id|faction_b_id' format\n"
             "- lantern_condition_distribution values must sum to exactly 1.0\n"
+            "- altered_target_domain_weights must weight some combination of physical, records, testimony, composite, access\n"
             "- stability_baseline: 0.0–1.0 per district\n"
             "- dominant_mood: 2–4 evocative words\n"
+            "- propagation_style should describe how Missingness tends to spread in this city\n"
+            "- replayability_profile should describe what type of structural variation this city emphasizes\n"
         )
         try:
             return self._llm.generate_json(
@@ -490,7 +506,7 @@ def _assemble(framework: dict[str, Any], cases_npcs: dict[str, Any]) -> dict[str
             "factions": factions,
             "tension_map": dict(framework.get("tension_map", {})),
         },
-        "lantern_configuration": {
+            "lantern_configuration": {
             "lantern_system_style": str(framework.get("lantern_system_style", "civic grid")),
             "lantern_ownership_structure": str(framework.get("lantern_ownership_structure", "mixed")),
             "lantern_maintenance_structure": str(framework.get("lantern_maintenance_structure", "civic engineers")),
@@ -500,8 +516,11 @@ def _assemble(framework: dict[str, Any], cases_npcs: dict[str, Any]) -> dict[str
             "lantern_reach_profile": str(framework.get("lantern_reach_profile", "district-wide")),
             "lantern_social_effect_profile": list(framework.get("lantern_social_effect_profile", [])),
             "lantern_memory_effect_profile": list(framework.get("lantern_memory_effect_profile", [])),
-            "lantern_tampering_probability": _clamp_float(framework.get("lantern_tampering_probability", 0.2)),
-        },
+                "lantern_tampering_probability": _clamp_float(framework.get("lantern_tampering_probability", 0.2)),
+                "altered_target_domain_weights": _normalize_domain_weights(
+                    framework.get("altered_target_domain_weights", {})
+                ),
+            },
         "missingness_configuration": {
             "missingness_pressure": _clamp_float(framework.get("missingness_pressure", 0.4)),
             "missingness_scope": str(framework.get("missingness_scope", "records first")),
@@ -509,6 +528,7 @@ def _assemble(framework: dict[str, Any], cases_npcs: dict[str, Any]) -> dict[str
             "missingness_style": str(framework.get("missingness_style", "edited records")),
             "missingness_targets": list(framework.get("missingness_targets", [])),
             "missingness_risk_level": str(framework.get("missingness_risk_level", "medium")),
+            "propagation_style": str(framework.get("propagation_style", "person_to_record")),
         },
         "case_configuration": {
             "starting_case_count": len(cases),
@@ -534,6 +554,7 @@ def _assemble(framework: dict[str, Any], cases_npcs: dict[str, Any]) -> dict[str
             "consequence_severity": str(framework.get("consequence_severity", "medium")),
             "revelation_delay": str(framework.get("revelation_delay", "gradual")),
             "narrative_strangeness": str(framework.get("narrative_strangeness", "grounded")),
+            "replayability_profile": str(framework.get("replayability_profile", "coherent_variation")),
         },
     }
 
@@ -551,6 +572,21 @@ def _normalize_distribution(dist: Any) -> dict[str, float]:
     if total <= 0:
         return {"bright": 0.40, "dim": 0.35, "flickering": 0.15, "extinguished": 0.05, "altered": 0.05}
     return {s: round(v / total, 4) for s, v in values.items()}
+
+
+def _normalize_domain_weights(raw: Any) -> dict[str, float]:
+    domains = ["physical", "records", "testimony", "composite", "access"]
+    values: dict[str, float] = {}
+    if isinstance(raw, dict):
+        for domain in domains:
+            try:
+                values[domain] = max(0.0, float(raw.get(domain, 0.0)))
+            except (TypeError, ValueError):
+                values[domain] = 0.0
+    total = sum(values.values())
+    if total <= 0:
+        return {"physical": 0.1, "records": 0.35, "testimony": 0.3, "composite": 0.15, "access": 0.1}
+    return {domain: round(value / total, 4) for domain, value in values.items()}
 
 
 def _clamp_float(v: Any) -> float:

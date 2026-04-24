@@ -16,6 +16,7 @@ NoiseLevel = Literal["low", "medium", "high"]
 LanternStateValue = Literal["bright", "dim", "flickering", "extinguished", "altered"]
 RiskLevel = Literal["low", "medium", "high"]
 ALL_LANTERN_STATES = {"bright", "dim", "flickering", "extinguished", "altered"}
+ALL_ALTERED_DOMAINS = {"physical", "records", "testimony", "composite", "access"}
 
 NonEmptyStr = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
 NonEmptyStrList = list[NonEmptyStr]
@@ -51,6 +52,9 @@ class District(SeedModel):
     lantern_state: LanternStateValue
     access_pattern: NonEmptyStr
     hidden_location_density: NonEmptyStr
+    social_rule: NonEmptyStr = "speak carefully"
+    investigation_pressure: NonEmptyStr = "contradiction"
+    case_pattern_biases: NonEmptyStrList = Field(default_factory=list)
 
 
 class DistrictConfiguration(SeedModel):
@@ -81,6 +85,8 @@ class Faction(SeedModel):
     hidden_goal: NonEmptyStr
     influence_by_district: dict[NonEmptyStr, float] = Field(default_factory=dict)
     attitude_toward_player: NonEmptyStr
+    methods: NonEmptyStrList = Field(default_factory=list)
+    preferred_leverage: NonEmptyStrList = Field(default_factory=list)
 
     @model_validator(mode="after")
     def validate_influence_by_district(self) -> Faction:
@@ -148,6 +154,7 @@ class LanternConfiguration(SeedModel):
     lantern_social_effect_profile: NonEmptyStrList = Field(default_factory=list)
     lantern_memory_effect_profile: NonEmptyStrList = Field(default_factory=list)
     lantern_tampering_probability: float = Field(ge=0.0, le=1.0)
+    altered_target_domain_weights: dict[NonEmptyStr, float] = Field(default_factory=dict)
 
     @model_validator(mode="after")
     def validate_lantern_configuration(self) -> LanternConfiguration:
@@ -174,6 +181,14 @@ class LanternConfiguration(SeedModel):
         total = sum(self.lantern_condition_distribution.values())
         if not isclose(total, 1.0, abs_tol=0.01):
             raise ValueError("lantern_condition_distribution must sum approximately to 1.0")
+
+        for domain, value in self.altered_target_domain_weights.items():
+            if domain not in ALL_ALTERED_DOMAINS:
+                raise ValueError(f"invalid altered target domain: {domain}")
+            if not 0.0 <= value <= 1.0:
+                raise ValueError(
+                    f"altered_target_domain_weights values must be between 0.0 and 1.0: {domain}"
+                )
         return self
 
 
@@ -184,6 +199,7 @@ class MissingnessConfiguration(SeedModel):
     missingness_style: NonEmptyStr
     missingness_targets: NonEmptyStrList = Field(default_factory=list)
     missingness_risk_level: RiskLevel
+    propagation_style: NonEmptyStr = "person_to_record"
 
 
 class CaseSeed(SeedModel):
@@ -254,6 +270,7 @@ class ToneAndDifficulty(SeedModel):
     consequence_severity: NonEmptyStr
     revelation_delay: NonEmptyStr
     narrative_strangeness: NonEmptyStr
+    replayability_profile: NonEmptyStr = "coherent_variation"
 
 
 class CitySeedDocument(SeedModel):
