@@ -312,6 +312,7 @@ class LanternCityApp:
         ]
         self._append_scene_affordances(
             lines,
+            state_changes=outcome.response.state_changes,
             learned=outcome.response.learned,
             visible_npcs=outcome.response.visible_npcs,
             notable_objects=outcome.response.notable_objects,
@@ -319,6 +320,10 @@ class LanternCityApp:
             case_relevance=outcome.response.case_relevance,
             now_available=outcome.response.now_available,
             next_actions=outcome.response.next_actions,
+            state_changes_label="How the scene reads:",
+            learned_label="What the scene gives you:",
+            now_available_label="What this opens:",
+            next_actions_label="What to check next:",
         )
         transient_text = self._maybe_transient_encounter(district_id, district, updated_at=updated_at)
         if transient_text:
@@ -414,6 +419,7 @@ class LanternCityApp:
         lines.extend(propagation_notices)
         self._append_scene_affordances(
             lines,
+            state_changes=outcome.response.state_changes,
             learned=outcome.response.learned,
             visible_npcs=outcome.response.visible_npcs,
             notable_objects=outcome.response.notable_objects,
@@ -421,6 +427,10 @@ class LanternCityApp:
             case_relevance=outcome.response.case_relevance,
             now_available=outcome.response.now_available,
             next_actions=outcome.response.next_actions,
+            state_changes_label="How the exchange shifted:",
+            learned_label="What came out of it:",
+            now_available_label="What this opens:",
+            next_actions_label="What to press next:",
         )
         turn_notices = self._apply_world_turn_plan(
             turn_plan,
@@ -521,6 +531,7 @@ class LanternCityApp:
         lines.extend(propagation_notices)
         self._append_scene_affordances(
             lines,
+            state_changes=outcome.response.state_changes,
             learned=outcome.response.learned,
             visible_npcs=outcome.response.visible_npcs,
             notable_objects=outcome.response.notable_objects,
@@ -528,6 +539,10 @@ class LanternCityApp:
             case_relevance=outcome.response.case_relevance,
             now_available=outcome.response.now_available,
             next_actions=outcome.response.next_actions,
+            state_changes_label="How the scene reads:",
+            learned_label="What the scene gives you:",
+            now_available_label="What this opens:",
+            next_actions_label="What to check next:",
         )
         progressed_case_ids = {
             case_id
@@ -1324,6 +1339,7 @@ class LanternCityApp:
         self,
         lines: list[str],
         *,
+        state_changes: list[str] | None = None,
         learned: list[str] | None = None,
         visible_npcs: list[str] | None = None,
         notable_objects: list[str] | None = None,
@@ -1331,9 +1347,17 @@ class LanternCityApp:
         case_relevance: list[str] | None = None,
         now_available: list[str] | None = None,
         next_actions: list[str] | None = None,
+        state_changes_label: str = "What changed:",
+        learned_label: str = "What you learned:",
+        now_available_label: str = "Now available:",
+        next_actions_label: str = "Next actions:",
     ) -> None:
+        if state_changes:
+            lines.append(state_changes_label)
+            for item in state_changes[:4]:
+                lines.append(f"  - {item}")
         if learned:
-            lines.append("What you learned:")
+            lines.append(learned_label)
             for item in learned[:4]:
                 lines.append(f"  - {item}")
         if visible_npcs:
@@ -1353,11 +1377,11 @@ class LanternCityApp:
             for item in case_relevance[:4]:
                 lines.append(f"  - {item}")
         if now_available:
-            lines.append("Now available:")
+            lines.append(now_available_label)
             for item in now_available[:4]:
                 lines.append(f"  - {item}")
         if next_actions:
-            lines.append("Next actions:")
+            lines.append(next_actions_label)
             for item in next_actions[:4]:
                 lines.append(f"  - {item}")
 

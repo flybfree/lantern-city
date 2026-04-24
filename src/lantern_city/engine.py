@@ -225,6 +225,12 @@ def _handle_npc_conversation(
         if player_flag is not None:
             updated_npc = apply_player_flag(updated_npc, flag=player_flag, updated_at=request.updated_at)
             state_changes.append(f"{npc.name} now remembers: {player_flag}.")
+        conversation_read = _conversation_outcome_read(
+            generation_result.structured_updates.dialogue_act,
+            generation_result.structured_updates.npc_stance,
+        )
+        if conversation_read:
+            state_changes.append(f"Conversation read: {conversation_read}.")
         state_changes.append(f"Relationship state: {summarize_relationship(updated_npc)}.")
         state_changes.extend(generation_read.state_changes)
     else:
@@ -307,14 +313,20 @@ def _build_inspection_response(
         narrative_text = f"You inspect {location_name} for anything that stands out."
         learned = _learned_clues(active_slice, clue)
         next_actions = ["Inspect a narrower detail", "Review known clues"]
+    clue = _first_clue(active_slice.clues)
+    state_changes = []
+    inspection_read = _inspection_outcome_read(clue)
+    if inspection_read:
+        state_changes.append(f"Inspection read: {inspection_read}.")
 
     return compose_response(
         narrative_text=narrative_text,
+        state_changes=state_changes,
         learned=learned,
         visible_npcs=_inspection_visible_npcs(active_slice),
         notable_objects=_inspection_notable_objects(active_slice),
         exits=_inspection_exits(active_slice),
-        case_relevance=_case_relevance(active_slice, clue=_first_clue(active_slice.clues)),
+        case_relevance=_case_relevance(active_slice, clue=clue),
         now_available=["Ask about what you found"],
         next_actions=next_actions,
     )
@@ -550,6 +562,43 @@ def _load_loyalty_faction(
         if isinstance(candidate, FactionState) and candidate.name == npc.loyalty:
             return candidate
     return None
+
+
+def _conversation_outcome_read(dialogue_act: str, npc_stance: str) -> str:
+    text = f"{dialogue_act} {npc_stance}".lower()
+    if any(token in text for token in ("refus", "procedur", "official")):
+        return "procedural block or formal refusal"
+    if any(token in text for token in ("warn", "caution", "risk", "afraid", "fear")):
+        return "warning delivered under pressure"
+    if any(token in text for token in ("redirect", "deflect", "dodge", "avoid")):
+        return "careful deflection with a redirect"
+    if any(token in text for token in ("confirm", "answer", "reveal", "explain", "hint")):
+        return "direct answer with usable detail"
+    if any(token in text for token in ("guard", "careful", "hesitant", "wary")):
+        return "guarded answer with limited detail"
+    return ""
+
+
+def _inspection_outcome_read(clue: ClueState | None) -> str:
+    if clue is None:
+        return "atmosphere and scene texture, but no solid lead yet"
+    if clue.reliability == "contradicted":
+        return "a contradiction in the scene that needs explanation"
+    if clue.reliability in {"credible", "solid"}:
+        if clue.source_type == "document":
+            return "a concrete paper-trail sign worth following quickly"
+        if clue.source_type == "physical":
+            return "a concrete physical sign worth following"
+        if clue.source_type == "testimony":
+            return "a credible witness lead anchored in the scene"
+        return "a credible lead anchored in the scene"
+    if clue.source_type == "document":
+        return "a weak paper trail that still needs corroboration"
+    if clue.source_type == "physical":
+        return "a suspicious physical detail that still needs confirmation"
+    if clue.source_type == "testimony":
+        return "a tentative witness lead rather than a conclusion"
+    return "a live lead, but not proof yet"
 
 
 def _faction_style(faction: FactionState | None) -> str:

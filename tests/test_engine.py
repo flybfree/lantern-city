@@ -468,6 +468,7 @@ def test_handle_player_request_biases_records_pressure_into_redirects_and_paper_
     assert "Ask who certified the change." in outcome.response.next_actions
     assert "The record trail bends back through Shrine Lane." in outcome.response.learned
     assert any("reply favored omission, deflection, and paper trails" in line for line in outcome.response.state_changes)
+    assert any("Conversation read: careful deflection with a redirect." in line for line in outcome.response.state_changes)
 
 
 def test_handle_player_request_biases_civic_pressure_into_formal_routing(
@@ -541,6 +542,7 @@ def test_handle_player_request_biases_civic_pressure_into_formal_routing(
     assert "Make a formal request: Ask for the proper desk." in outcome.response.next_actions
     assert "Requests have to be logged through Shrine Lane first." in outcome.response.learned
     assert any("reply stayed procedural and access-minded" in line for line in outcome.response.state_changes)
+    assert any("Conversation read: procedural block or formal refusal." in line for line in outcome.response.state_changes)
 
 
 def test_handle_player_request_returns_inspection_response_without_state_changes(
@@ -559,6 +561,7 @@ def test_handle_player_request_returns_inspection_response_without_state_changes
     assert (
         outcome.response.narrative_text == "You inspect Shrine Lane for anything that stands out."
     )
+    assert outcome.response.state_changes == ["Inspection read: a live lead, but not proof yet."]
     assert outcome.response.learned == ["Fresh scoring marks suggest recent tampering."]
     assert outcome.response.now_available == ["Ask about what you found"]
     assert outcome.response.next_actions == ["Inspect a narrower detail", "Review known clues"]

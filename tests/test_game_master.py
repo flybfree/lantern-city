@@ -448,3 +448,27 @@ def test_narrate_system_prompt_mentions_faction_style_distinctions() -> None:
 
     assert "If faction posture or social pressure indicates records control" in system_prompt
     assert "civic pressure should feel official, procedural, and compliance-minded" in system_prompt
+
+
+def test_narrate_system_prompt_requires_legible_conversation_outcomes() -> None:
+    llm = _RecordingLLM()
+    gm = GameMaster(app=None, llm=llm)  # type: ignore[arg-type]
+
+    gm._narrate(
+        "ask what changed",
+        ["talk npc_archive_clerk what changed"],
+        [
+            "[command ok: talk npc_archive_clerk what changed]\n"
+            "Sered Marr glances toward the ledger stacks before answering.\n"
+            "How the exchange shifted:\n"
+            "  - Relationship state: guarded but engaged.\n"
+            "What came out of it:\n"
+            "  - The copied numbers were corrected after closing."
+        ],
+        "Current district: Old Quarter",
+    )
+
+    system_prompt = llm.calls[0]["messages"][0]["content"]
+
+    assert "make the exchange legible" in system_prompt
+    assert "answered, deflected, redirected, confirmed, warned, or procedurally blocked" in system_prompt

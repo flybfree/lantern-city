@@ -6,6 +6,7 @@ from lantern_city.models import ClueState
 from lantern_city.tui import (
     _clue_reading_lines,
     _faction_pressure_lines,
+    _format_command_result_markup,
     _format_start_result_markup,
     _recovery_panel_lines,
 )
@@ -40,6 +41,38 @@ def test_format_start_result_markup_highlights_model_check_warning() -> None:
         "[yellow]Model check: warning — startup probe failed, so NPC generation quality is uncertain.[/yellow]"
         in rendered
     )
+
+
+def test_format_command_result_markup_highlights_conversation_and_scene_reads() -> None:
+    rendered = _format_command_result_markup(
+        "Sered Marr answers without looking up.\n"
+        "How the exchange shifted:\n"
+        "  - Conversation read: guarded answer with limited detail.\n"
+        "What came out of it:\n"
+        "  - The copied numbers were corrected after closing.\n"
+        "[New lead]\n"
+        "[Clue found: Ledger Trace: credible]"
+    )
+
+    assert "[bold]How the exchange shifted:[/bold]" in rendered
+    assert "[bold cyan]  - Conversation read: guarded answer with limited detail.[/bold cyan]" in rendered
+    assert "[bold]What came out of it:[/bold]" in rendered
+    assert "[bold yellow][New lead][/bold yellow]" in rendered
+    assert "[bold yellow][Clue found: Ledger Trace: credible][/bold yellow]" in rendered
+
+
+def test_format_command_result_markup_highlights_inspection_read() -> None:
+    rendered = _format_command_result_markup(
+        "The marks line up too neatly to be wear.\n"
+        "How the scene reads:\n"
+        "  - Inspection read: a concrete physical sign worth following.\n"
+        "What to check next:\n"
+        "  - Review known clues"
+    )
+
+    assert "[bold]How the scene reads:[/bold]" in rendered
+    assert "[bold cyan]  - Inspection read: a concrete physical sign worth following.[/bold cyan]" in rendered
+    assert "[bold]What to check next:[/bold]" in rendered
 
 
 def test_recovery_panel_lines_show_scene_recovery_when_no_clues_are_found() -> None:

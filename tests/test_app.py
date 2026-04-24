@@ -55,6 +55,7 @@ def test_talk_to_npc_surfaces_pre_case_clue_as_new_lead(tmp_path, monkeypatch) -
             ),
             response=compose_response(
                 narrative_text="Ila Venn lowers her voice and points out a detail that should not be easy to explain.",
+                state_changes=["Relationship state: guarded but engaged."],
                 learned=["Notable clue: Maintenance records were altered after the outage."],
                 visible_npcs=[npc.name],
                 case_relevance=[
@@ -72,8 +73,11 @@ def test_talk_to_npc_surfaces_pre_case_clue_as_new_lead(tmp_path, monkeypatch) -
     output = app.talk_to_npc("npc_shrine_keeper", "Ask what seems wrong here.")
 
     assert "[New lead]" in output
-    assert "What you learned:" in output
+    assert "How the exchange shifted:" in output
+    assert "Relationship state: guarded but engaged." in output
+    assert "What came out of it:" in output
     assert "Notable clue: Maintenance records were altered after the outage." in output
+    assert "What to press next:" in output
 
 
 def test_inspect_location_surfaces_pre_case_clue_as_new_lead(tmp_path, monkeypatch) -> None:
@@ -112,6 +116,7 @@ def test_inspect_location_surfaces_pre_case_clue_as_new_lead(tmp_path, monkeypat
             ),
             response=compose_response(
                 narrative_text="The marks on the archive steps line up too neatly to be wear.",
+                state_changes=["Inspection read: a concrete physical sign worth following."],
                 learned=["Notable clue: Someone maintained this route after it should have gone dark."],
                 notable_objects=["Fresh scoring in the stone"],
                 case_relevance=[
@@ -130,7 +135,11 @@ def test_inspect_location_surfaces_pre_case_clue_as_new_lead(tmp_path, monkeypat
 
     assert "[Clue found:" in output
     assert "[New lead]" in output
+    assert "How the scene reads:" in output
+    assert "Inspection read: a concrete physical sign worth following." in output
+    assert "What the scene gives you:" in output
     assert "Someone maintained this route after it should have gone dark." in output
+    assert "What to check next:" in output
 
 
 def test_start_new_game_reports_successful_model_check(tmp_path, monkeypatch) -> None:

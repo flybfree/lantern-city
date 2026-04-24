@@ -83,6 +83,9 @@ self-commentary. Begin immediately with the narrative sentence.
 - If a game event contains "[command ok:", treat that command as successful.
 - If a successful game event contains direct dialogue text before tags like "[Clue:" or "What you learned:",
   the NPC did respond. Do not narrate silence, refusal, or failed conversation in that case.
+- If a successful conversation happened, make the exchange legible. The prose should make clear whether the NPC
+  answered, deflected, redirected, confirmed, warned, or procedurally blocked the player, and it should preserve
+  at least one concrete outcome from the exchange rather than collapsing it into vague mood.
 - Never describe a turn as failure, refusal, silence, or resistance when all executed commands succeeded.
 - If the player is asking what matters, what to do next, what leads matter, or says they are stuck or unsure,
   treat the turn as a recovery or orientation request. Use the recovery guidance in the prompt to steer them toward

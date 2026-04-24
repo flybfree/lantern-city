@@ -1124,7 +1124,9 @@ class LanternCityTUI(App[None]):
                         Text.from_markup(_format_start_result_markup(result))
                     )
                 else:
-                    self.query_one("#narrative", RichLog).write(escape(result))
+                    self.query_one("#narrative", RichLog).write(
+                        Text.from_markup(_format_command_result_markup(result))
+                    )
                 self._turn_log.record(mode="CMD", player_input=self._last_input, response=result)
                 if name == "cmd:start":
                     self._show_case_opening_hook()
@@ -1687,6 +1689,37 @@ def _format_start_result_markup(result: str) -> str:
             lines.append(f"[cyan]{escaped}[/cyan]")
         elif line.startswith("Lantern City ready:"):
             lines.append(f"[bold green]{escaped}[/bold green]")
+        else:
+            lines.append(escaped)
+    return "\n".join(lines)
+
+
+def _format_command_result_markup(result: str) -> str:
+    lines: list[str] = []
+    for raw_line in result.splitlines():
+        line = raw_line.strip()
+        escaped = escape(raw_line)
+        normalized = line.removeprefix("- ").strip()
+        if line.startswith("[Clue found:"):
+            lines.append(f"[bold yellow]{escaped}[/bold yellow]")
+        elif line == "[New lead]":
+            lines.append(f"[bold yellow]{escaped}[/bold yellow]")
+        elif line.startswith("[Case opened:"):
+            lines.append(f"[bold magenta]{escaped}[/bold magenta]")
+        elif normalized.startswith("Conversation read:"):
+            lines.append(f"[bold cyan]{escaped}[/bold cyan]")
+        elif normalized.startswith("Inspection read:"):
+            lines.append(f"[bold cyan]{escaped}[/bold cyan]")
+        elif line in {
+            "How the exchange shifted:",
+            "What came out of it:",
+            "What this opens:",
+            "What to press next:",
+            "How the scene reads:",
+            "What the scene gives you:",
+            "What to check next:",
+        }:
+            lines.append(f"[bold]{escaped}[/bold]")
         else:
             lines.append(escaped)
     return "\n".join(lines)
