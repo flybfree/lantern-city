@@ -120,6 +120,8 @@ _MODEL_QUALITY_PROBE_SCHEMA: dict[str, object] = {
     "additionalProperties": False,
 }
 
+_MVP_BASELINE_CASE_IDS: frozenset[str] = frozenset({"case_missing_clerk"})
+
 
 @dataclass(slots=True)
 class LanternCityApp:
@@ -515,7 +517,9 @@ class LanternCityApp:
         case = case_obj
         progress = self._require_progress()
 
-        if case.id == "case_missing_clerk":
+        runtime_mode = _case_runtime_mode(case)
+
+        if runtime_mode == "mvp_baseline":
             path, new_status, resolution_summary, fallout_summary = _assess_resolution(
                 self.store, progress
             )
@@ -3056,6 +3060,17 @@ def _gains_for_outcome(outcome_status: str) -> list[tuple[str, int, str]]:
     return [
         ("lantern_understanding", 2, "Partial observation before case closed against truth."),
     ]
+
+
+def _case_runtime_mode(case: CaseState) -> str:
+    """Classify a case as the authored MVP baseline or the broader evolved runtime.
+
+    This keeps the vertical-slice Missing Clerk path explicit in code instead of
+    relying on an inline case-id special case inside command handling.
+    """
+    if case.id in _MVP_BASELINE_CASE_IDS:
+        return "mvp_baseline"
+    return "evolved_runtime"
 
 
 def _load_default_seed() -> dict[str, object]:

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from lantern_city.active_slice import ActiveSlice
 from lantern_city.case_bootstrap import bootstrap_generated_case
-from lantern_city.app import LanternCityApp, _load_default_seed
+from lantern_city.app import LanternCityApp, _case_runtime_mode, _load_default_seed
 from lantern_city.cases import transition_case
 from lantern_city.engine import EngineOutcome
 from lantern_city.generation.case_generation import (
@@ -397,3 +397,101 @@ def test_generated_case_recovery_surfaces_use_generated_case_id(tmp_path) -> Non
     assert "  - board case_gen_001" in journal_output
     assert "Borrowed Ledger" in leads_output
     assert "  - board case_gen_001" in leads_output
+
+
+def test_case_runtime_mode_marks_missing_clerk_as_mvp_baseline(tmp_path) -> None:
+    app = LanternCityApp(tmp_path / "lantern-city.sqlite3")
+    app.start_new_game()
+
+    case = app.store.load_object("CaseState", "case_missing_clerk")
+
+    assert case is not None
+    assert _case_runtime_mode(case) == "mvp_baseline"
+
+
+def test_case_runtime_mode_marks_generated_cases_as_evolved_runtime(tmp_path) -> None:
+    app = LanternCityApp(tmp_path / "lantern-city.sqlite3")
+    app.start_new_game()
+
+    city = app._require_city()
+    generated = CaseGenerationResult(
+        request_id="req_case_003",
+        title="Night Manifest",
+        case_type="shipping fraud",
+        intensity="medium",
+        opening_hook="Someone is rewriting the night manifest before the dock bells ring.",
+        objective_summary="Find who is altering the manifest trail.",
+        involved_district_ids=["district_old_quarter", "district_the_docks"],
+        hook_npc_index=0,
+        npc_specs=[
+            GeneratedNPCSpec(
+                name="Hadrin Voss",
+                role_category="informant",
+                district_id="district_the_docks",
+                location_type_hint="office",
+                public_identity="night tally clerk",
+                hidden_objective="Keep one shipment off the books.",
+                current_objective="Find out who noticed the revised manifest.",
+                trust_in_player=0.3,
+                suspicion=0.4,
+                fear=0.4,
+            )
+        ],
+        clue_specs=[
+            GeneratedClueSpec(
+                source_type="document",
+                district_id="district_the_docks",
+                location_type_hint="office",
+                clue_text="The night manifest shows a corrected cargo line in fresher ink.",
+                starting_reliability="credible",
+                known_by_npc_index=0,
+            ),
+            GeneratedClueSpec(
+                source_type="physical",
+                district_id="district_old_quarter",
+                location_type_hint="records",
+                clue_text="A torn wax seal matches the corrected manifest bundle.",
+                starting_reliability="uncertain",
+                known_by_npc_index=None,
+            ),
+            GeneratedClueSpec(
+                source_type="testimony",
+                district_id="district_the_docks",
+                location_type_hint="office",
+                clue_text="A runner claims the manifest changed after the lamps dimmed.",
+                starting_reliability="uncertain",
+                known_by_npc_index=None,
+            ),
+        ],
+        resolution_paths=[
+            GeneratedResolutionPath(
+                path_id="best_path",
+                label="Trace the revised manifest",
+                outcome_status="solved",
+                required_clue_indices=[0, 1],
+                required_credible_count=2,
+                summary_text="You tie the forged manifest to the right hands.",
+                fallout_text="Dock traffic shifts before dawn and everyone notices.",
+                priority=1,
+            ),
+            GeneratedResolutionPath(
+                path_id="fallback_path",
+                label="Prove the manifest changed",
+                outcome_status="partially solved",
+                required_clue_indices=[0],
+                required_credible_count=1,
+                summary_text="You prove the record changed, but not who changed it.",
+                fallout_text="The docks close ranks around the missing names.",
+                priority=2,
+            ),
+        ],
+    )
+    bootstrap = bootstrap_generated_case(
+        generated,
+        store=app.store,
+        city=city,
+        case_index=3,
+        updated_at="turn_test",
+    )
+
+    assert _case_runtime_mode(bootstrap.case) == "evolved_runtime"
