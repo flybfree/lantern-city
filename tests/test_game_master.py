@@ -228,3 +228,44 @@ def test_narrate_recovery_guidance_supports_generated_case_ids(tmp_path) -> None
     assert "Borrowed Ledger" in user_prompt
     assert "case_gen_002" in user_prompt
     assert "board case_gen_002" in user_prompt
+
+
+def test_build_context_includes_clue_readability_distinctions(tmp_path) -> None:
+    llm = _RecordingLLM()
+    app = LanternCityApp(tmp_path / "lantern-city.sqlite3")
+    app.start_new_game()
+    app.enter_district("district_old_quarter")
+    app._introduce_case("case_missing_clerk")
+    app._acquire_clues(
+        [
+            "clue_missing_clerk_ledgers",
+            "clue_family_record_discrepancy",
+            "clue_missing_maintenance_line",
+        ]
+    )
+    gm = GameMaster(app=app, llm=llm)
+
+    context = gm._build_context()
+
+    assert "Clue reading:" in context
+    assert "role=supports current case" in context
+    assert "role=contradiction to explain" in context
+    assert "role=paper trail to test" in context
+    assert "Why it matters:" in context
+
+
+def test_narrate_system_prompt_mentions_clue_role_distinctions() -> None:
+    llm = _RecordingLLM()
+    gm = GameMaster(app=None, llm=llm)  # type: ignore[arg-type]
+
+    gm._narrate(
+        "what matters here?",
+        [],
+        [],
+        "Current district: Old Quarter\nClue reading:\n  Ledger Trail [credible] role=supports current case",
+    )
+
+    system_prompt = llm.calls[0]["messages"][0]["content"]
+
+    assert "preserve those distinctions in the narration" in system_prompt
+    assert "When a clue is marked as a contradiction" in system_prompt

@@ -16,7 +16,7 @@ from dataclasses import dataclass, field
 from lantern_city.app import LanternCityApp
 from lantern_city.llm_client import OpenAICompatibleLLMClient
 from lantern_city.log import get_logger
-from lantern_city.models import CaseState, LocationState
+from lantern_city.models import CaseState, ClueState, LocationState
 
 log = get_logger(__name__)
 
@@ -89,6 +89,10 @@ self-commentary. Begin immediately with the narrative sentence.
   the strongest available next step, and name concrete people, places, or investigation surfaces when the prompt provides them.
 - When recovery guidance mentions matters, board, leads, compare, or journal, you may refer to those surfaces naturally
   in prose, but keep the response as in-world narration rather than a bullet list or tutorial.
+- If the prompt identifies clues as supporting the current case, contradicting the current picture, or remaining follow-up leads,
+  preserve those distinctions in the narration. Do not flatten every clue into the same kind of ominous signal.
+- When a clue is marked as a contradiction, make it feel like a pressure point in the investigation.
+- When a clue is marked as a follow-up lead, frame it as something worth testing rather than something already proven.
 - If the game events include a "[New lead]" tag, make clear that the player has found something significant.
   The meaning can remain uncertain, but the importance must be legible right now rather than implied.
 - If the game events include a "[Case opened: …]" tag, this is a pivotal moment. \
@@ -322,6 +326,17 @@ class GameMaster:
         # Clue count
         clue_count = len(pos.clue_ids) if pos is not None else 0
         lines.append(f"\nAcquired clues: {clue_count}")
+        if pos is not None and pos.clue_ids:
+            lines.append("Clue reading:")
+            for clue_id in pos.clue_ids[:5]:
+                clue = self.app.store.load_object("ClueState", clue_id)
+                if not isinstance(clue, ClueState):
+                    continue
+                lines.append(
+                    f"  {_clue_label(clue.id)} [{clue.reliability}]"
+                    f" role={_clue_readability_tag(clue)}"
+                )
+                lines.append(f"    Why it matters: {_summarize_clue_implication(clue)}")
 
         return "\n".join(lines)
 
@@ -626,6 +641,8 @@ _KNOWN_VERBS: frozenset[str] = frozenset(
     ]
 )
 
+_CREDIBLE_RELIABILITIES: frozenset[str] = frozenset({"credible", "solid"})
+
 _TOOL_CALL_RE = re.compile(r"[`{}<|]|tool_call|```", re.IGNORECASE)
 
 
@@ -673,6 +690,38 @@ def _rejoin_split_commands(commands: list[str]) -> list[str]:
         result.append(token)
         i += 1
     return result
+
+
+def _clue_label(clue_id: str) -> str:
+    return clue_id.removeprefix("clue_").replace("_", " ").title()
+
+
+def _clue_readability_tag(clue: ClueState) -> str:
+    if clue.reliability == "contradicted":
+        return "contradiction to explain"
+    if clue.reliability in _CREDIBLE_RELIABILITIES:
+        if clue.related_case_ids:
+            return "supports current case"
+        return "credible free-standing lead"
+    if clue.source_type == "testimony":
+        return "lead to verify"
+    if clue.source_type == "document":
+        return "paper trail to test"
+    return "possible follow-up"
+
+
+def _summarize_clue_implication(clue: ClueState) -> str:
+    if clue.reliability in _CREDIBLE_RELIABILITIES:
+        if clue.related_case_ids:
+            return "This currently supports the strongest case theory you can defend."
+        return "This is credible enough to anchor a broader theory, even if no case is attached yet."
+    if clue.reliability == "contradicted":
+        return "This actively clashes with the current picture and could break a bad theory open."
+    if clue.source_type == "testimony":
+        return "This is a live lead, but it is still testimony. You need a person, record, or second witness to steady it."
+    if clue.source_type == "document":
+        return "This points at a paper trail worth checking, but it still needs corroboration before it should drive a conclusion."
+    return "This is a follow-up lead rather than a conclusion. Treat it as something to test."
 
 
 def _is_recovery_request(player_input: str) -> bool:
