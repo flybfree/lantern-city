@@ -124,6 +124,10 @@ def _handle_district_entry(
         narrative_text=narrative_text,
         state_changes=[f"Presence increased in {district.name}."] if district.name else [],
         learned=[f"The district lanterns are running {district.lantern_condition}."],
+        visible_npcs=[npc.name for npc in active_slice.npcs if npc.name][:4],
+        notable_objects=_district_notable_objects(active_slice),
+        exits=[_display_name(location_id) for location_id in district.visible_locations[:4]],
+        case_relevance=_case_relevance(active_slice),
         now_available=_district_now_available(district, active_slice.npcs),
         next_actions=_district_next_actions(district, case_title),
     )
@@ -198,6 +202,10 @@ def _handle_npc_conversation(
         narrative_text=narrative_text,
         state_changes=state_changes,
         learned=[] if clue is None else [clue.clue_text],
+        visible_npcs=[npc.name] if npc.name else [],
+        notable_objects=_conversation_notable_objects(active_slice, npc),
+        exits=_conversation_exits(active_slice),
+        case_relevance=_case_relevance(active_slice, clue=clue),
         now_available=_conversation_now_available(active_slice, npc),
         next_actions=_conversation_next_actions(case_title),
     )
@@ -247,6 +255,10 @@ def _build_inspection_response(
     return compose_response(
         narrative_text=narrative_text,
         learned=learned,
+        visible_npcs=_inspection_visible_npcs(active_slice),
+        notable_objects=_inspection_notable_objects(active_slice),
+        exits=_inspection_exits(active_slice),
+        case_relevance=_case_relevance(active_slice, clue=_first_clue(active_slice.clues)),
         now_available=["Ask about what you found"],
         next_actions=next_actions,
     )
@@ -362,11 +374,16 @@ def _build_case_response(active_slice: ActiveSlice) -> ResponsePayload:
     if active_slice.case is None:
         return compose_response(
             narrative_text="You review your current leads, but no active case is focused here.",
+            case_relevance=["No active case is anchored to this scene yet."],
             next_actions=["Choose a district lead", "Speak to a local contact"],
         )
     return compose_response(
         narrative_text=f"You review {active_slice.case.title}.",
         learned=list(active_slice.case.open_questions),
+        visible_npcs=[npc.name for npc in active_slice.npcs if npc.name][:4],
+        notable_objects=_district_notable_objects(active_slice),
+        exits=_inspection_exits(active_slice),
+        case_relevance=_case_relevance(active_slice),
         now_available=["Follow a case lead"],
         next_actions=["Inspect related evidence", "Speak to an involved NPC"],
     )
@@ -450,6 +467,60 @@ def _conversation_next_actions(case_title: str | None) -> list[str]:
     if case_title is not None:
         next_actions.append(f"Review {case_title}")
     return next_actions
+
+
+def _district_notable_objects(active_slice: ActiveSlice) -> list[str]:
+    objects: list[str] = []
+    for location in active_slice.locations[:3]:
+        for scene_object in location.scene_objects[:2]:
+            if scene_object not in objects:
+                objects.append(scene_object)
+    return objects[:4]
+
+
+def _conversation_notable_objects(active_slice: ActiveSlice, npc: NPCState) -> list[str]:
+    if active_slice.location is not None and active_slice.location.scene_objects:
+        return active_slice.location.scene_objects[:4]
+    if npc.location_id:
+        return [_display_name(npc.location_id)]
+    return []
+
+
+def _conversation_exits(active_slice: ActiveSlice) -> list[str]:
+    if active_slice.location is not None:
+        return [active_slice.location.name]
+    if active_slice.district is not None:
+        return [_display_name(location_id) for location_id in active_slice.district.visible_locations[:3]]
+    return []
+
+
+def _inspection_visible_npcs(active_slice: ActiveSlice) -> list[str]:
+    return [npc.name for npc in active_slice.npcs if npc.name][:4]
+
+
+def _inspection_notable_objects(active_slice: ActiveSlice) -> list[str]:
+    if active_slice.location is None:
+        return []
+    return active_slice.location.scene_objects[:4]
+
+
+def _inspection_exits(active_slice: ActiveSlice) -> list[str]:
+    if active_slice.district is None:
+        return []
+    return [_display_name(location_id) for location_id in active_slice.district.visible_locations[:4]]
+
+
+def _case_relevance(active_slice: ActiveSlice, clue: ClueState | None = None) -> list[str]:
+    relevance: list[str] = []
+    if active_slice.case is not None:
+        relevance.append(f"Active case: {active_slice.case.title} [{active_slice.case.status}]")
+        if active_slice.case.open_questions:
+            relevance.append(active_slice.case.open_questions[0])
+    if clue is not None:
+        relevance.append(f"Clue reliability: {clue.reliability}")
+    if active_slice.district is not None:
+        relevance.append(f"Lantern condition: {active_slice.district.lantern_condition}")
+    return relevance[:4]
 
 
 def _require_district(active_slice: ActiveSlice) -> DistrictState:

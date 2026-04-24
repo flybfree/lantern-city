@@ -134,8 +134,20 @@ class LanternCityApp:
             return self.start_new_game(concept=concept)
         if verb == "overview":
             return self.overview()
+        if verb == "status":
+            return self.status()
         if verb == "clues":
             return self.clues()
+        if verb == "journal":
+            return self.journal()
+        if verb in {"board", "caseboard"}:
+            return self.case_board(parts[1] if len(parts) > 1 else None)
+        if verb == "leads":
+            return self.strongest_leads()
+        if verb in {"matters", "standout"}:
+            return self.what_matters_here()
+        if verb == "compare" and len(parts) >= 3:
+            return self.compare_clues(parts[1], parts[2])
         if verb == "go" and len(parts) >= 2:
             return self.go(parts[1])
         if verb == "look":
@@ -194,6 +206,16 @@ class LanternCityApp:
             f"Available location IDs: {available_locations}",
             f"Summary: {outcome.response.narrative_text}",
         ]
+        self._append_scene_affordances(
+            lines,
+            learned=outcome.response.learned,
+            visible_npcs=outcome.response.visible_npcs,
+            notable_objects=outcome.response.notable_objects,
+            exits=outcome.response.exits,
+            case_relevance=outcome.response.case_relevance,
+            now_available=outcome.response.now_available,
+            next_actions=outcome.response.next_actions,
+        )
         transient_text = self._maybe_transient_encounter(district_id, district, updated_at=TURN_ONE)
         if transient_text:
             lines.append(f"\n{transient_text}")
@@ -279,6 +301,16 @@ class LanternCityApp:
         if pending_case is not None:
             lines.append(f'[Case opened: {pending_case.title}]')
         lines.extend(propagation_notices)
+        self._append_scene_affordances(
+            lines,
+            learned=outcome.response.learned,
+            visible_npcs=outcome.response.visible_npcs,
+            notable_objects=outcome.response.notable_objects,
+            exits=outcome.response.exits,
+            case_relevance=outcome.response.case_relevance,
+            now_available=outcome.response.now_available,
+            next_actions=outcome.response.next_actions,
+        )
         case_pressure_updates = self._run_case_pressure_updates(
             updated_at=TURN_TWO,
             progressed_case_ids=progressed_case_ids,
@@ -370,10 +402,6 @@ class LanternCityApp:
         if object_name:
             lines.append(f"Examining: {object_name}")
         lines.append(outcome.response.narrative_text)
-        if outcome.response.learned:
-            lines.append("Observed:")
-            for detail in outcome.response.learned:
-                lines.append(f"  - {detail}")
         location = outcome.active_slice.location
         if not object_name and location is not None and location.scene_objects:
             lines.append("Objects here:")
@@ -388,6 +416,16 @@ class LanternCityApp:
             lines.append(f"[Case opened: {discovered_lead}]")
         lines.append(f"[Lantern: {district.lantern_condition}]")
         lines.extend(propagation_notices)
+        self._append_scene_affordances(
+            lines,
+            learned=outcome.response.learned,
+            visible_npcs=outcome.response.visible_npcs,
+            notable_objects=outcome.response.notable_objects,
+            exits=outcome.response.exits,
+            case_relevance=outcome.response.case_relevance,
+            now_available=outcome.response.now_available,
+            next_actions=outcome.response.next_actions,
+        )
         progressed_case_ids = {
             case_id
             for clue in updated_clues
@@ -493,6 +531,10 @@ class LanternCityApp:
         ]
         if surfaced_hook:
             lines.append(f"\n{surfaced_hook}")
+        lines.append("")
+        lines.append("Follow-up:")
+        lines.append("  - overview")
+        lines.append("  - leads")
         case_pressure_updates = self._run_case_pressure_updates(
             updated_at=TURN_FOUR,
             progressed_case_ids={case_id},
@@ -591,6 +633,47 @@ class LanternCityApp:
             self.store.save_objects_atomically(updated_npcs)
         return changes
 
+    def _append_scene_affordances(
+        self,
+        lines: list[str],
+        *,
+        learned: list[str] | None = None,
+        visible_npcs: list[str] | None = None,
+        notable_objects: list[str] | None = None,
+        exits: list[str] | None = None,
+        case_relevance: list[str] | None = None,
+        now_available: list[str] | None = None,
+        next_actions: list[str] | None = None,
+    ) -> None:
+        if learned:
+            lines.append("What you learned:")
+            for item in learned[:4]:
+                lines.append(f"  - {item}")
+        if visible_npcs:
+            lines.append("Who matters here:")
+            for item in visible_npcs[:4]:
+                lines.append(f"  - {item}")
+        if notable_objects:
+            lines.append("What stands out:")
+            for item in notable_objects[:4]:
+                lines.append(f"  - {item}")
+        if exits:
+            lines.append("Exits and routes:")
+            for item in exits[:4]:
+                lines.append(f"  - {item}")
+        if case_relevance:
+            lines.append("Case relevance:")
+            for item in case_relevance[:4]:
+                lines.append(f"  - {item}")
+        if now_available:
+            lines.append("Now available:")
+            for item in now_available[:4]:
+                lines.append(f"  - {item}")
+        if next_actions:
+            lines.append("Next actions:")
+            for item in next_actions[:4]:
+                lines.append(f"  - {item}")
+
     def overview(self) -> str:
         city = self._require_city()
         pos = self._load_position()
@@ -641,6 +724,57 @@ class LanternCityApp:
             lines.append("  None")
         return "\n".join(lines)
 
+    def status(self) -> str:
+        city = self._require_city()
+        pos = self._load_position()
+        progress = self._require_progress()
+        clue_objects = self._load_clues([] if pos is None else pos.clue_ids)
+        credible_count = sum(1 for clue in clue_objects if clue.reliability in _CREDIBLE_RELIABILITIES)
+        uncertain_count = sum(
+            1
+            for clue in clue_objects
+            if clue.reliability not in _CREDIBLE_RELIABILITIES and clue.reliability != "contradicted"
+        )
+        contradicted_count = sum(1 for clue in clue_objects if clue.reliability == "contradicted")
+        cases = self._known_nonlatent_cases(city, pos)
+
+        lines = ["=== Investigator Status ==="]
+        if pos is not None and pos.district_id:
+            district = self._district(pos.district_id)
+            lines.append(f"District: {district.name if district is not None else pos.district_id}")
+            if pos.location_id:
+                location = self.store.load_object("LocationState", pos.location_id)
+                if isinstance(location, LocationState):
+                    lines.append(f"Location: {location.name}")
+        else:
+            lines.append("District: None")
+        if cases:
+            lines.append(f"Current case: {cases[0].title} [{cases[0].status}]")
+            lines.append(f"Case pressure: {cases[0].pressure_level}")
+        else:
+            lines.append("Current case: None")
+        lines.append(
+            "Clues: "
+            f"{len(clue_objects)} total / {credible_count} credible / "
+            f"{uncertain_count} uncertain / {contradicted_count} contradicted"
+        )
+        lines.append("")
+        lines.append("Progress:")
+        lines.append(f"  - Reputation: {progress.reputation.score} ({progress.reputation.tier})")
+        lines.append(f"  - Access: {progress.access.score} ({progress.access.tier})")
+        lines.append(f"  - Leverage: {progress.leverage.score} ({progress.leverage.tier})")
+        lines.append(
+            f"  - Lantern understanding: "
+            f"{progress.lantern_understanding.score} ({progress.lantern_understanding.tier})"
+        )
+        lines.append(f"  - Clue mastery: {progress.clue_mastery.score} ({progress.clue_mastery.tier})")
+        lines.append("")
+        lines.append("Recovery:")
+        lines.append("  - board")
+        lines.append("  - leads")
+        lines.append("  - matters")
+        return "\n".join(lines)
+
     def clues(self) -> str:
         pos = self._load_position()
         if pos is None or not pos.clue_ids:
@@ -670,14 +804,237 @@ class LanternCityApp:
         for bucket_key, bucket_clues in buckets.items():
             case_label = case_titles.get(bucket_key, "General") if bucket_key != "__general__" else "General"
             lines.append(f"\n  — {case_label} —")
-            for clue in bucket_clues:
-                lines.append(f"  [{clue.reliability}] {clue.source_id.replace('_', ' ').title()}")
+            ranked_clues = sorted(bucket_clues, key=_clue_sort_key)
+            for clue in ranked_clues:
+                lines.append(f"  [{clue.reliability}] {_clue_label(clue.id)} ({clue.id})")
+                lines.append(f"    Source: {clue.source_type} / {clue.source_id.replace('_', ' ').title()}")
                 lines.append(f"    {clue.clue_text}")
+                implication = self._summarize_clue_implication(clue)
+                if implication:
+                    lines.append(f"    Suggests: {implication}")
+            synthesis = self._summarize_case_clues(ranked_clues)
+            if synthesis:
+                lines.append(f"    Synthesis: {synthesis}")
 
         if unresolved:
             lines.append(f"\n  [dim] {len(unresolved)} tracked ID(s) not yet resolved:")
             for uid in unresolved:
                 lines.append(f"    {uid}")
+        lines.append("")
+        lines.append("Next:")
+        lines.append("  - board")
+        lines.append("  - leads")
+        lines.append("  - compare <clue_a> <clue_b>")
+        return "\n".join(lines)
+
+    def case_board(self, case_id: str | None = None) -> str:
+        city = self._require_city()
+        pos = self._load_position()
+        case = self._resolve_case_for_board(city, pos, case_id)
+        if case is None:
+            return "No known active case. Use 'overview' or enter a district to pick up a lead."
+
+        district_names = [
+            district.name
+            for district_id in case.involved_district_ids
+            if (district := self._district(district_id)) is not None
+        ]
+        npc_names = [
+            f"{npc.name} ({npc.id})"
+            for npc_id in case.involved_npc_ids
+            if (npc := self._npc(npc_id)) is not None
+        ]
+        case_clues = self._clues_for_case(case, pos)
+        ranked_clues = sorted(case_clues, key=_clue_sort_key)
+        open_questions = list(case.open_questions)
+        if not open_questions:
+            open_questions = [
+                prompt
+                for prompt in (self._clue_uncertainty_prompt(clue) for clue in ranked_clues)
+                if prompt
+            ]
+
+        lines = [
+            f"=== Case Board: {case.title} ===",
+            f"Status: {case.status}",
+            f"Pressure: {case.pressure_level}",
+            f"Resolution window: {case.active_resolution_window}",
+        ]
+        if case.objective_summary:
+            lines.append(f"Objective: {case.objective_summary}")
+        if district_names:
+            lines.append(f"Districts: {', '.join(district_names)}")
+        if npc_names:
+            lines.append(f"People: {', '.join(npc_names)}")
+        if case.district_effects:
+            lines.append("Signals:")
+            for effect in case.district_effects[:4]:
+                lines.append(f"  - {effect}")
+        if open_questions:
+            lines.append("Open questions:")
+            for question in open_questions[:5]:
+                lines.append(f"  - {question}")
+        if ranked_clues:
+            lines.append("Best evidence:")
+            for clue in ranked_clues[:4]:
+                lines.append(f"  - [{clue.reliability}] {_clue_label(clue.id)}")
+        synthesis = self._summarize_case_clues(ranked_clues)
+        if synthesis:
+            lines.append(f"Synthesis: {synthesis}")
+        leads = self._build_lead_lines(case=case, pos=pos, limit=4)
+        if leads:
+            lines.append("Strongest leads:")
+            for lead in leads:
+                lines.append(f"  - {lead}")
+        return "\n".join(lines)
+
+    def journal(self) -> str:
+        city = self._require_city()
+        pos = self._load_position()
+        clues = self._load_clues([] if pos is None else pos.clue_ids)
+        cases = self._known_nonlatent_cases(city, pos)
+        visited_districts = [] if pos is None else pos.visited_district_ids
+        district_names = [
+            district.name
+            for district_id in visited_districts
+            if (district := self._district(district_id)) is not None
+        ]
+        recent_npc_events: list[str] = []
+        for npc in sorted(
+            [
+                npc for npc in self.store.list_objects("NPCState")
+                if isinstance(npc, NPCState) and npc.recent_events
+            ],
+            key=lambda npc: npc.updated_at,
+            reverse=True,
+        ):
+            for event in reversed(npc.recent_events[-2:]):
+                if event not in recent_npc_events:
+                    recent_npc_events.append(f"{npc.name}: {event}")
+                if len(recent_npc_events) >= 4:
+                    break
+            if len(recent_npc_events) >= 4:
+                break
+
+        lines = ["=== Journal ==="]
+        if district_names:
+            lines.append(f"Visited districts: {', '.join(district_names)}")
+        if cases:
+            lines.append("Cases in motion:")
+            for case in cases[:4]:
+                lines.append(f"  - {case.title}: {case.status}, pressure {case.pressure_level}")
+        if clues:
+            lines.append("Evidence ledger:")
+            for clue in sorted(clues, key=_clue_sort_key)[:5]:
+                lines.append(
+                    f"  - {_clue_label(clue.id)} [{clue.reliability}]"
+                    f" from {clue.source_type}"
+                )
+        if recent_npc_events:
+            lines.append("Recent city movement:")
+            for event in recent_npc_events:
+                lines.append(f"  - {event}")
+        if clues:
+            lines.append(f"Current synthesis: {self._summarize_case_clues(sorted(clues, key=_clue_sort_key))}")
+        lines.append("Use 'board' for the active case or 'compare <clue_a> <clue_b>' to test two clues directly.")
+        return "\n".join(lines)
+
+    def strongest_leads(self) -> str:
+        city = self._require_city()
+        pos = self._load_position()
+        cases = self._known_nonlatent_cases(city, pos)
+        if not cases:
+            return "No known active leads yet. Enter a district or talk to a local contact."
+        lines = ["=== Strongest Leads ==="]
+        for case in cases[:3]:
+            lines.append(f"{case.title} [{case.pressure_level}]")
+            for lead in self._build_lead_lines(case=case, pos=pos, limit=3):
+                lines.append(f"  - {lead}")
+        return "\n".join(lines)
+
+    def what_matters_here(self) -> str:
+        city = self._require_city()
+        pos = self._load_position()
+        if pos is None or pos.district_id is None:
+            return "You are not in a district yet. Use 'overview' to choose where to go."
+        district = self._district(pos.district_id)
+        if district is None:
+            return f"Current district is missing: {pos.district_id}"
+
+        lines = [f"=== What Matters Here: {district.name} ===", f"Lantern condition: {district.lantern_condition}"]
+        if pos.location_id:
+            location = self.store.load_object("LocationState", pos.location_id)
+            if isinstance(location, LocationState):
+                if location.scene_objects:
+                    lines.append(f"Visible objects: {', '.join(location.scene_objects)}")
+                if location.known_npc_ids:
+                    npc_names = [
+                        npc.name
+                        for npc_id in location.known_npc_ids
+                        if (npc := self._npc(npc_id)) is not None
+                    ]
+                    if npc_names:
+                        lines.append(f"People here: {', '.join(npc_names)}")
+
+        local_cases = [
+            case
+            for case in self._known_nonlatent_cases(city, pos)
+            if pos.district_id in case.involved_district_ids
+        ]
+        if local_cases:
+            lines.append("Local case pressure:")
+            for case in local_cases[:3]:
+                lines.append(f"  - {case.title}: {case.pressure_level}")
+        standouts: list[str] = []
+        for case in local_cases[:2]:
+            standouts.extend(self._build_lead_lines(case=case, pos=pos, limit=2))
+        if not standouts:
+            standouts.append("No live contradiction is surfaced here yet; inspect a location or speak to a contact.")
+        lines.append("Standouts:")
+        for item in standouts[:4]:
+            lines.append(f"  - {item}")
+        lines.append("Recovery:")
+        lines.append("  - inspect <location_id>")
+        lines.append("  - talk <npc_id> <question>")
+        lines.append("  - board")
+        return "\n".join(lines)
+
+    def compare_clues(self, left_ref: str, right_ref: str) -> str:
+        pos = self._load_position()
+        if pos is None or not pos.clue_ids:
+            return "No known clues to compare yet."
+        left = self._resolve_known_clue(left_ref, pos.clue_ids)
+        right = self._resolve_known_clue(right_ref, pos.clue_ids)
+        if left is None:
+            raise LookupError(f"Clue not found: {left_ref}")
+        if right is None:
+            raise LookupError(f"Clue not found: {right_ref}")
+        if left.id == right.id:
+            return "Choose two different clues to compare."
+
+        shared_cases = self._shared_case_titles(left, right)
+        shared_npcs = self._shared_npc_names(left, right)
+        shared_districts = self._shared_district_names(left, right)
+        reliability_read = self._compare_reliability(left, right)
+        relation_read = self._compare_relation(left, right)
+
+        lines = [
+            f"=== Compare Clues ===",
+            f"Left: {_clue_label(left.id)} [{left.reliability}]",
+            f"Right: {_clue_label(right.id)} [{right.reliability}]",
+            reliability_read,
+            relation_read,
+        ]
+        if shared_cases:
+            lines.append(f"Shared case context: {', '.join(shared_cases)}")
+        if shared_npcs:
+            lines.append(f"Shared people: {', '.join(shared_npcs)}")
+        if shared_districts:
+            lines.append(f"Shared districts: {', '.join(shared_districts)}")
+        lines.append("Texts:")
+        lines.append(f"  - {_clue_label(left.id)}: {left.clue_text}")
+        lines.append(f"  - {_clue_label(right.id)}: {right.clue_text}")
+        lines.append(f"Synthesis: {self._compare_synthesis(left, right)}")
         return "\n".join(lines)
 
     def go(self, location_id: str) -> str:
@@ -709,6 +1066,11 @@ class LanternCityApp:
             lines.append(f"Objects: {', '.join(loc.scene_objects)}")
         if loc.clue_ids:
             lines.append(f"Clues present: {len(loc.clue_ids)}")
+        lines.append("Suggested actions:")
+        lines.append(f"  - inspect {location_id}")
+        for nid in loc.known_npc_ids[:2]:
+            lines.append(f"  - talk {nid} <question>")
+        lines.append("  - matters")
         return "\n".join(lines)
 
     def look(self, district_id: str | None = None) -> str:
@@ -758,6 +1120,20 @@ class LanternCityApp:
                 lines.append(f"    Objects: {', '.join(loc.scene_objects)}")
         if not district.visible_locations:
             lines.append("  None")
+        local_cases = [
+            case
+            for case in self._known_nonlatent_cases(city, self._load_position())
+            if district_id in case.involved_district_ids
+        ] if city is not None else []
+        if local_cases:
+            lines.append("")
+            lines.append("Local pressure:")
+            for case in local_cases[:3]:
+                lines.append(f"  - {case.title}: {case.pressure_level}")
+        lines.append("")
+        lines.append("Recovery:")
+        lines.append("  - matters")
+        lines.append("  - leads")
         return "\n".join(lines)
 
     def get_state_snapshot(self) -> dict[str, object]:
@@ -779,6 +1155,200 @@ class LanternCityApp:
             "npc_memory_count": 0 if npc is None else len(npc.memory_log),
             "lantern_understanding_score": progress.lantern_understanding.score,
         }
+
+    def _load_clues(self, clue_ids: list[str]) -> list[ClueState]:
+        return [
+            clue
+            for clue_id in clue_ids
+            if isinstance(clue := self.store.load_object("ClueState", clue_id), ClueState)
+        ]
+
+    def _known_nonlatent_cases(
+        self,
+        city: object,
+        pos: ActiveWorkingSet | None,
+    ) -> list[CaseState]:
+        known_ids = None if pos is None else set(pos.known_case_ids)
+        cases = [
+            case
+            for case_id in getattr(city, "active_case_ids", [])
+            if isinstance(case := self.store.load_object("CaseState", case_id), CaseState)
+            and case.status != "latent"
+            and (known_ids is None or case.id in known_ids)
+        ]
+        return sorted(cases, key=_case_sort_key)
+
+    def _resolve_case_for_board(
+        self,
+        city: object,
+        pos: ActiveWorkingSet | None,
+        case_id: str | None,
+    ) -> CaseState | None:
+        if case_id is not None:
+            case = self.store.load_object("CaseState", case_id)
+            if isinstance(case, CaseState) and case.status != "latent":
+                return case
+            raise LookupError(f"Case not found: {case_id}")
+        known_cases = self._known_nonlatent_cases(city, pos)
+        return None if not known_cases else known_cases[0]
+
+    def _clues_for_case(
+        self,
+        case: CaseState,
+        pos: ActiveWorkingSet | None,
+    ) -> list[ClueState]:
+        known = set([] if pos is None else pos.clue_ids)
+        clue_ids = [clue_id for clue_id in case.known_clue_ids if clue_id in known]
+        return self._load_clues(clue_ids)
+
+    def _build_lead_lines(
+        self,
+        *,
+        case: CaseState,
+        pos: ActiveWorkingSet | None,
+        limit: int,
+    ) -> list[str]:
+        clues = self._clues_for_case(case, pos)
+        lines: list[str] = []
+        uncertain = [
+            self._clue_uncertainty_prompt(clue)
+            for clue in sorted(clues, key=_clue_sort_key)
+            if clue.reliability not in _CREDIBLE_RELIABILITIES
+        ]
+        for prompt in uncertain:
+            if prompt:
+                lines.append(prompt)
+            if len(lines) >= limit:
+                return lines[:limit]
+        for question in case.open_questions:
+            if question not in lines:
+                lines.append(question)
+            if len(lines) >= limit:
+                return lines[:limit]
+        if case.involved_npc_ids and len(lines) < limit:
+            npc = self._npc(case.involved_npc_ids[0])
+            if npc is not None:
+                lines.append(f"Talk to {npc.name} about {case.title.lower()}.")
+        if case.involved_district_ids and len(lines) < limit:
+            district = self._district(case.involved_district_ids[0])
+            if district is not None:
+                lines.append(f"Inspect a location in {district.name} tied to this case.")
+        return lines[:limit]
+
+    def _summarize_case_clues(self, clues: list[ClueState]) -> str:
+        if not clues:
+            return ""
+        credible = [clue for clue in clues if clue.reliability in _CREDIBLE_RELIABILITIES]
+        contradicted = [clue for clue in clues if clue.reliability == "contradicted"]
+        uncertain = [clue for clue in clues if clue.reliability not in _CREDIBLE_RELIABILITIES and clue.reliability != "contradicted"]
+        parts: list[str] = []
+        if credible:
+            parts.append(f"{len(credible)} clue(s) currently support the case theory")
+        if uncertain:
+            parts.append(f"{len(uncertain)} still need confirmation")
+        if contradicted:
+            parts.append(f"{len(contradicted)} are actively in conflict")
+        return "; ".join(parts)
+
+    def _summarize_clue_implication(self, clue: ClueState) -> str:
+        if clue.reliability in {"solid", "credible"}:
+            return "This can support a stronger resolution path."
+        if clue.reliability == "contradicted":
+            return "This cannot be trusted without explaining the contradiction."
+        if clue.source_type == "testimony":
+            return "An NPC or record check may clarify whether this account holds up."
+        if clue.source_type == "document":
+            return "Compare this against another record source or lantern condition."
+        return "This needs corroboration before it should anchor a conclusion."
+
+    def _clue_uncertainty_prompt(self, clue: ClueState) -> str:
+        label = _clue_label(clue.id)
+        if clue.reliability == "contradicted":
+            return f"Resolve why {label.lower()} is contradicted before relying on it."
+        if clue.reliability not in _CREDIBLE_RELIABILITIES:
+            if clue.related_npc_ids:
+                npc = self._npc(clue.related_npc_ids[0])
+                if npc is not None:
+                    return f"Ask {npc.name} to clarify {label.lower()}."
+            return f"Corroborate {label.lower()} with a second source."
+        return ""
+
+    def _resolve_known_clue(self, raw: str, known_ids: list[str]) -> ClueState | None:
+        clue_map = {
+            clue_id: clue
+            for clue_id in known_ids
+            if isinstance(clue := self.store.load_object("ClueState", clue_id), ClueState)
+        }
+        if raw in clue_map:
+            return clue_map[raw]
+        normalized = raw.lower().replace("_", " ").replace("-", " ")
+        best: ClueState | None = None
+        best_score = 0
+        for clue in clue_map.values():
+            label = _clue_label(clue.id).lower()
+            source = clue.source_id.lower().replace("_", " ")
+            score = 0
+            if normalized in label or label in normalized:
+                score += 3
+            if normalized in source or source in normalized:
+                score += 2
+            score += len(set(normalized.split()) & set(label.split()))
+            if score > best_score:
+                best = clue
+                best_score = score
+        return best if best_score > 0 else None
+
+    def _shared_case_titles(self, left: ClueState, right: ClueState) -> list[str]:
+        return [
+            case.title
+            for case_id in sorted(set(left.related_case_ids) & set(right.related_case_ids))
+            if isinstance(case := self.store.load_object("CaseState", case_id), CaseState)
+        ]
+
+    def _shared_npc_names(self, left: ClueState, right: ClueState) -> list[str]:
+        return [
+            npc.name
+            for npc_id in sorted(set(left.related_npc_ids) & set(right.related_npc_ids))
+            if (npc := self._npc(npc_id)) is not None
+        ]
+
+    def _shared_district_names(self, left: ClueState, right: ClueState) -> list[str]:
+        return [
+            district.name
+            for district_id in sorted(set(left.related_district_ids) & set(right.related_district_ids))
+            if (district := self._district(district_id)) is not None
+        ]
+
+    def _compare_reliability(self, left: ClueState, right: ClueState) -> str:
+        if left.reliability == right.reliability:
+            return f"Reliability: both clues currently read as {left.reliability}."
+        if left.reliability in _CREDIBLE_RELIABILITIES and right.reliability not in _CREDIBLE_RELIABILITIES:
+            return f"Reliability: {_clue_label(left.id)} is the stronger anchor; {_clue_label(right.id)} still needs support."
+        if right.reliability in _CREDIBLE_RELIABILITIES and left.reliability not in _CREDIBLE_RELIABILITIES:
+            return f"Reliability: {_clue_label(right.id)} is the stronger anchor; {_clue_label(left.id)} still needs support."
+        return f"Reliability: {left.reliability} versus {right.reliability}."
+
+    def _compare_relation(self, left: ClueState, right: ClueState) -> str:
+        shared_cases = set(left.related_case_ids) & set(right.related_case_ids)
+        shared_districts = set(left.related_district_ids) & set(right.related_district_ids)
+        if shared_cases and shared_districts:
+            return "Relation: these clues point into the same investigation and the same local context."
+        if shared_cases:
+            return "Relation: these clues belong to the same case, but they come from different contexts."
+        if shared_districts:
+            return "Relation: these clues describe the same district pressure from different angles."
+        return "Relation: these clues are not directly linked; compare them carefully before building a theory."
+
+    def _compare_synthesis(self, left: ClueState, right: ClueState) -> str:
+        if left.reliability == "contradicted" or right.reliability == "contradicted":
+            return "One of these clues is already in conflict. Explain that contradiction before treating them as a shared theory."
+        if set(left.related_case_ids) & set(right.related_case_ids):
+            if left.reliability in _CREDIBLE_RELIABILITIES and right.reliability in _CREDIBLE_RELIABILITIES:
+                return "Together, these clues can support a stronger case interpretation."
+            return "These clues belong together, but at least one still needs corroboration before it should drive a conclusion."
+        if set(left.related_district_ids) & set(right.related_district_ids):
+            return "These clues may reveal district pattern rather than direct causation. Use them to test pressure, not just sequence."
+        return "These clues are better treated as parallel signals until a case, district, or NPC ties them together."
 
     def _propagate_missingness(
         self,
@@ -1981,6 +2551,39 @@ def _clue_label(clue_id: str) -> str:
     if clue_id.startswith("clue_"):
         return clue_id[5:].replace("_", " ").title()
     return clue_id
+
+
+def _clue_sort_key(clue: ClueState) -> tuple[int, str]:
+    order = {
+        "solid": 0,
+        "credible": 1,
+        "uncertain": 2,
+        "unstable": 3,
+        "distorted": 4,
+        "contradicted": 5,
+    }
+    return (order.get(clue.reliability, 9), clue.id)
+
+
+def _case_sort_key(case: CaseState) -> tuple[int, int, str]:
+    pressure_order = {
+        "urgent": 0,
+        "rising": 1,
+        "low": 2,
+    }
+    status_order = {
+        "active": 0,
+        "escalated": 1,
+        "stalled": 2,
+        "partially solved": 3,
+        "solved": 4,
+        "failed": 5,
+    }
+    return (
+        pressure_order.get(case.pressure_level, 9),
+        status_order.get(case.status, 9),
+        case.id,
+    )
 
 
 def _apply_physical_discovery(

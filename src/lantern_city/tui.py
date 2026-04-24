@@ -64,6 +64,11 @@ The Game Master understands natural language. Just describe what you want to do:
   [italic]"examine the lantern post"[/italic]
   [italic]"what clues do I have so far?"[/italic]
   [italic]"where should I go next?"[/italic]  ← ask for a status update anytime
+  [italic]"what matters here?"[/italic]
+  [italic]"show the case board"[/italic]
+  [italic]"show my strongest leads"[/italic]
+  [italic]"compare clue_missing_clerk_ledgers with clue_hidden_copy_sheet"[/italic]
+  [italic]"show my journal"[/italic]
 
 [bold]── Navigation ──────────────────────────────────────[/bold]
 
@@ -109,12 +114,18 @@ _HELP_TEXT = """\
 
   [bold]start[/bold]                        begin a new game
   [bold]overview[/bold]                     city-level summary
+  [bold]status[/bold]                       player and case status
   [bold]look[/bold] [dim][district_id][/dim]          district detail
   [bold]enter[/bold] [dim]<district_id>[/dim]         travel to a district
   [bold]go[/bold] [dim]<location_id>[/dim]            move to a location
   [bold]inspect[/bold] [dim]<location_id>[/dim]       examine a location
   [bold]talk[/bold] [dim]<npc_id> <text>[/dim]        speak with an NPC
   [bold]case[/bold] [dim]<case_id>[/dim]              attempt to resolve a case
+  [bold]board[/bold] [dim][case_id][/dim]             review current case board
+  [bold]leads[/bold]                        show strongest unresolved leads
+  [bold]matters[/bold]                      show what matters in the current scene
+  [bold]compare[/bold] [dim]<clue_a> <clue_b>[/dim]   compare two known clues
+  [bold]journal[/bold]                      run-level memory and city chronicle
   [bold]clues[/bold]                        view acquired clues
   [bold]help[/bold]                         show this panel
 
@@ -1272,7 +1283,7 @@ class LanternCityTUI(App[None]):
                 f"  [green]{credible_count} credible[/green]"
                 f"  [dim]{uncertain_count} uncertain[/dim]"
             )
-            lines.append("  [dim]say 'show my clues'[/dim]")
+            lines.append("  [dim]say 'show my clues' or use 'board' / 'leads' / 'journal'[/dim]")
 
         # ── What to do next ──────────────────────────────────────────
         hint = _next_step_hint(active_cases, clue_count, credible_count)
@@ -1404,11 +1415,11 @@ def _next_step_hint(active_cases: list, clue_count: int, credible_count: int) ->
     if clue_count == 0:
         if case.involved_district_ids:
             name = case.involved_district_ids[0].replace("district_", "").replace("_", " ").title()
-            return f"Inspect locations or talk to NPCs in {name}."
+            return f"Inspect locations or talk to NPCs in {name}. Use 'matters' if you lose the thread."
         return "Inspect locations to find clues."
     if credible_count == 0:
-        return "Talk to NPCs to raise clue reliability before resolving."
-    return f"Ready to attempt resolution — type: case {case.id}"
+        return "Talk to NPCs to raise clue reliability before resolving. Use 'board' to review open questions."
+    return f"Ready to attempt resolution — type: case {case.id} or use 'leads' for one more pass."
 
 
 # ------------------------------------------------------------------
