@@ -495,3 +495,82 @@ def test_case_runtime_mode_marks_generated_cases_as_evolved_runtime(tmp_path) ->
     )
 
     assert _case_runtime_mode(bootstrap.case) == "evolved_runtime"
+
+
+def test_start_new_game_can_force_mvp_baseline_even_with_llm_config(tmp_path, monkeypatch) -> None:
+    class _PassingProbeClient:
+        def __init__(self, config) -> None:
+            self.config = config
+
+        def generate_json(self, **kwargs):
+            return {
+                "task_type": "npc_response",
+                "request_id": "probe_npc_response",
+                "summary_text": "The witness answers carefully but provides a usable route.",
+                "structured_updates": {
+                    "dialogue_act": "answer_with_hint",
+                    "npc_stance": "guarded but cooperative",
+                    "relationship_shift": {
+                        "trust_delta": 0.05,
+                        "suspicion_delta": 0.0,
+                        "fear_delta": 0.0,
+                        "tag": "measured_cooperation",
+                    },
+                    "clue_effects": [],
+                    "access_effects": [],
+                    "redirect_targets": [],
+                },
+                "cacheable_text": {
+                    "npc_line": "The route is still usable, but only if you move before the ward shutters close.",
+                    "follow_up_suggestions": ["Ask who still watches the route."],
+                    "exit_line_if_needed": "That is all I can risk saying here.",
+                },
+                "confidence": 0.82,
+                "warnings": [],
+            }
+
+        def close(self) -> None:
+            return None
+
+    monkeypatch.setattr("lantern_city.app.OpenAICompatibleLLMClient", _PassingProbeClient)
+
+    generate_world_called = False
+    generate_cases_called = False
+
+    def _mark_world(self, on_progress=None):
+        nonlocal generate_world_called
+        generate_world_called = True
+
+    def _mark_cases(self, count=2):
+        nonlocal generate_cases_called
+        generate_cases_called = True
+
+    monkeypatch.setattr(LanternCityApp, "_generate_world_content", _mark_world)
+    monkeypatch.setattr(LanternCityApp, "_generate_latent_cases", _mark_cases)
+
+    app = LanternCityApp(
+        tmp_path / "lantern-city.sqlite3",
+        llm_config=OpenAICompatibleConfig(base_url="http://localhost:1234/v1", model="test-model"),
+        startup_mode="mvp_baseline",
+    )
+
+    output = app.start_new_game()
+
+    assert "Active case: The Missing Clerk" in output
+    assert "Model check:" not in output
+    assert generate_world_called is False
+    assert generate_cases_called is False
+
+
+def test_start_new_game_rejects_generated_runtime_without_llm(tmp_path) -> None:
+    app = LanternCityApp(
+        tmp_path / "lantern-city.sqlite3",
+        startup_mode="generated_runtime",
+    )
+
+    try:
+        app.start_new_game()
+    except ValueError as exc:
+        assert "requires llm_config" in str(exc)
+    else:
+        raise AssertionError("Expected generated runtime startup without llm_config to fail")

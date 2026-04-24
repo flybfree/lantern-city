@@ -127,6 +127,7 @@ _MVP_BASELINE_CASE_IDS: frozenset[str] = frozenset({"case_missing_clerk"})
 class LanternCityApp:
     database_path: str | Path
     llm_config: OpenAICompatibleConfig | None = None
+    startup_mode: str = "auto"
     store: SQLiteStore = field(init=False)
 
     def __post_init__(self) -> None:
@@ -151,8 +152,10 @@ class LanternCityApp:
                 f"Active case: {case_title}"
             )
 
+        startup_mode = self._resolved_startup_mode()
+
         model_check_summary: str | None = None
-        if self.llm_config is not None:
+        if startup_mode == "generated_runtime":
             _emit("[llm] Running model quality check…")
             model_check_summary = self._probe_llm_quality()
             _emit(f"[llm] {model_check_summary}")
@@ -166,7 +169,7 @@ class LanternCityApp:
         result = bootstrap_city(seed, self.store)
         _emit(f"[city] Structure ready: {result.city_id}")
 
-        if self.llm_config is not None:
+        if startup_mode == "generated_runtime":
             _emit("[city] Generating world content (locations, clues, NPC placement)…")
             self._generate_world_content(on_progress=on_progress)
             _emit("[city] Generating latent cases…")
@@ -552,7 +555,7 @@ class LanternCityApp:
         self.store.save_object(progress)
 
         # Generate a new latent case if the pipeline is running low
-        if self.llm_config is not None:
+        if self._resolved_startup_mode() == "generated_runtime":
             city = self._require_city()
             non_terminal = [
                 obj
@@ -1818,6 +1821,18 @@ class LanternCityApp:
         activated = transition_case(case, "active", updated_at=TURN_ZERO)
         self.store.save_object(activated)
         self._introduce_case(case.id)
+
+    def _resolved_startup_mode(self) -> str:
+        """Resolve whether startup uses the authored baseline or generated runtime."""
+        if self.startup_mode == "auto":
+            return "generated_runtime" if self.llm_config is not None else "mvp_baseline"
+        if self.startup_mode == "mvp_baseline":
+            return "mvp_baseline"
+        if self.startup_mode == "generated_runtime":
+            if self.llm_config is None:
+                raise ValueError("startup_mode='generated_runtime' requires llm_config")
+            return "generated_runtime"
+        raise ValueError(f"Unsupported startup_mode: {self.startup_mode}")
 
     def _probe_llm_quality(self) -> str:
         assert self.llm_config is not None
