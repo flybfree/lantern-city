@@ -764,16 +764,15 @@ class LanternCityApp:
         if pos is None or not pos.clue_ids:
             return "No clues acquired yet."
 
-        # Build case_id → title lookup
         city = self._city()
+        known_case_ids = set(pos.known_case_ids)
         case_titles: dict[str, str] = {}
         if city is not None:
             for cid in city.active_case_ids:
                 c = self.store.load_object("CaseState", cid)
-                if isinstance(c, CaseState):
+                if isinstance(c, CaseState) and cid in known_case_ids:
                     case_titles[cid] = c.title
 
-        # Group clues by their first related case (or "General" if none)
         buckets: dict[str, list[ClueState]] = {}
         unresolved: list[str] = []
         for clue_id in pos.clue_ids:
@@ -781,7 +780,8 @@ class LanternCityApp:
             if not isinstance(clue, ClueState):
                 unresolved.append(clue_id)
                 continue
-            bucket_key = clue.related_case_ids[0] if clue.related_case_ids else "__general__"
+            visible_case_ids = [cid for cid in clue.related_case_ids if cid in known_case_ids]
+            bucket_key = visible_case_ids[0] if visible_case_ids else "__general__"
             buckets.setdefault(bucket_key, []).append(clue)
 
         lines = [f"=== Acquired Clues ({len(pos.clue_ids)} tracked) ==="]
@@ -918,8 +918,15 @@ class LanternCityApp:
             lines.append("Recent city movement:")
             for event in recent_npc_events:
                 lines.append(f"  - {event}")
-        if clues:
-            lines.append(f"Current synthesis: {self._summarize_case_clues(sorted(clues, key=_clue_sort_key))}")
+        visible_case_clues = [
+            clue
+            for clue in clues
+            if not clue.related_case_ids or any(case.id in clue.related_case_ids for case in cases)
+        ]
+        if visible_case_clues:
+            lines.append(
+                f"Current synthesis: {self._summarize_case_clues(sorted(visible_case_clues, key=_clue_sort_key))}"
+            )
         lines.append("Use 'board' for the active case or 'compare <clue_a> <clue_b>' to test two clues directly.")
         return "\n".join(lines)
 
@@ -996,11 +1003,11 @@ class LanternCityApp:
         if left.id == right.id:
             return "Choose two different clues to compare."
 
-        shared_cases = self._shared_case_titles(left, right)
+        shared_cases = self._shared_case_titles(left, right, set(pos.known_case_ids))
         shared_npcs = self._shared_npc_names(left, right)
         shared_districts = self._shared_district_names(left, right)
         reliability_read = self._compare_reliability(left, right)
-        relation_read = self._compare_relation(left, right)
+        relation_read = self._compare_relation(left, right, set(pos.known_case_ids))
 
         lines = [
             f"=== Compare Clues ===",
@@ -1018,7 +1025,7 @@ class LanternCityApp:
         lines.append("Texts:")
         lines.append(f"  - {_clue_label(left.id)}: {left.clue_text}")
         lines.append(f"  - {_clue_label(right.id)}: {right.clue_text}")
-        lines.append(f"Synthesis: {self._compare_synthesis(left, right)}")
+        lines.append(f"Synthesis: {self._compare_synthesis(left, right, set(pos.known_case_ids))}")
         return "\n".join(lines)
 
     def go(self, location_id: str) -> str:
@@ -1282,10 +1289,15 @@ class LanternCityApp:
                 best_score = score
         return best if best_score > 0 else None
 
-    def _shared_case_titles(self, left: ClueState, right: ClueState) -> list[str]:
+    def _shared_case_titles(
+        self,
+        left: ClueState,
+        right: ClueState,
+        known_case_ids: set[str],
+    ) -> list[str]:
         return [
             case.title
-            for case_id in sorted(set(left.related_case_ids) & set(right.related_case_ids))
+            for case_id in sorted((set(left.related_case_ids) & set(right.related_case_ids)) & known_case_ids)
             if isinstance(case := self.store.load_object("CaseState", case_id), CaseState)
         ]
 
@@ -1312,8 +1324,8 @@ class LanternCityApp:
             return f"Reliability: {_clue_label(right.id)} is the stronger anchor; {_clue_label(left.id)} still needs support."
         return f"Reliability: {left.reliability} versus {right.reliability}."
 
-    def _compare_relation(self, left: ClueState, right: ClueState) -> str:
-        shared_cases = set(left.related_case_ids) & set(right.related_case_ids)
+    def _compare_relation(self, left: ClueState, right: ClueState, known_case_ids: set[str]) -> str:
+        shared_cases = (set(left.related_case_ids) & set(right.related_case_ids)) & known_case_ids
         shared_districts = set(left.related_district_ids) & set(right.related_district_ids)
         if shared_cases and shared_districts:
             return "Relation: these clues point into the same investigation and the same local context."
@@ -1323,10 +1335,10 @@ class LanternCityApp:
             return "Relation: these clues describe the same district pressure from different angles."
         return "Relation: these clues are not directly linked; compare them carefully before building a theory."
 
-    def _compare_synthesis(self, left: ClueState, right: ClueState) -> str:
+    def _compare_synthesis(self, left: ClueState, right: ClueState, known_case_ids: set[str]) -> str:
         if left.reliability == "contradicted" or right.reliability == "contradicted":
             return "One of these clues is already in conflict. Explain that contradiction before treating them as a shared theory."
-        if set(left.related_case_ids) & set(right.related_case_ids):
+        if (set(left.related_case_ids) & set(right.related_case_ids)) & known_case_ids:
             if left.reliability in _CREDIBLE_RELIABILITIES and right.reliability in _CREDIBLE_RELIABILITIES:
                 return "Together, these clues can support a stronger case interpretation."
             return "These clues belong together, but at least one still needs corroboration before it should drive a conclusion."
