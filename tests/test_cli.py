@@ -22,6 +22,7 @@ def test_cli_start_initializes_a_game_and_renders_compact_status(tmp_path: Path)
     assert "Lantern City ready" in output
     assert "district_old_quarter" in output
     assert "district_lantern_ward" in output
+    assert "Startup mode: mvp_baseline" in output
     assert "Active case: The Missing Clerk" in output
     assert "Next: enter district_old_quarter" in output
 
@@ -95,6 +96,7 @@ def test_cli_startup_mode_can_force_mvp_baseline_even_with_llm_config(tmp_path: 
     )
 
     assert "Active case: The Missing Clerk" in output
+    assert "Startup mode: mvp_baseline" in output
     assert "Model check:" not in output
 
 

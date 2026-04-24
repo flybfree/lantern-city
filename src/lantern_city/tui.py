@@ -585,7 +585,7 @@ def _fetch_models_from_url(base_url: str) -> list[str]:
     return sorted(models)
 
 
-class SettingsScreen(ModalScreen[tuple[str, str] | None]):
+class SettingsScreen(ModalScreen[tuple[str, str, str] | None]):
     """Modal overlay for configuring the LLM connection."""
 
     CSS = """
@@ -638,10 +638,16 @@ class SettingsScreen(ModalScreen[tuple[str, str] | None]):
     }
     """
 
-    def __init__(self, current_url: str = "", current_model: str = "") -> None:
+    def __init__(
+        self,
+        current_url: str = "",
+        current_model: str = "",
+        current_startup_mode: str = "auto",
+    ) -> None:
         super().__init__()
         self._current_url = current_url
         self._current_model = current_model
+        self._current_startup_mode = current_startup_mode
 
     def compose(self) -> ComposeResult:
         with Vertical(id="settings-dialog"):
@@ -658,6 +664,12 @@ class SettingsScreen(ModalScreen[tuple[str, str] | None]):
             yield ListView(id="settings-model-list")
             yield Label("Model  [dim](select above or type)[/dim]", markup=True)
             yield Input(value=self._current_model, placeholder="model-name", id="inp-settings-model")
+            yield Label("Startup mode  [dim](auto | mvp_baseline | generated_runtime)[/dim]", markup=True)
+            yield Input(
+                value=self._current_startup_mode,
+                placeholder="auto",
+                id="inp-settings-startup-mode",
+            )
             with Horizontal(id="settings-buttons"):
                 yield Button("Cancel", variant="default", id="btn-settings-cancel")
                 yield Button("Save", variant="primary", id="btn-settings-save")
@@ -707,8 +719,12 @@ class SettingsScreen(ModalScreen[tuple[str, str] | None]):
     def _save(self) -> None:
         url = self.query_one("#inp-settings-url", Input).value.strip()
         model = self.query_one("#inp-settings-model", Input).value.strip()
+        startup_mode = self.query_one("#inp-settings-startup-mode", Input).value.strip() or "auto"
+        if startup_mode not in {"auto", "mvp_baseline", "generated_runtime"}:
+            self.query_one("#inp-settings-startup-mode", Input).focus()
+            return
         if url and model:
-            self.dismiss((url, model))
+            self.dismiss((url, model, startup_mode))
         elif not url:
             self.query_one("#inp-settings-url", Input).focus()
         else:
@@ -920,26 +936,28 @@ class LanternCityTUI(App[None]):
 
     def action_settings(self) -> None:
         current = _load_llm_config(self._database_path)
+        current_startup_mode = _load_startup_mode(self._database_path) or self._game.startup_mode
         url = current.base_url if current else ""
         model = current.model if current else ""
 
-        def _on_close(result: tuple[str, str] | None) -> None:
+        def _on_close(result: tuple[str, str, str] | None) -> None:
             if result is None:
                 return
-            url, model = result
-            _save_llm_config(self._database_path, url, model)
-            self._apply_llm_config(url, model)
+            url, model, startup_mode = result
+            _save_llm_config(self._database_path, url, model, startup_mode=startup_mode)
+            self._apply_llm_config(url, model, startup_mode)
 
-        self.push_screen(SettingsScreen(url, model), _on_close)
+        self.push_screen(SettingsScreen(url, model, current_startup_mode), _on_close)
 
     def action_toggle_info(self) -> None:
         self._info_mode = "stats" if self._info_mode == "surroundings" else "surroundings"
         self._refresh_surroundings()
 
-    def _apply_llm_config(self, url: str, model: str) -> None:
+    def _apply_llm_config(self, url: str, model: str, startup_mode: str = "auto") -> None:
         """Instantiate a new LLM client + GM and enable GM mode."""
         llm_config = OpenAICompatibleConfig(base_url=url, model=model)
         self._game.llm_config = llm_config
+        self._game.startup_mode = startup_mode
         llm_client = OpenAICompatibleLLMClient(llm_config)
         self._gm = GameMaster(app=self._game, llm=llm_client)
         self._gm_mode = True
@@ -949,7 +967,7 @@ class LanternCityTUI(App[None]):
         narrative = self.query_one("#narrative", RichLog)
         narrative.write(Text.from_markup(
             f"[green]LLM configured:[/green] {escape(url)}  model: {escape(model)}\n"
-            "[dim]GM mode activated.[/dim]"
+            f"[dim]Startup mode: {escape(startup_mode)}. GM mode activated.[/dim]"
         ))
 
     # ------------------------------------------------------------------
@@ -1535,6 +1553,8 @@ def _format_start_result_markup(result: str) -> str:
             lines.append(f"[green]{escaped}[/green]")
         elif line.startswith("Model check: warning"):
             lines.append(f"[yellow]{escaped}[/yellow]")
+        elif line.startswith("Startup mode:"):
+            lines.append(f"[cyan]{escaped}[/cyan]")
         elif line.startswith("Lantern City ready:"):
             lines.append(f"[bold green]{escaped}[/bold green]")
         else:

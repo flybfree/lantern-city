@@ -8,11 +8,13 @@ from lantern_city.tui import _format_start_result_markup, _recovery_panel_lines
 def test_format_start_result_markup_highlights_model_check_pass() -> None:
     rendered = _format_start_result_markup(
         "Lantern City ready: seeded city_lantern_city\n"
+        "Startup mode: generated_runtime\n"
         "Model check: pass — startup probe validated NPC response quality in 0.8s.\n"
         "Next: enter district_old_quarter"
     )
 
     assert "[bold green]Lantern City ready: seeded city_lantern_city[/bold green]" in rendered
+    assert "[cyan]Startup mode: generated_runtime[/cyan]" in rendered
     assert (
         "[green]Model check: pass — startup probe validated NPC response quality in 0.8s.[/green]"
         in rendered
@@ -22,10 +24,12 @@ def test_format_start_result_markup_highlights_model_check_pass() -> None:
 def test_format_start_result_markup_highlights_model_check_warning() -> None:
     rendered = _format_start_result_markup(
         "Lantern City ready: seeded city_lantern_city\n"
+        "Startup mode: generated_runtime\n"
         "Model check: warning — startup probe failed, so NPC generation quality is uncertain.\n"
         "Next: enter district_old_quarter"
     )
 
+    assert "[cyan]Startup mode: generated_runtime[/cyan]" in rendered
     assert (
         "[yellow]Model check: warning — startup probe failed, so NPC generation quality is uncertain.[/yellow]"
         in rendered

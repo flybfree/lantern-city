@@ -182,6 +182,7 @@ def test_start_new_game_reports_successful_model_check(tmp_path, monkeypatch) ->
     output = app.start_new_game()
 
     assert "Lantern City ready:" in output
+    assert "Startup mode: generated_runtime" in output
     assert "Model check: pass" in output
 
 
@@ -213,6 +214,7 @@ def test_start_new_game_reports_warning_when_model_probe_fails(tmp_path, monkeyp
     output = app.start_new_game()
 
     assert "Lantern City ready:" in output
+    assert "Startup mode: generated_runtime" in output
     assert "Model check: warning" in output
 
 
@@ -557,6 +559,7 @@ def test_start_new_game_can_force_mvp_baseline_even_with_llm_config(tmp_path, mo
     output = app.start_new_game()
 
     assert "Active case: The Missing Clerk" in output
+    assert "Startup mode: mvp_baseline" in output
     assert "Model check:" not in output
     assert generate_world_called is False
     assert generate_cases_called is False

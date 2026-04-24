@@ -143,16 +143,16 @@ class LanternCityApp:
                 on_progress(msg)
 
         existing_city = self._city()
+        startup_mode = self._resolved_startup_mode()
         if existing_city is not None:
             case = self._active_case(existing_city)
             case_title = "None introduced yet" if case is None else self._display_case_title(case.title)
             return (
                 f"Existing game loaded: {existing_city.id}\n"
                 f"Districts: {', '.join(existing_city.district_ids)}\n"
+                f"Startup mode: {startup_mode}\n"
                 f"Active case: {case_title}"
             )
-
-        startup_mode = self._resolved_startup_mode()
 
         model_check_summary: str | None = None
         if startup_mode == "generated_runtime":
@@ -191,6 +191,7 @@ class LanternCityApp:
         return (
             f"Lantern City ready: seeded {result.city_id}\n"
             f"Districts: {', '.join(result.district_ids)}\n"
+            f"Startup mode: {startup_mode}\n"
             f"Active case: {case_title}\n"
             f"{'' if model_check_summary is None else model_check_summary + chr(10)}"
             f"Next: enter {first_district}"
