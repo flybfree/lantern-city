@@ -84,6 +84,11 @@ self-commentary. Begin immediately with the narrative sentence.
 - If a successful game event contains direct dialogue text before tags like "[Clue:" or "What you learned:",
   the NPC did respond. Do not narrate silence, refusal, or failed conversation in that case.
 - Never describe a turn as failure, refusal, silence, or resistance when all executed commands succeeded.
+- If the player is asking what matters, what to do next, what leads matter, or says they are stuck or unsure,
+  treat the turn as a recovery or orientation request. Use the recovery guidance in the prompt to steer them toward
+  the strongest available next step, and name concrete people, places, or investigation surfaces when the prompt provides them.
+- When recovery guidance mentions matters, board, leads, compare, or journal, you may refer to those surfaces naturally
+  in prose, but keep the response as in-world narration rather than a bullet list or tutorial.
 - If the game events include a "[New lead]" tag, make clear that the player has found something significant.
   The meaning can remain uncertain, but the importance must be legible right now rather than implied.
 - If the game events include a "[Case opened: …]" tag, this is a pivotal moment. \
@@ -428,6 +433,7 @@ class GameMaster:
         failure_count = sum(
             1 for result in results if "[command failed:" in result or "[action not possible:" in result
         )
+        recovery_intent = _is_recovery_request(player_input)
         direct_dialogue = any(
             "[command ok:" in result
             and "talk " in result
@@ -446,6 +452,8 @@ class GameMaster:
             summary_lines.append(
                 "The player uncovered a significant lead whose full meaning is not yet established."
             )
+        if recovery_intent:
+            summary_lines.append("The player is asking for orientation about what matters or what to do next.")
         if commands and results:
             pairs = "\n".join(
                 f"  > {cmd}\n  {res}\n" for cmd, res in zip(commands, results)
@@ -456,12 +464,25 @@ class GameMaster:
                 + f"\n\nGame events this turn:\n{pairs}"
             )
         else:
-            events_block = "\n(No game actions executed — answer from context and history.)"
+            events_block = (
+                "\nResolution summary:\n"
+                + "\n".join(f"  - {line}" for line in summary_lines)
+                + "\n\n(No game actions executed — answer from context and history.)"
+            )
+
+        recovery_block = ""
+        if recovery_intent:
+            recovery_lines = self._recovery_guidance_lines()
+            if recovery_lines:
+                recovery_block = "\nRecovery guidance:\n" + "\n".join(
+                    f"  - {line}" for line in recovery_lines
+                )
 
         user_content = (
             f"{self._history_block()}"
             f"Current game state:\n{context}\n"
-            f"{events_block}\n\n"
+            f"{events_block}"
+            f"{recovery_block}\n\n"
             f'Player said: "{player_input}"\n\n'
             "Write a brief atmospheric narrative response (2–5 sentences)."
         )
@@ -495,6 +516,74 @@ class GameMaster:
         if results:
             return "\n\n".join(results)
         return "(The city offers no response.)"
+
+    def _recovery_guidance_lines(self) -> list[str]:
+        try:
+            pos = self.app._load_position()
+            city = self.app._city()
+        except Exception:
+            return []
+
+        if city is None:
+            return ["No active game exists yet; the player needs to start before any lead can be followed."]
+
+        if pos is None or pos.district_id is None:
+            return ["The player has not entered a district yet; entering one of the listed districts is the next step."]
+
+        known_case_ids: set[str] = set(pos.known_case_ids)
+        active_cases = [
+            case
+            for cid in city.active_case_ids
+            if cid in known_case_ids
+            if isinstance(case := self.app.store.load_object("CaseState", cid), CaseState) and case.status != "latent"
+        ]
+
+        clue_count = len(pos.clue_ids)
+        credible_count = 0
+        for clue_id in pos.clue_ids:
+            clue = self.app.store.load_object("ClueState", clue_id)
+            if getattr(clue, "reliability", None) in {"credible", "solid"}:
+                credible_count += 1
+
+        lines: list[str] = []
+        if active_cases:
+            case = active_cases[0]
+            lines.append(
+                f"The main active case is {case.title} ({case.id}) with {case.pressure_level} pressure."
+            )
+        else:
+            lines.append("No case has been formally introduced to the player yet.")
+
+        if pos.location_id is not None:
+            lines.append(
+                f"The current location can be re-checked with matters or inspected directly: {pos.location_id}."
+            )
+        if pos.npc_ids:
+            lines.append(f"The nearest immediate contact is {pos.npc_ids[0]}; talking to them is available now.")
+
+        if clue_count == 0:
+            lines.append(
+                "No clues are acquired yet; the strongest recovery move is to inspect the current scene or talk to a nearby contact."
+            )
+            if active_cases:
+                lines.append(f"The case board is available as board {active_cases[0].id}.")
+            lines.append("Leads can still be used to surface the strongest thread.")
+            return lines[:5]
+
+        if credible_count == 0:
+            lines.append(
+                "The player has clues, but none are yet credible; clarification and comparison matter more than resolution."
+            )
+            if active_cases:
+                lines.append(f"Use board {active_cases[0].id} to review open questions and pressure.")
+            lines.append("Compare is appropriate if two clues seem related or inconsistent.")
+            return lines[:5]
+
+        lines.append(f"The player has {credible_count} credible clue(s), so leads can rank the strongest unresolved thread.")
+        if active_cases:
+            lines.append(f"Use board {active_cases[0].id} to review pressure before attempting case {active_cases[0].id}.")
+        lines.append("Compare remains useful if two clues still feel related or unstable.")
+        return lines[:5]
 
     # ------------------------------------------------------------------
     # History helpers
@@ -584,6 +673,31 @@ def _rejoin_split_commands(commands: list[str]) -> list[str]:
         result.append(token)
         i += 1
     return result
+
+
+def _is_recovery_request(player_input: str) -> bool:
+    text = _normalize_match_text(player_input)
+    if not text:
+        return False
+    recovery_phrases = (
+        "what should i do next",
+        "what do i do next",
+        "what now",
+        "where should i go next",
+        "what matters here",
+        "what matters",
+        "what lead matters",
+        "strongest lead",
+        "i am stuck",
+        "im stuck",
+        "i m stuck",
+        "stuck",
+        "not sure what to do",
+        "unsure what to do",
+        "lost the thread",
+        "help me recover",
+    )
+    return any(phrase in text for phrase in recovery_phrases)
 
 
 _THINK_TAG_RE = re.compile(r"<think>.*?</think>", re.DOTALL | re.IGNORECASE)
