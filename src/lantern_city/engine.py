@@ -201,7 +201,7 @@ def _handle_npc_conversation(
     response = compose_response(
         narrative_text=narrative_text,
         state_changes=state_changes,
-        learned=[] if clue is None else [clue.clue_text],
+        learned=_learned_clues(active_slice, clue),
         visible_npcs=[npc.name] if npc.name else [],
         notable_objects=_conversation_notable_objects(active_slice, npc),
         exits=_conversation_exits(active_slice),
@@ -249,7 +249,7 @@ def _build_inspection_response(
     else:
         clue = _first_clue(active_slice.clues)
         narrative_text = f"You inspect {location_name} for anything that stands out."
-        learned = [] if clue is None else [clue.clue_text]
+        learned = _learned_clues(active_slice, clue)
         next_actions = ["Inspect a narrower detail", "Review known clues"]
 
     return compose_response(
@@ -516,11 +516,34 @@ def _case_relevance(active_slice: ActiveSlice, clue: ClueState | None = None) ->
         relevance.append(f"Active case: {active_slice.case.title} [{active_slice.case.status}]")
         if active_slice.case.open_questions:
             relevance.append(active_slice.case.open_questions[0])
+    relevance.extend(_pre_case_clue_signals(active_slice, clue))
     if clue is not None:
         relevance.append(f"Clue reliability: {clue.reliability}")
     if active_slice.district is not None:
         relevance.append(f"Lantern condition: {active_slice.district.lantern_condition}")
     return relevance[:4]
+
+
+def _learned_clues(active_slice: ActiveSlice, clue: ClueState | None) -> list[str]:
+    if clue is None:
+        return []
+    if _is_pre_case_significant_clue(active_slice, clue):
+        return [f"Notable clue: {clue.clue_text}"]
+    return [clue.clue_text]
+
+
+def _pre_case_clue_signals(active_slice: ActiveSlice, clue: ClueState | None) -> list[str]:
+    if not _is_pre_case_significant_clue(active_slice, clue):
+        return []
+    return [
+        "New lead: This clue feels significant, even though you do not yet know what case it belongs to."
+    ]
+
+
+def _is_pre_case_significant_clue(active_slice: ActiveSlice, clue: ClueState | None) -> bool:
+    if clue is None or active_slice.case is not None:
+        return False
+    return bool(clue.related_case_ids)
 
 
 def _require_district(active_slice: ActiveSlice) -> DistrictState:

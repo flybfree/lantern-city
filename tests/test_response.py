@@ -8,6 +8,10 @@ def test_compose_response_includes_required_fields_and_compact_text() -> None:
         narrative_text="You step into the Old Quarter beneath a dim lantern line.",
         state_changes=["Presence increased in Old Quarter."],
         learned=["The district lanterns are running dim."],
+        visible_npcs=["Ila Venn"],
+        notable_objects=["Shrine Lane"],
+        exits=["Archive Steps"],
+        case_relevance=["Active case: The Missing Clerk [active]"],
         now_available=["Travel to Shrine Lane", "Speak to Ila Venn"],
         next_actions=["Inspect the shrine bracket", "Review the missing clerk case"],
     )
@@ -16,12 +20,20 @@ def test_compose_response_includes_required_fields_and_compact_text() -> None:
     assert response.narrative_text == "You step into the Old Quarter beneath a dim lantern line."
     assert response.state_changes == ["Presence increased in Old Quarter."]
     assert response.learned == ["The district lanterns are running dim."]
+    assert response.visible_npcs == ["Ila Venn"]
+    assert response.notable_objects == ["Shrine Lane"]
+    assert response.exits == ["Archive Steps"]
+    assert response.case_relevance == ["Active case: The Missing Clerk [active]"]
     assert response.now_available == ["Travel to Shrine Lane", "Speak to Ila Venn"]
     assert response.next_actions == ["Inspect the shrine bracket", "Review the missing clerk case"]
     assert response.text == (
         "What happened: You step into the Old Quarter beneath a dim lantern line.\n"
         "What changed: Presence increased in Old Quarter.\n"
         "What you learned: The district lanterns are running dim.\n"
+        "Who matters here: Ila Venn\n"
+        "What stands out: Shrine Lane\n"
+        "Exits and routes: Archive Steps\n"
+        "Case relevance: Active case: The Missing Clerk [active]\n"
         "Now available: Travel to Shrine Lane; Speak to Ila Venn\n"
         "Next actions: Inspect the shrine bracket; Review the missing clerk case"
     )
@@ -40,6 +52,10 @@ def test_compose_response_uses_none_for_empty_sections() -> None:
         "What happened: Nothing new happens.\n"
         "What changed: None\n"
         "What you learned: None\n"
+        "Who matters here: None\n"
+        "What stands out: None\n"
+        "Exits and routes: None\n"
+        "Case relevance: None\n"
         "Now available: None\n"
         "Next actions: None"
     )
@@ -50,5 +66,9 @@ def test_compose_response_defaults_to_empty_lists() -> None:
 
     assert response.state_changes == []
     assert response.learned == []
+    assert response.visible_npcs == []
+    assert response.notable_objects == []
+    assert response.exits == []
+    assert response.case_relevance == []
     assert response.now_available == []
     assert response.next_actions == []

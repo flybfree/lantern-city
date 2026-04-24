@@ -373,6 +373,75 @@ def test_handle_player_request_returns_case_progression_response_without_state_c
     assert case.version == 1
 
 
+def test_handle_player_request_flags_pre_case_clue_as_significant_during_conversation(
+    populated_store: SQLiteStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from lantern_city import engine
+
+    request = make_request(
+        intent="conversation",
+        target_id=NPC_ID,
+        input_text="Ask what seems wrong here.",
+    )
+    pre_case_slice = replace(_district_entry_slice(request), case=None)
+
+    monkeypatch.setattr(
+        engine,
+        "orchestrate_request",
+        lambda store, *, city_id, request: OrchestratedRequest(
+            request=request,
+            intent="talk_to_npc",
+            active_slice=pre_case_slice,
+        ),
+    )
+
+    outcome = engine.handle_player_request(populated_store, city_id=CITY_ID, request=request)
+
+    assert outcome.response.learned == ["Notable clue: Fresh scoring marks suggest recent tampering."]
+    assert outcome.response.case_relevance == [
+        "New lead: This clue feels significant, even though you do not yet know what case it belongs to.",
+        "Clue reliability: unknown",
+        "Lantern condition: dim",
+    ]
+
+
+def test_handle_player_request_flags_pre_case_clue_as_significant_during_inspection(
+    populated_store: SQLiteStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from lantern_city import engine
+
+    request = make_request(intent="inspect location", target_id=LOCATION_ID)
+    pre_case_slice = replace(_district_entry_slice(request), case=None, location=LocationState(
+        id=LOCATION_ID,
+        created_at=TURN_ZERO,
+        updated_at=TURN_ZERO,
+        district_id=DISTRICT_ID,
+        name="Shrine Lane",
+        location_type="shrine",
+        known_npc_ids=[NPC_ID],
+        clue_ids=[CLUE_ID],
+    ))
+
+    monkeypatch.setattr(
+        engine,
+        "orchestrate_request",
+        lambda store, *, city_id, request: OrchestratedRequest(
+            request=request,
+            intent="inspect_location",
+            active_slice=pre_case_slice,
+        ),
+    )
+
+    outcome = engine.handle_player_request(populated_store, city_id=CITY_ID, request=request)
+
+    assert outcome.response.learned == ["Notable clue: Fresh scoring marks suggest recent tampering."]
+    assert outcome.response.case_relevance == [
+        "New lead: This clue feels significant, even though you do not yet know what case it belongs to.",
+        "Clue reliability: unknown",
+        "Lantern condition: dim",
+    ]
+
+
 def test_handle_player_request_returns_generic_action_response_without_state_changes(
     populated_store: SQLiteStore,
 ) -> None:

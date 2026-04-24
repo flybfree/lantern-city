@@ -91,6 +91,23 @@ When an NPC signals conversation closure, the same exit phrase repeats word-for-
 
 ---
 
+### Clue signaling needs a deeper UX/readability pass
+Pre-case clue signaling is now functionally in place: the engine, app output, and GM narration all mark certain clues as significant before the related case is formally understood. That fixes the immediate contextless-clue problem, but the broader investigation readability layer is still shallow.
+
+**Current limitation:** The system mostly uses a generic "this matters" signal. It does not yet distinguish clearly between:
+- a clue that is merely interesting
+- a clue that likely belongs to a hidden case
+- a clue that changes the current theory
+- a clue that raises urgency or danger
+
+Related review surfaces like `clues`, `board`, `leads`, `journal`, and the TUI side panels also need a stronger pass so the player can track not just that a clue matters, but why it matters and what it suggests doing next.
+
+**Impact:** The player is less likely to miss important evidence than before, but the game still does not fully support the intended investigation readability. This is now a game-improvement task rather than a blocking bug.
+
+**Fix direction:** Revisit clue signaling as part of interaction-model strengthening. Add richer clue categories/signals, clearer follow-up guidance, and stronger review/board/TUI presentation for newly surfaced leads and clue reinterpretation.
+
+---
+
 ### ~~Location inspection has no narrative or object-level interaction~~ ✅ Fixed
 `LocationInspectionGenerator` wired in for both whole-scene and object-level inspection. Each `LocationState` now has `scene_objects: list[str]`. Whole-scene inspect shows the object list; `inspect <location_id> <object>` focuses the generation on that object with a narrowed prompt and stays on the physical detail. CLI: `inspect location_ledger_room "maintenance log shelf"`.
 

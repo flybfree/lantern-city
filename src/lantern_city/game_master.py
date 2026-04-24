@@ -84,6 +84,8 @@ self-commentary. Begin immediately with the narrative sentence.
 - If a successful game event contains direct dialogue text before tags like "[Clue:" or "What you learned:",
   the NPC did respond. Do not narrate silence, refusal, or failed conversation in that case.
 - Never describe a turn as failure, refusal, silence, or resistance when all executed commands succeeded.
+- If the game events include a "[New lead]" tag, make clear that the player has found something significant.
+  The meaning can remain uncertain, but the importance must be legible right now rather than implied.
 - If the game events include a "[Case opened: …]" tag, this is a pivotal moment. \
 You MUST make clear in the narrative that the player has just become aware of a new \
 investigation — name the case or its subject explicitly so the player understands \
@@ -423,13 +425,16 @@ class GameMaster:
         context: str,
     ) -> str:
         success_count = sum(1 for result in results if "[command ok:" in result)
-        failure_count = sum(1 for result in results if "[command failed:" in result or "[action not possible:" in result)
+        failure_count = sum(
+            1 for result in results if "[command failed:" in result or "[action not possible:" in result
+        )
         direct_dialogue = any(
             "[command ok:" in result
             and "talk " in result
-            and "[Clue:" in result or "What you learned:" in result
+            and ("[Clue:" in result or "What you learned:" in result)
             for result in results
         )
+        new_lead = any("[New lead]" in result for result in results)
         summary_lines = [
             f"Executed commands: {len(commands)}",
             f"Successful commands: {success_count}",
@@ -437,6 +442,10 @@ class GameMaster:
         ]
         if direct_dialogue:
             summary_lines.append("A successful conversation happened and produced concrete information.")
+        if new_lead:
+            summary_lines.append(
+                "The player uncovered a significant lead whose full meaning is not yet established."
+            )
         if commands and results:
             pairs = "\n".join(
                 f"  > {cmd}\n  {res}\n" for cmd, res in zip(commands, results)

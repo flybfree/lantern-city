@@ -298,6 +298,8 @@ class LanternCityApp:
         lines = [outcome.response.narrative_text]
         if clue is not None:
             lines.append(f'[Clue: {_clue_label(clue.id)} — {clue.reliability}]')
+        if _has_pre_case_signal(outcome.response.case_relevance):
+            lines.append("[New lead]")
         if pending_case is not None:
             lines.append(f'[Case opened: {pending_case.title}]')
         lines.extend(propagation_notices)
@@ -351,19 +353,9 @@ class LanternCityApp:
         )
         all_clues = outcome.active_slice.clues
 
-        # Only surface clues whose cases are active — never reveal latent-case clues.
-        # NPC clues are only revealed through talk_to_npc.
-        active_case_ids: set[str] = {
-            cid for cid in city.active_case_ids
-            if _is_case_active(self.store, cid)
-        }
         discoverable = [
             clue for clue in all_clues
             if not clue.related_npc_ids
-            and (
-                not clue.related_case_ids
-                or any(cid in active_case_ids for cid in clue.related_case_ids)
-            )
         ]
 
         inspected_location_id = location_id
@@ -407,6 +399,8 @@ class LanternCityApp:
                 f"{_clue_label(c.id)}: {c.reliability}" for c in updated_clues
             )
             lines.append(f"[Clue found: {clue_status}]")
+        if _has_pre_case_signal(outcome.response.case_relevance):
+            lines.append("[New lead]")
         lines.append(f"[Lantern: {district.lantern_condition}]")
         lines.extend(propagation_notices)
         self._append_scene_affordances(
@@ -2548,6 +2542,12 @@ class LanternCityApp:
 def _is_case_active(store: SQLiteStore, case_id: str) -> bool:
     c = store.load_object("CaseState", case_id)
     return isinstance(c, CaseState) and c.status == "active"
+
+
+def _has_pre_case_signal(case_relevance: list[str] | None) -> bool:
+    if not case_relevance:
+        return False
+    return any(item.startswith("New lead:") for item in case_relevance)
 
 
 def _clue_label(clue_id: str) -> str:
