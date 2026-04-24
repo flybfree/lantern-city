@@ -310,6 +310,8 @@ Turn a player request into state updates and a response.
 **Context to provide:**
 - The engine should load relevant state, generate narrow output if needed, apply rules, persist changes, and return a response.
 - Response should include narrative text, state changes, and next actions.
+- If the player encounters a clue before the related case is active, the response must frame it as noteworthy so the player knows it matters even if its meaning is still unclear.
+- The player should not need to guess whether a scene produced something meaningful; responses should surface that legibly after the fact.
 
 **Implementation guidance:**
 - Keep request handling narrow and deterministic where possible.
@@ -339,6 +341,7 @@ Add narrow generation for districts and NPC dialogue.
 **Context to provide:**
 - District generation should create a district summary, nearby locations, rumor pool, and relevant NPC anchors.
 - NPC generation should produce dialogue plus structured updates like clue changes and relationship deltas.
+- If NPC dialogue surfaces a clue tied to a case the player has not formally discovered yet, the GM-style presentation should mark it as unusual, relevant, or worth remembering without prematurely explaining the case.
 
 **Implementation guidance:**
 - Keep generation tightly scoped to the current context packet.
@@ -380,6 +383,7 @@ Implement the core rule systems that make Lantern City react.
   - City Impact
   - Clue Mastery
 - Cases should support active, stalled, escalated, solved, partially solved, and failed.
+- Pre-case clue discovery must be supported. A clue can exist before its case is active, but the system should attach enough presentation metadata or signaling rules for the response layer to introduce it as significant even when its meaning is not yet known.
 
 **Implementation guidance:**
 - Keep rules explicit and understandable.
