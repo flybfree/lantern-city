@@ -49,6 +49,16 @@ to:
 - lantern and Missingness conditions drive actual play consequences
 - case outcomes leave visible, persistent civic fallout
 
+This roadmap should now be read alongside:
+- `briefs/world-turn-and-social-simulation-brief.md`
+
+That brief turns the next major depth target into a concrete execution direction:
+- durable NPC social memory
+- faction and NPC offscreen action
+- discrete world turns
+- idle-delay catch-up
+- time-sensitive case progression
+
 ## Boundary With The MVP Loop
 
 The repo still carries an authored MVP vertical slice that serves as:
@@ -68,16 +78,99 @@ In practical terms:
 
 Implement in this order:
 
-1. NPC agency and relationship persistence
-2. case pressure and offscreen evolution
-3. seed-driven city variation hardening
-4. interaction-model strengthening and clue synthesis
-5. lantern and Missingness rule deepening
-6. authored content expansion on top of stronger systems
+1. world turn engine and idle-delay simulation
+2. NPC agency and relationship persistence
+3. case pressure and offscreen evolution
+4. seed-driven city variation hardening
+5. interaction-model strengthening and clue synthesis
+6. lantern and Missingness rule deepening
+7. authored content expansion on top of stronger systems
 
 This order matters.
 More authored content on top of shallow simulation will still feel shallow.
 Stronger simulation immediately improves both authored and generated play.
+
+The key refinement here is that relationship persistence and case escalation should now be built on top of an explicit world-turn spine rather than remaining as loosely connected per-command updates.
+
+## Phase 0 — World Turn Engine and Idle-Delay Simulation
+
+## Goal
+
+Create a deterministic world-turn system that advances on meaningful player actions and catches up when the player waits too long between turns.
+
+## Current state
+
+The code already contains:
+- `CityState.time_index`
+- app-owned case pressure updates
+- app-owned offscreen NPC updates
+- NPC memory logs and relationship snapshots
+
+What is missing is a unified turn engine that ties these together and makes delay matter explicitly.
+
+## Required outcomes
+
+The runtime should:
+- advance one world turn on each meaningful player action
+- convert long real-time delay into bounded missed-turn catch-up
+- surface player-facing notices about what changed
+- support deeper generated-runtime behavior without forcing full simulation onto the MVP baseline path
+
+## Target modules
+
+- `src/lantern_city/models.py`
+- `src/lantern_city/app.py`
+- `src/lantern_city/engine.py`
+- `src/lantern_city/tui.py`
+- new modules such as:
+  - `src/lantern_city/simulation.py`
+  - `src/lantern_city/social.py`
+  - `src/lantern_city/factions.py`
+
+## Concrete work
+
+### 1. Define meaningful-action turn advancement
+
+Advance time for:
+- district movement
+- location entry
+- inspection
+- NPC conversation
+- case actions
+
+Do not advance time for pure help/status surfaces unless intentionally chosen later.
+
+### 2. Add idle-delay catch-up
+
+Persist the last meaningful-action timestamp.
+On the next meaningful action:
+- compute idle delay
+- translate that into missed turns
+- cap the number of applied catch-up turns
+
+### 3. Centralize world advancement
+
+Replace ad hoc per-command offscreen updates with a stable turn pipeline that can:
+- increment city time
+- tick faction plans
+- tick focused/warm/cold NPCs
+- advance cases
+- update clue risk windows
+- emit player-facing notices
+
+### 4. Surface time clearly
+
+The TUI and command outputs should make it clear:
+- that time passed
+- how much passed
+- what changed because of it
+
+## Exit criteria
+
+- delay matters in generated runtime
+- the player can read the consequences of time passing
+- the system remains deterministic enough for behavior testing
+- the MVP baseline can still preserve its lighter onboarding behavior intentionally
 
 ## Phase 1 — NPC Agency and Relationship Persistence
 

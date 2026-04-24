@@ -510,3 +510,42 @@ The Lantern City MVP backend is ready when:
 - cases and clues persist
 - progression advances
 - the city can be restarted into a fresh, distinct run
+
+---
+
+## Post-MVP Depth Slice
+
+After the current MVP/runtime work is stable, the next implementation phase should follow:
+
+- `briefs/world-turn-and-social-simulation-brief.md`
+
+That phase is the next meaningful systems step for the repo.
+It should not be treated as miscellaneous polish.
+
+### Next recommended coding order
+
+1. add a world-turn engine
+2. add idle-delay catch-up based on last meaningful action time
+3. expand NPC social persistence and relationship state
+4. add faction operation/pressure rules
+5. tie case evolution to elapsed turns and actor pressure
+6. surface time passage and offscreen changes in responses and TUI
+
+### First implementation target
+
+Start with:
+
+- `src/lantern_city/simulation.py`
+- `src/lantern_city/app.py`
+- `tests/test_simulation.py`
+
+The first deliverable should be a deterministic turn pipeline that:
+
+- advances on meaningful player actions
+- can apply bounded missed turns after delay
+- emits readable summaries of offscreen change
+
+### Runtime boundary
+
+This depth slice should primarily strengthen `generated_runtime` / evolved-runtime behavior.
+If the authored `mvp_baseline` path needs lighter behavior, keep that reduced behavior explicit rather than implicitly applying full simulation rules everywhere.

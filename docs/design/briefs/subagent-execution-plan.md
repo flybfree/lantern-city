@@ -514,3 +514,41 @@ Fresh subagent per task.
 Spec review first.
 Quality review second.
 No skipping.
+
+---
+
+## Post-MVP Next Execution Slice
+
+Once the current MVP/runtime cleanup is stable, the next systemic implementation slice should follow:
+
+- `briefs/world-turn-and-social-simulation-brief.md`
+
+That slice should be treated as the next major evolved-runtime phase, not as incidental polish.
+
+### Recommended order for that phase
+
+1. world turn engine and idle-delay catch-up
+2. social-state expansion for NPC memory and relationships
+3. faction pressure and operation rules
+4. case evolution tied to actor pressure and elapsed turns
+5. TUI/response surfacing for time passage and offscreen changes
+
+### First coding target
+
+The safest first implementation target is:
+
+- `src/lantern_city/simulation.py`
+- `src/lantern_city/app.py`
+- `tests/test_simulation.py`
+
+Goal:
+
+- define one deterministic world-turn advancement pipeline
+- advance one turn per meaningful player action
+- support bounded catch-up turns after player delay
+- surface readable notices about what changed
+
+### Boundary rule
+
+This phase belongs primarily to the `evolved_runtime`.
+If shared logic touches `mvp_baseline`, keep any reduced or bypassed baseline behavior explicit rather than letting the deeper simulation become the accidental default for the authored onboarding path.
