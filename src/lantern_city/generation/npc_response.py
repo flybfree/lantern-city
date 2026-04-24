@@ -13,7 +13,7 @@ from lantern_city.generation.writing_guardrails import (
     NPC_DIALOGUE_RULES,
     TONE_SYSTEM_BLOCK,
 )
-from lantern_city.models import LanternCityModel, PlayerProgressState, PlayerRequest
+from lantern_city.models import FactionState, LanternCityModel, PlayerProgressState, PlayerRequest
 from lantern_city.progression import can_pressure_npc, can_use_informal_access
 
 
@@ -241,6 +241,7 @@ class NPCResponseGenerationRequest:
     npc_id: str | None = None
     progress: PlayerProgressState | None = None
     case_intro_text: str | None = None
+    loyalty_faction: FactionState | None = None
 
     def __post_init__(self) -> None:
         if not self.request_id.strip():
@@ -339,7 +340,27 @@ class NPCResponseGenerationRequest:
                 "loyalty_relationship": (
                     None if not npc.loyalty else _relationship_snapshot_payload(npc, npc.loyalty)
                 ),
+                "loyalty_faction": (
+                    None
+                    if self.loyalty_faction is None
+                    else {
+                        "id": self.loyalty_faction.id,
+                        "name": self.loyalty_faction.name,
+                        "style": _faction_style_label(self.loyalty_faction),
+                        "tactic": _faction_tactic_label(self.loyalty_faction),
+                        "attitude_toward_player": self.loyalty_faction.attitude_toward_player,
+                        "active_plan": (
+                            self.loyalty_faction.active_plans[0]
+                            if self.loyalty_faction.active_plans
+                            else "holding position"
+                        ),
+                    }
+                ),
                 "emotional_register": _emotional_register(npc),
+                "institutional_pressure": _institutional_pressure_register(
+                    npc,
+                    loyalty_faction=self.loyalty_faction,
+                ),
             },
             "scene": scene_payload,
             "district": district_payload,
@@ -388,6 +409,60 @@ def _emotional_register(npc: Any) -> str:
         parts.append("somewhat suspicious — watches for inconsistency in what the player says")
 
     return "; ".join(parts) if parts else "neutral"
+
+
+def _institutional_pressure_register(
+    npc: Any,
+    *,
+    loyalty_faction: FactionState | None,
+) -> str:
+    if loyalty_faction is None:
+        return "no explicit institutional pressure profile is available"
+    style = _faction_style_label(loyalty_faction)
+    tactic = _faction_tactic_label(loyalty_faction)
+    if style == "records control":
+        return (
+            f"under {loyalty_faction.name}'s records-control pressure — "
+            f"protect names, routes, certifications, and written traces; "
+            f"default tactic: {tactic}"
+        )
+    if style == "civic enforcement":
+        return (
+            f"under {loyalty_faction.name}'s civic pressure — "
+            f"speak in procedural, official, or compliance-heavy language; "
+            f"default tactic: {tactic}"
+        )
+    return f"under {loyalty_faction.name}'s institutional pressure; default tactic: {tactic}"
+
+
+def _faction_style_label(faction: FactionState) -> str:
+    text = " ".join(
+        [
+            faction.name,
+            faction.public_goal,
+            faction.hidden_goal,
+            *faction.known_assets,
+            *faction.active_plans,
+        ]
+    ).lower()
+    if any(token in text for token in ("records", "memory", "archive", "certification", "continuity")):
+        return "records control"
+    if any(token in text for token in ("order", "compliance", "permit", "civic", "lantern", "public confidence")):
+        return "civic enforcement"
+    return "general pressure"
+
+
+def _faction_tactic_label(faction: FactionState) -> str:
+    plan = faction.active_plans[0].lower() if faction.active_plans else ""
+    if any(token in plan for token in ("cover", "record", "certification", "delay", "correction")):
+        return "burying or correcting records"
+    if any(token in plan for token in ("review", "reassurance", "order", "permit", "scrutiny")):
+        return "tightening official scrutiny"
+    if any(token in plan for token in ("isolation", "witness")):
+        return "isolating witnesses"
+    if any(token in plan for token in ("fallout", "manage")):
+        return "managing fallout"
+    return "holding pressure"
 
 
 def _relationship_snapshot_payload(npc: Any, actor_id: str) -> dict[str, object] | None:
@@ -538,6 +613,9 @@ class NPCResponseGenerator:
             "Rules:\n"
             "- stay within the NPC's known goals, fears, and knowledge\n"
             "- use npc.emotional_register to shape HOW the NPC speaks, not just what they reveal — it governs tone, deflection, and phrasing\n"
+            "- if npc.loyalty_faction or npc.institutional_pressure is present, let it shape the voice of the reply:\n"
+            "  records control pressure should sound careful, archival, and omission-heavy;\n"
+            "  civic enforcement pressure should sound official, procedural, and compliance-minded\n"
             "- respect npc.offscreen_state, recent_events, and player_flags — they describe what changed since the last meeting and how the NPC currently approaches the player\n"
             "- generate exactly one reply turn plus structured effects\n"
             "- if the NPC refuses, the refusal should still be informative or redirective\n"

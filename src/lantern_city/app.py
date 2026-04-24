@@ -14,7 +14,12 @@ from lantern_city.case_bootstrap import bootstrap_generated_case
 from lantern_city.cases import advance_case_pressure, case_pressure_summary, note_case_progress, transition_case
 from lantern_city.clues import clarify_clue
 from lantern_city.engine import handle_player_request
-from lantern_city.factions import FactionOperation, run_faction_turn
+from lantern_city.factions import (
+    FactionOperation,
+    faction_style_label,
+    faction_tactic_label,
+    run_faction_turn,
+)
 from lantern_city.generation.case_generation import (
     CaseGenerationRequest,
     CaseGenerationError,
@@ -710,6 +715,11 @@ class LanternCityApp:
             and case.status != "latent"
             and (focus_district_id is None or focus_district_id in case.involved_district_ids)
         ]
+        focus_district = (
+            self.store.load_object("DistrictState", focus_district_id)
+            if focus_district_id is not None
+            else None
+        )
         updated_factions: list[FactionState] = []
         notices: list[str] = []
         for faction in factions:
@@ -719,6 +729,11 @@ class LanternCityApp:
                 related_cases=[case for case in related_cases if faction.id in case.involved_faction_ids],
                 updated_at=updated_at,
                 focus_district_id=focus_district_id,
+                district_access_level=(
+                    focus_district.current_access_level
+                    if isinstance(focus_district, DistrictState)
+                    else None
+                ),
             )
             if result.faction != faction:
                 updated_factions.append(result.faction.model_copy(update={"version": faction.version + 1}))
@@ -753,9 +768,33 @@ class LanternCityApp:
                         updated_at=updated_at,
                     )
                 )
+            elif operation.kind == "district_surveillance" and operation.district_id:
+                notices.extend(
+                    self._apply_faction_district_surveillance(
+                        faction=faction,
+                        district_id=operation.district_id,
+                        updated_at=updated_at,
+                    )
+                )
             elif operation.kind == "case_interference" and operation.case_id:
                 notices.extend(
                     self._apply_faction_case_interference(
+                        faction=faction,
+                        case_id=operation.case_id,
+                        updated_at=updated_at,
+                    )
+                )
+            elif operation.kind == "case_coverup" and operation.case_id:
+                notices.extend(
+                    self._apply_faction_case_coverup(
+                        faction=faction,
+                        case_id=operation.case_id,
+                        updated_at=updated_at,
+                    )
+                )
+            elif operation.kind == "case_isolation" and operation.case_id:
+                notices.extend(
+                    self._apply_faction_case_isolation(
                         faction=faction,
                         case_id=operation.case_id,
                         updated_at=updated_at,
@@ -812,6 +851,38 @@ class LanternCityApp:
             notices.append(f"{district.name} is now carrying active faction pressure from {faction.name}.")
         return notices
 
+    def _apply_faction_district_surveillance(
+        self,
+        *,
+        faction: FactionState,
+        district_id: str,
+        updated_at: str,
+    ) -> list[str]:
+        district = self.store.load_object("DistrictState", district_id)
+        if not isinstance(district, DistrictState):
+            return []
+        surveillance_flag = f"faction_surveillance:{faction.id}"
+        active_problems = list(district.active_problems)
+        changed = False
+        if surveillance_flag not in active_problems:
+            active_problems = [*active_problems, surveillance_flag][-6:]
+            changed = True
+        next_access = _surveil_district_access(district.current_access_level)
+        if next_access != district.current_access_level:
+            changed = True
+        if not changed:
+            return []
+        updated = district.model_copy(
+            update={
+                "active_problems": active_problems,
+                "current_access_level": next_access,
+                "updated_at": updated_at,
+                "version": district.version + 1,
+            }
+        )
+        self.store.save_object(updated)
+        return [f"{faction.name} is watching movement through {district.name}."]
+
     def _apply_faction_case_interference(
         self,
         *,
@@ -853,6 +924,66 @@ class LanternCityApp:
         )
         self.store.save_object(updated)
         return [f"{faction.name} is tightening pressure around {case.title}."]
+
+    def _apply_faction_case_coverup(
+        self,
+        *,
+        faction: FactionState,
+        case_id: str,
+        updated_at: str,
+    ) -> list[str]:
+        case = self.store.load_object("CaseState", case_id)
+        if not isinstance(case, CaseState) or _case_runtime_mode(case) != "evolved_runtime":
+            return []
+        risk_flag = f"coverup:{faction.id}"
+        district_effect = f"coverup:{faction.id}"
+        if risk_flag in case.offscreen_risk_flags and district_effect in case.district_effects:
+            return []
+        updated = case.model_copy(
+            update={
+                "offscreen_risk_flags": [*case.offscreen_risk_flags, risk_flag]
+                if risk_flag not in case.offscreen_risk_flags
+                else case.offscreen_risk_flags,
+                "district_effects": [*case.district_effects, district_effect][-6:]
+                if district_effect not in case.district_effects
+                else case.district_effects,
+                "updated_at": updated_at,
+                "version": case.version + 1,
+            }
+        )
+        self.store.save_object(updated)
+        return [f"{faction.name} is covering its tracks around {case.title}."]
+
+    def _apply_faction_case_isolation(
+        self,
+        *,
+        faction: FactionState,
+        case_id: str,
+        updated_at: str,
+    ) -> list[str]:
+        case = self.store.load_object("CaseState", case_id)
+        if not isinstance(case, CaseState) or _case_runtime_mode(case) != "evolved_runtime":
+            return []
+        risk_flag = f"isolation:{faction.id}"
+        district_effect = f"isolation:{faction.id}"
+        next_window = "narrowing"
+        updated = case.model_copy(
+            update={
+                "offscreen_risk_flags": [*case.offscreen_risk_flags, risk_flag]
+                if risk_flag not in case.offscreen_risk_flags
+                else case.offscreen_risk_flags,
+                "district_effects": [*case.district_effects, district_effect][-6:]
+                if district_effect not in case.district_effects
+                else case.district_effects,
+                "active_resolution_window": next_window,
+                "updated_at": updated_at,
+                "version": case.version + 1,
+            }
+        )
+        if updated == case:
+            return []
+        self.store.save_object(updated)
+        return [f"{faction.name} is isolating witnesses around {case.title}."]
 
     def _apply_faction_npc_pressure(
         self,
@@ -1815,7 +1946,8 @@ class LanternCityApp:
             district_label = target_district_id or "the city"
             plan = faction.active_plans[0] if faction.active_plans else "holding position"
             reads.append(
-                f"{faction.name}: {faction.attitude_toward_player} toward you, focused on {district_label}, plan '{plan}'"
+                f"{faction.name}: {faction.attitude_toward_player} toward you, focused on {district_label}, "
+                f"style={faction_style_label(faction)}, tactic={faction_tactic_label(faction)}, plan '{plan}'"
             )
             if len(reads) >= limit:
                 break
@@ -3600,12 +3732,26 @@ def _tighten_district_access(current_access_level: str) -> str:
     return "watched"
 
 
+def _surveil_district_access(current_access_level: str) -> str:
+    if current_access_level in {"controlled", "sealed"}:
+        return current_access_level
+    if current_access_level == "restricted":
+        return "controlled"
+    if current_access_level == "watched":
+        return "restricted"
+    return "watched"
+
+
 def _prioritized_faction_updates(notices: list[str], *, limit: int = 6) -> list[str]:
     def _priority(notice: str) -> tuple[int, int]:
         if "leaning on" in notice or "tightening pressure around" in notice:
             return (0, 0)
+        if "isolating witnesses" in notice or "covering its tracks" in notice:
+            return (0, 1)
         if "constricting access" in notice or "active faction pressure" in notice:
             return (1, 0)
+        if "watching movement through" in notice:
+            return (1, 1)
         if "now " in notice and "toward you" in notice:
             return (2, 0)
         if "moving around" in notice:

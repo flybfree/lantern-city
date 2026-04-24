@@ -18,6 +18,7 @@ from lantern_city.models import (
     CityState,
     ClueState,
     DistrictState,
+    FactionState,
     NPCState,
     PlayerRequest,
     RelationshipSnapshot,
@@ -283,6 +284,32 @@ def test_npc_response_request_payload_includes_social_pressure_snapshots() -> No
     assert payload["npc"]["loyalty_relationship"]["last_changed_turn"] == "turn_3"
 
 
+def test_npc_response_request_payload_includes_loyalty_faction_style_context() -> None:
+    active_slice = make_active_slice()
+    faction = FactionState(
+        id="faction_memory_keepers",
+        created_at="2026-03-28T00:00:00Z",
+        updated_at="2026-03-28T00:00:00Z",
+        name="Memory Keepers",
+        public_goal="preserve continuity",
+        hidden_goal="control what the city remembers",
+        known_assets=["memory stewardship", "records", "certification"],
+        active_plans=["procedural delay"],
+        attitude_toward_player="guarded",
+    )
+
+    payload = NPCResponseGenerationRequest(
+        request_id="req_npc_001",
+        active_slice=active_slice,
+        player_request=make_player_request(),
+        loyalty_faction=faction,
+    ).to_payload()
+
+    assert payload["npc"]["loyalty_faction"]["style"] == "records control"
+    assert payload["npc"]["loyalty_faction"]["tactic"] == "burying or correcting records"
+    assert "records-control pressure" in payload["npc"]["institutional_pressure"]
+
+
 def test_npc_response_generator_builds_bounded_prompt_and_returns_validated_output() -> None:
     client = StubLLMClient(make_valid_payload())
     generator = NPCResponseGenerator(client)
@@ -314,6 +341,7 @@ def test_npc_response_generator_builds_bounded_prompt_and_returns_validated_outp
     assert "exactly one reply turn" in messages[1]["content"].lower()
     assert '"redirect_targets"' in messages[1]["content"]
     assert '"follow_up_suggestions"' in messages[1]["content"]
+    assert "records control pressure should sound careful, archival, and omission-heavy" in messages[1]["content"]
 
 
 def test_npc_response_generator_wraps_llm_errors() -> None:

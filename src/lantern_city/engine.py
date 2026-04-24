@@ -22,7 +22,15 @@ from lantern_city.generation.npc_response import (
     NPCResponseGenerator,
 )
 from lantern_city.llm_client import OpenAICompatibleConfig, OpenAICompatibleLLMClient
-from lantern_city.models import ClueState, DistrictState, NPCState, PlayerProgressState, PlayerRequest, RuntimeModel
+from lantern_city.models import (
+    ClueState,
+    DistrictState,
+    FactionState,
+    NPCState,
+    PlayerProgressState,
+    PlayerRequest,
+    RuntimeModel,
+)
 from lantern_city.orchestrator import orchestrate_request
 from lantern_city.response import ResponsePayload, compose_response
 from lantern_city.social import (
@@ -163,6 +171,7 @@ def _handle_npc_conversation(
     case_title = None if active_slice.case is None else active_slice.case.title
 
     generation_result = _generate_npc_dialogue(
+        state_update_engine.store,
         active_slice,
         request,
         llm_config=llm_config,
@@ -416,6 +425,7 @@ def _build_case_response(active_slice: ActiveSlice) -> ResponsePayload:
 
 
 def _generate_npc_dialogue(
+    store: SQLiteStore,
     active_slice: ActiveSlice,
     request: PlayerRequest,
     *,
@@ -427,6 +437,7 @@ def _generate_npc_dialogue(
         return None
     try:
         llm_client = OpenAICompatibleLLMClient(llm_config)
+        target_npc = active_slice.npcs[0]
         gen_request = NPCResponseGenerationRequest(
             request_id=request.id,
             active_slice=active_slice,
@@ -434,6 +445,7 @@ def _generate_npc_dialogue(
             npc_id=request.target_id,
             progress=progress,
             case_intro_text=case_intro_text,
+            loyalty_faction=_load_loyalty_faction(active_slice, target_npc, store),
         )
         result = NPCResponseGenerator(llm_client).generate(gen_request, max_tokens=2000)
         llm_client.close()
@@ -441,6 +453,23 @@ def _generate_npc_dialogue(
     except (NPCResponseGenerationError, Exception) as exc:
         print(f"[LLM] generation failed: {exc}", file=sys.stderr)
         return None
+
+
+def _load_loyalty_faction(
+    active_slice: ActiveSlice,
+    npc: NPCState,
+    store: SQLiteStore,
+) -> FactionState | None:
+    if not npc.loyalty:
+        return None
+    loyalty = store.load_object("FactionState", npc.loyalty)
+    if isinstance(loyalty, FactionState):
+        return loyalty
+    for faction_id in active_slice.city.faction_ids:
+        candidate = store.load_object("FactionState", faction_id)
+        if isinstance(candidate, FactionState) and candidate.name == npc.loyalty:
+            return candidate
+    return None
 
 
 def _infer_player_flag(

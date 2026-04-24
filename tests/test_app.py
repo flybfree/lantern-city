@@ -439,15 +439,16 @@ def test_faction_turn_operations_pressure_generated_case_and_targeted_npc(tmp_pa
             id="case_gen_pressure_001",
             created_at="turn_0",
             updated_at="turn_0",
-            title="Borrowed Ledger",
+            title="Night Manifest",
             case_type="records tampering",
-            status="active",
-            involved_district_ids=["district_old_quarter"],
-            involved_npc_ids=["npc_shrine_keeper"],
-            involved_faction_ids=["faction_memory_keepers"],
-            npc_pressure_targets=["npc_shrine_keeper"],
-            pressure_level="rising",
+            status="escalated",
+            involved_district_ids=["district_lantern_ward"],
+            involved_npc_ids=["npc_watcher_pell"],
+            involved_faction_ids=["faction_council_lights"],
+            npc_pressure_targets=["npc_watcher_pell"],
+            pressure_level="urgent",
             time_since_last_progress=2,
+            offscreen_risk_flags=["urgent_window"],
             objective_summary="Work out who is rewriting the ledger trail and why.",
         )
     )
@@ -457,29 +458,29 @@ def test_faction_turn_operations_pressure_generated_case_and_targeted_npc(tmp_pa
     )
     app._introduce_case("case_gen_pressure_001")
 
-    output = app.enter_district("district_old_quarter")
+    output = app.enter_district("district_lantern_ward")
     pressured_case = app.store.load_object("CaseState", "case_gen_pressure_001")
-    pressured_npc = app.store.load_object("NPCState", "npc_shrine_keeper")
-    district = app.store.load_object("DistrictState", "district_old_quarter")
+    pressured_npc = app.store.load_object("NPCState", "npc_watcher_pell")
+    district = app.store.load_object("DistrictState", "district_lantern_ward")
 
     assert pressured_case is not None
     assert pressured_npc is not None
     assert district is not None
     assert "Faction pressure:" in output
-    assert "Memory Keepers is tightening pressure around Borrowed Ledger." in output
-    assert "Memory Keepers is leaning on Ila Venn over Borrowed Ledger." in output
-    assert "faction_pressure:faction_memory_keepers" in pressured_case.offscreen_risk_flags
-    assert "interference:faction_memory_keepers" in pressured_case.district_effects
+    assert "Council of Lights is isolating witnesses around Night Manifest." in output
+    assert "Council of Lights is leaning on Watcher Pell over Night Manifest." in output
+    assert "isolation:faction_council_lights" in pressured_case.offscreen_risk_flags
+    assert "isolation:faction_council_lights" in pressured_case.district_effects
     assert pressured_npc.offscreen_state == "obstructing"
     assert pressured_npc.suspicion > 0.0
     assert any(
         isinstance(entry, dict)
         and entry.get("memory_type") == "offscreen_event"
-        and "Borrowed Ledger" in str(entry.get("summary_text", ""))
+        and "Night Manifest" in str(entry.get("summary_text", ""))
         for entry in pressured_npc.memory_log
     )
-    assert "faction_pressure:faction_memory_keepers" in district.active_problems
-    assert district.current_access_level in {"watched", "restricted"}
+    assert "faction_surveillance:faction_council_lights" in district.active_problems
+    assert district.current_access_level in {"controlled", "restricted"}
 
 
 def test_overview_and_status_surface_faction_posture(tmp_path) -> None:
@@ -492,9 +493,12 @@ def test_overview_and_status_surface_faction_posture(tmp_path) -> None:
 
     assert "Faction posture:" in overview_output
     assert "Memory Keepers: guarded toward you, focused on district_old_quarter" in overview_output
+    assert "style=records control" in overview_output
+    assert "tactic=tightening official scrutiny" in overview_output
     assert "Faction posture:" in status_output
     assert "toward you" in status_output
     assert "focused on district_old_quarter" in status_output
+    assert "style=records control" in status_output
 
 
 def test_what_matters_here_includes_exact_next_commands(tmp_path) -> None:

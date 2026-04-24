@@ -41,6 +41,7 @@ from lantern_city.cli import (
     _parse_startup_mode_arg,
     _save_llm_config,
 )
+from lantern_city.factions import faction_style_label, faction_tactic_label
 from lantern_city.game_master import GameMaster
 from lantern_city.llm_client import OpenAICompatibleConfig, OpenAICompatibleLLMClient
 from lantern_city.models import CaseState, CityState, ClueState, LocationState, PlayerProgressState
@@ -1556,7 +1557,8 @@ def _faction_pressure_lines(factions: list) -> list[str]:
     for faction in factions[:3]:
         plan = faction.active_plans[0] if getattr(faction, "active_plans", None) else "holding position"
         lines.append(
-            f"  [dim]- {escape(faction.name)}: {escape(faction.attitude_toward_player)} / {escape(plan)}[/dim]"
+            f"  [dim]- {escape(faction.name)}: {escape(faction.attitude_toward_player)} / "
+            f"{escape(faction_style_label(faction))} / {escape(faction_tactic_label(faction))}[/dim]"
         )
     return lines
 

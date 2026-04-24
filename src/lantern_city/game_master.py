@@ -91,6 +91,9 @@ self-commentary. Begin immediately with the narrative sentence.
   in prose, but keep the response as in-world narration rather than a bullet list or tutorial.
 - If the prompt identifies clues as supporting the current case, contradicting the current picture, or remaining follow-up leads,
   preserve those distinctions in the narration. Do not flatten every clue into the same kind of ominous signal.
+- If faction posture or social pressure indicates records control, civic enforcement, or another institutional style,
+  preserve that distinction in how you describe pressure and speech. Records pressure should feel archival, omission-heavy,
+  and corrective; civic pressure should feel official, procedural, and compliance-minded.
 - When a clue is marked as a contradiction, make it feel like a pressure point in the investigation.
 - When a clue is marked as a follow-up lead, frame it as something worth testing rather than something already proven.
 - If the game events include a "[New lead]" tag, make clear that the player has found something significant.

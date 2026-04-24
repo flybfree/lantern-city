@@ -305,7 +305,8 @@ def test_build_context_includes_faction_posture_summary(tmp_path) -> None:
 
     assert "Faction posture:" in context
     assert (
-        "Memory Keepers: guarded toward you, focused on district_old_quarter, plan 'contain scrutiny in district_old_quarter'"
+        "Memory Keepers: guarded toward you, focused on district_old_quarter, style=records control, "
+        "tactic=tightening official scrutiny, plan 'contain scrutiny in district_old_quarter'"
         in context
     )
 
@@ -325,3 +326,20 @@ def test_narrate_system_prompt_mentions_clue_role_distinctions() -> None:
 
     assert "preserve those distinctions in the narration" in system_prompt
     assert "When a clue is marked as a contradiction" in system_prompt
+
+
+def test_narrate_system_prompt_mentions_faction_style_distinctions() -> None:
+    llm = _RecordingLLM()
+    gm = GameMaster(app=None, llm=llm)  # type: ignore[arg-type]
+
+    gm._narrate(
+        "talk to the clerk",
+        [],
+        [],
+        "Faction posture:\n  Memory Keepers: guarded toward you, style=records control, tactic=burying or correcting records",
+    )
+
+    system_prompt = llm.calls[0]["messages"][0]["content"]
+
+    assert "If faction posture or social pressure indicates records control" in system_prompt
+    assert "civic pressure should feel official, procedural, and compliance-minded" in system_prompt

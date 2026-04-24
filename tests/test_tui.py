@@ -155,16 +155,22 @@ def test_faction_pressure_lines_surface_attitude_and_plan() -> None:
         [
             SimpleNamespace(
                 name="Memory Keepers",
+                public_goal="preserve continuity",
+                hidden_goal="control what the city remembers",
+                known_assets=["memory stewardship", "records", "certification"],
                 attitude_toward_player="guarded",
-                active_plans=["contain scrutiny in district_old_quarter"],
+                active_plans=["contain scrutiny in district_old_quarter", "procedural delay"],
             ),
             SimpleNamespace(
                 name="Council of Lights",
+                public_goal="maintain public order",
+                hidden_goal="monopolize lantern legitimacy",
+                known_assets=["civic lantern administration", "compliance", "access permits"],
                 attitude_toward_player="wary",
-                active_plans=["manage missing clerk fallout"],
+                active_plans=["official review", "manage missing clerk fallout"],
             ),
         ]
     )
 
-    assert any("Memory Keepers: guarded / contain scrutiny in district_old_quarter" in line for line in lines)
-    assert any("Council of Lights: wary / manage missing clerk fallout" in line for line in lines)
+    assert any("Memory Keepers: guarded / records control / tightening official scrutiny" in line for line in lines)
+    assert any("Council of Lights: wary / civic enforcement / tightening official scrutiny" in line for line in lines)
