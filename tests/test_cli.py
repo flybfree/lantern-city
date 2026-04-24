@@ -4,7 +4,9 @@ import json
 from io import StringIO
 from pathlib import Path
 
-from lantern_city.cli import _load_startup_mode, main
+from lantern_city.app import LanternCityApp, _load_default_seed
+from lantern_city.cli import _default_player_startup_mode, _load_startup_mode, main
+from lantern_city.seed_schema import validate_city_seed
 
 
 def run_cli(*args: str) -> str:
@@ -133,3 +135,37 @@ def test_cli_persists_startup_mode_with_llm_config(tmp_path: Path) -> None:
 
     assert config["startup_mode"] == "mvp_baseline"
     assert _load_startup_mode(str(database_path)) == "mvp_baseline"
+
+
+def test_cli_defaults_to_generated_runtime_when_llm_is_present_and_no_mode_is_specified(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    database_path = tmp_path / "lantern-city.sqlite3"
+
+    monkeypatch.setattr(
+        LanternCityApp,
+        "_generate_city_seed",
+        lambda self, concept=None, on_progress=None: validate_city_seed(_load_default_seed()),
+    )
+    monkeypatch.setattr(LanternCityApp, "_generate_world_content", lambda self, on_progress=None: None)
+    monkeypatch.setattr(LanternCityApp, "_generate_latent_cases", lambda self, count=2: None)
+
+    run_cli(
+        "--db",
+        str(database_path),
+        "--llm-url",
+        "http://localhost:1234/v1",
+        "--llm-model",
+        "test-model",
+        "start",
+    )
+
+    config = json.loads(database_path.with_suffix(".json").read_text(encoding="utf-8"))
+
+    assert config["startup_mode"] == "generated_runtime"
+
+
+def test_default_player_startup_mode_prefers_generated_runtime_when_llm_exists() -> None:
+    assert _default_player_startup_mode(has_llm_config=True) == "generated_runtime"
+    assert _default_player_startup_mode(has_llm_config=False) == "mvp_baseline"

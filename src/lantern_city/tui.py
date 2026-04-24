@@ -34,7 +34,12 @@ from textual.widgets import Button, Input, Label, ListView, ListItem, RichLog, S
 from textual.worker import Worker, WorkerState
 
 from lantern_city.app import LanternCityApp
-from lantern_city.cli import _load_llm_config, _load_startup_mode, _save_llm_config
+from lantern_city.cli import (
+    _default_player_startup_mode,
+    _load_llm_config,
+    _load_startup_mode,
+    _save_llm_config,
+)
 from lantern_city.game_master import GameMaster
 from lantern_city.llm_client import OpenAICompatibleConfig, OpenAICompatibleLLMClient
 from lantern_city.models import CaseState, CityState, LocationState, PlayerProgressState
@@ -664,10 +669,10 @@ class SettingsScreen(ModalScreen[tuple[str, str, str] | None]):
             yield ListView(id="settings-model-list")
             yield Label("Model  [dim](select above or type)[/dim]", markup=True)
             yield Input(value=self._current_model, placeholder="model-name", id="inp-settings-model")
-            yield Label("Startup mode  [dim](auto | mvp_baseline | generated_runtime)[/dim]", markup=True)
+            yield Label("Startup mode  [dim](generated_runtime | mvp_baseline)[/dim]", markup=True)
             yield Input(
                 value=self._current_startup_mode,
-                placeholder="auto",
+                placeholder="generated_runtime",
                 id="inp-settings-startup-mode",
             )
             with Horizontal(id="settings-buttons"):
@@ -936,7 +941,14 @@ class LanternCityTUI(App[None]):
 
     def action_settings(self) -> None:
         current = _load_llm_config(self._database_path)
-        current_startup_mode = _load_startup_mode(self._database_path) or self._game.startup_mode
+        current_startup_mode = (
+            _load_startup_mode(self._database_path)
+            or (
+                _default_player_startup_mode(has_llm_config=self._game.llm_config is not None)
+                if self._game.startup_mode == "auto"
+                else self._game.startup_mode
+            )
+        )
         url = current.base_url if current else ""
         model = current.model if current else ""
 
@@ -1615,15 +1627,21 @@ def main(argv: list[str] | None = None) -> int:
     else:
         db_path = args.database_path
 
-    startup_mode = args.startup_mode
-    if startup_mode == "auto":
-        startup_mode = _load_startup_mode(db_path) or "auto"
-
     if args.llm_url and args.llm_model:
+        startup_mode = args.startup_mode
+        if startup_mode == "auto":
+            startup_mode = _load_startup_mode(db_path) or _default_player_startup_mode(
+                has_llm_config=True
+            )
         _save_llm_config(db_path, args.llm_url, args.llm_model, startup_mode=startup_mode)
         llm_config = OpenAICompatibleConfig(base_url=args.llm_url, model=args.llm_model)
     else:
         llm_config = _load_llm_config(db_path)
+        startup_mode = args.startup_mode
+        if startup_mode == "auto":
+            startup_mode = _load_startup_mode(db_path) or _default_player_startup_mode(
+                has_llm_config=llm_config is not None
+            )
 
     _configure_logging(db_path)
     game = LanternCityApp(

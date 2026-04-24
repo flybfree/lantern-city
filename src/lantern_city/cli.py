@@ -107,6 +107,10 @@ def _save_llm_config(
     )
 
 
+def _default_player_startup_mode(*, has_llm_config: bool) -> str:
+    return "generated_runtime" if has_llm_config else "mvp_baseline"
+
+
 def main(argv: list[str] | None = None, *, stdout: TextIO | None = None) -> int:
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -118,11 +122,12 @@ def main(argv: list[str] | None = None, *, stdout: TextIO | None = None) -> int:
     args = parser.parse_args(argv)
     _configure_logging(args.database_path)
 
-    startup_mode = args.startup_mode
-    if startup_mode == "auto":
-        startup_mode = _load_startup_mode(args.database_path) or "auto"
-
     if args.llm_url and args.llm_model:
+        startup_mode = args.startup_mode
+        if startup_mode == "auto":
+            startup_mode = _load_startup_mode(args.database_path) or _default_player_startup_mode(
+                has_llm_config=True
+            )
         _save_llm_config(
             args.database_path,
             args.llm_url,
@@ -132,6 +137,11 @@ def main(argv: list[str] | None = None, *, stdout: TextIO | None = None) -> int:
         llm_config = OpenAICompatibleConfig(base_url=args.llm_url, model=args.llm_model)
     else:
         llm_config = _load_llm_config(args.database_path)
+        startup_mode = args.startup_mode
+        if startup_mode == "auto":
+            startup_mode = _load_startup_mode(args.database_path) or _default_player_startup_mode(
+                has_llm_config=llm_config is not None
+            )
 
     app = LanternCityApp(
         Path(args.database_path),
