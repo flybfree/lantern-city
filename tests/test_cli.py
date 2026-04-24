@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+import json
 from io import StringIO
 from pathlib import Path
 
-from lantern_city.cli import main
+from lantern_city.cli import _load_startup_mode, main
 
 
 def run_cli(*args: str) -> str:
@@ -109,3 +110,24 @@ def test_cli_reports_invalid_generated_runtime_without_llm(tmp_path: Path) -> No
     )
 
     assert "Error: startup_mode='generated_runtime' requires llm_config" in output
+
+
+def test_cli_persists_startup_mode_with_llm_config(tmp_path: Path) -> None:
+    database_path = tmp_path / "lantern-city.sqlite3"
+
+    run_cli(
+        "--db",
+        str(database_path),
+        "--llm-url",
+        "http://localhost:1234/v1",
+        "--llm-model",
+        "test-model",
+        "--startup-mode",
+        "mvp_baseline",
+        "start",
+    )
+
+    config = json.loads(database_path.with_suffix(".json").read_text(encoding="utf-8"))
+
+    assert config["startup_mode"] == "mvp_baseline"
+    assert _load_startup_mode(str(database_path)) == "mvp_baseline"

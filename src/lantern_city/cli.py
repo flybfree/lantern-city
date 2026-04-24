@@ -69,10 +69,40 @@ def _load_llm_config(database_path: str) -> OpenAICompatibleConfig | None:
     return None
 
 
-def _save_llm_config(database_path: str, url: str, model: str) -> None:
+def _load_startup_mode(database_path: str) -> str | None:
     path = _config_path(database_path)
+    if not path.exists():
+        return None
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        startup_mode = data.get("startup_mode")
+        if startup_mode in {"auto", "mvp_baseline", "generated_runtime"}:
+            return str(startup_mode)
+    except (json.JSONDecodeError, OSError):
+        pass
+    return None
+
+
+def _save_llm_config(
+    database_path: str,
+    url: str,
+    model: str,
+    *,
+    startup_mode: str | None = None,
+) -> None:
+    path = _config_path(database_path)
+    payload: dict[str, str] = {"llm_url": url, "llm_model": model}
+    if startup_mode is not None:
+        payload["startup_mode"] = startup_mode
+    elif path.exists():
+        try:
+            existing = json.loads(path.read_text(encoding="utf-8"))
+            if existing.get("startup_mode") in {"auto", "mvp_baseline", "generated_runtime"}:
+                payload["startup_mode"] = str(existing["startup_mode"])
+        except (json.JSONDecodeError, OSError):
+            pass
     path.write_text(
-        json.dumps({"llm_url": url, "llm_model": model}, indent=2),
+        json.dumps(payload, indent=2),
         encoding="utf-8",
     )
 
@@ -88,8 +118,17 @@ def main(argv: list[str] | None = None, *, stdout: TextIO | None = None) -> int:
     args = parser.parse_args(argv)
     _configure_logging(args.database_path)
 
+    startup_mode = args.startup_mode
+    if startup_mode == "auto":
+        startup_mode = _load_startup_mode(args.database_path) or "auto"
+
     if args.llm_url and args.llm_model:
-        _save_llm_config(args.database_path, args.llm_url, args.llm_model)
+        _save_llm_config(
+            args.database_path,
+            args.llm_url,
+            args.llm_model,
+            startup_mode=startup_mode,
+        )
         llm_config = OpenAICompatibleConfig(base_url=args.llm_url, model=args.llm_model)
     else:
         llm_config = _load_llm_config(args.database_path)
@@ -97,7 +136,7 @@ def main(argv: list[str] | None = None, *, stdout: TextIO | None = None) -> int:
     app = LanternCityApp(
         Path(args.database_path),
         llm_config=llm_config,
-        startup_mode=args.startup_mode,
+        startup_mode=startup_mode,
     )
 
     try:
