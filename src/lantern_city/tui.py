@@ -104,14 +104,14 @@ you commit. Clue reliability is what gates outcomes, not clue count.
 
   [dim]Ctrl+G[/dim]  toggle GM / direct command mode
   [dim]Ctrl+R[/dim]  toggle map / player stats (reputation, leverage, attention)
-  [dim]Ctrl+S[/dim]  configure LLM connection
+  [dim]Ctrl+S[/dim]  configure startup and LLM settings
   [dim]Ctrl+C[/dim]  quit
   [dim]↑ ↓[/dim]     cycle input history
   [dim]help[/dim]    show this screen again
 """
 
 _HELP_TEXT = """\
-[bold yellow]Commands[/bold yellow]  [dim](Ctrl+S — LLM settings)[/dim]
+[bold yellow]Commands[/bold yellow]  [dim](Ctrl+S — startup and LLM settings)[/dim]
 
   [bold]start[/bold]                        begin a new game
   [bold]overview[/bold]                     city-level summary
@@ -586,7 +586,7 @@ def _fetch_models_from_url(base_url: str) -> list[str]:
 
 
 class SettingsScreen(ModalScreen[tuple[str, str, str] | None]):
-    """Modal overlay for configuring the LLM connection."""
+    """Modal overlay for configuring startup mode and the LLM connection."""
 
     CSS = """
     SettingsScreen {
@@ -651,7 +651,7 @@ class SettingsScreen(ModalScreen[tuple[str, str, str] | None]):
 
     def compose(self) -> ComposeResult:
         with Vertical(id="settings-dialog"):
-            yield Static("[bold yellow]LLM Settings[/bold yellow]", markup=True)
+            yield Static("[bold yellow]Startup And LLM Settings[/bold yellow]", markup=True)
             yield Label("Base URL")
             with Horizontal(id="url-row"):
                 yield Input(
@@ -821,7 +821,7 @@ class LanternCityTUI(App[None]):
         Binding("ctrl+c", "quit", "Quit", priority=True),
         Binding("ctrl+g", "toggle_gm", "Toggle GM mode"),
         Binding("ctrl+r", "toggle_info", "Toggle stats/map"),
-        Binding("ctrl+s", "settings", "LLM settings"),
+        Binding("ctrl+s", "settings", "Startup/LLM settings"),
     ]
 
     def __init__(
@@ -1213,7 +1213,7 @@ class LanternCityTUI(App[None]):
 
         if city is None:
             return (
-                "[dim]Ctrl+G — GM/CMD  |  Ctrl+R — map/stats  |  Ctrl+S — LLM[/dim]\n\n"
+                "[dim]Ctrl+G — GM/CMD  |  Ctrl+R — map/stats  |  Ctrl+S — startup/LLM[/dim]\n\n"
                 "Type [bold]start[/bold] to begin a new game."
             )
 
