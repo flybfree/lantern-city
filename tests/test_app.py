@@ -223,11 +223,23 @@ def test_case_board_includes_actionable_recovery_section(tmp_path) -> None:
     app.start_new_game()
     app.enter_district("district_old_quarter")
     app._introduce_case("case_missing_clerk")
-    app.talk_to_npc("npc_shrine_keeper", "Ask who last saw the missing clerk.")
+    app._acquire_clues(
+        [
+            "clue_missing_clerk_ledgers",
+            "clue_family_record_discrepancy",
+            "clue_missing_maintenance_line",
+        ]
+    )
 
     output = app.case_board()
 
     assert "=== Case Board: Missing Clerk ===" in output
+    assert "Best evidence:" in output
+    assert "Role: supports current case" in output
+    assert "Role: contradiction to explain" in output
+    assert "Role: paper trail to test" in output
+    assert "Why it matters:" in output
+    assert "Follow up:" in output
     assert "What this suggests:" in output
     assert "Do next:" in output
     assert "Use 'leads' to rank the strongest unresolved thread." in output
@@ -292,6 +304,28 @@ def test_compare_clues_includes_recovery_guidance(tmp_path) -> None:
     assert "  - board" in output
     assert "  - talk npc_brin_hesse" in output
     assert "  - matters" in output
+
+
+def test_clues_surface_support_contradiction_and_follow_up_roles(tmp_path) -> None:
+    app = LanternCityApp(tmp_path / "lantern-city.sqlite3")
+    app.start_new_game()
+    app.enter_district("district_old_quarter")
+    app._introduce_case("case_missing_clerk")
+    app._acquire_clues(
+        [
+            "clue_missing_clerk_ledgers",
+            "clue_family_record_discrepancy",
+            "clue_missing_maintenance_line",
+        ]
+    )
+
+    output = app.clues()
+
+    assert "Role: supports current case" in output
+    assert "Role: contradiction to explain" in output
+    assert "Role: paper trail to test" in output
+    assert "Why it matters:" in output
+    assert "Follow up:" in output
 
 
 def test_generated_case_recovery_surfaces_use_generated_case_id(tmp_path) -> None:

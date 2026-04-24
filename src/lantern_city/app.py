@@ -861,12 +861,17 @@ class LanternCityApp:
             lines.append(f"\n  — {case_label} —")
             ranked_clues = sorted(bucket_clues, key=_clue_sort_key)
             for clue in ranked_clues:
+                readability_tag = self._clue_readability_tag(clue)
                 lines.append(f"  [{clue.reliability}] {_clue_label(clue.id)} ({clue.id})")
+                lines.append(f"    Role: {readability_tag}")
                 lines.append(f"    Source: {clue.source_type} / {clue.source_id.replace('_', ' ').title()}")
                 lines.append(f"    {clue.clue_text}")
                 implication = self._summarize_clue_implication(clue)
                 if implication:
-                    lines.append(f"    Suggests: {implication}")
+                    lines.append(f"    Why it matters: {implication}")
+                next_read = self._clue_next_step(clue)
+                if next_read:
+                    lines.append(f"    Follow up: {next_read}")
             synthesis = self._summarize_case_clues(ranked_clues)
             if synthesis:
                 lines.append(f"    Synthesis: {synthesis}")
@@ -933,6 +938,13 @@ class LanternCityApp:
             lines.append("Best evidence:")
             for clue in ranked_clues[:4]:
                 lines.append(f"  - [{clue.reliability}] {_clue_label(clue.id)}")
+                lines.append(f"    Role: {self._clue_readability_tag(clue)}")
+                implication = self._summarize_clue_implication(clue)
+                if implication:
+                    lines.append(f"    Why it matters: {implication}")
+                next_read = self._clue_next_step(clue)
+                if next_read:
+                    lines.append(f"    Follow up: {next_read}")
         synthesis = self._summarize_case_clues(ranked_clues)
         if synthesis:
             lines.append(f"What this suggests: {synthesis}")
@@ -1284,6 +1296,13 @@ class LanternCityApp:
     ) -> list[ClueState]:
         known = set([] if pos is None else pos.clue_ids)
         clue_ids = [clue_id for clue_id in case.known_clue_ids if clue_id in known]
+        if not clue_ids and known:
+            clue_ids = [
+                clue_id
+                for clue_id in known
+                if isinstance(clue := self.store.load_object("ClueState", clue_id), ClueState)
+                and case.id in clue.related_case_ids
+            ]
         return self._load_clues(clue_ids)
 
     def _build_lead_lines(
@@ -1395,14 +1414,38 @@ class LanternCityApp:
 
     def _summarize_clue_implication(self, clue: ClueState) -> str:
         if clue.reliability in {"solid", "credible"}:
-            return "This can support a stronger resolution path."
+            if clue.related_case_ids:
+                return "This currently supports the strongest case theory you can defend."
+            return "This is credible enough to anchor a broader theory, even if no case is attached yet."
         if clue.reliability == "contradicted":
-            return "This cannot be trusted without explaining the contradiction."
+            return "This actively clashes with the current picture and could break a bad theory open."
         if clue.source_type == "testimony":
-            return "An NPC or record check may clarify whether this account holds up."
+            return "This is a live lead, but it is still testimony. You need a person, record, or second witness to steady it."
         if clue.source_type == "document":
-            return "Compare this against another record source or lantern condition."
-        return "This needs corroboration before it should anchor a conclusion."
+            return "This points at a paper trail worth checking, but it still needs corroboration before it should drive a conclusion."
+        return "This is a follow-up lead rather than a conclusion. Treat it as something to test."
+
+    def _clue_readability_tag(self, clue: ClueState) -> str:
+        if clue.reliability == "contradicted":
+            return "contradiction to explain"
+        if clue.reliability in _CREDIBLE_RELIABILITIES:
+            if clue.related_case_ids:
+                return "supports current case"
+            return "credible free-standing lead"
+        if clue.source_type == "testimony":
+            return "lead to verify"
+        if clue.source_type == "document":
+            return "paper trail to test"
+        return "possible follow-up"
+
+    def _clue_next_step(self, clue: ClueState) -> str:
+        if clue.reliability == "contradicted":
+            return self._clue_uncertainty_prompt(clue)
+        if clue.reliability in _CREDIBLE_RELIABILITIES:
+            if clue.related_case_ids:
+                return "Use this in board or compare to see what it strengthens."
+            return "Keep this in mind when a case or second clue lines up with it."
+        return self._clue_uncertainty_prompt(clue)
 
     def _clue_uncertainty_prompt(self, clue: ClueState) -> str:
         label = _clue_label(clue.id)
