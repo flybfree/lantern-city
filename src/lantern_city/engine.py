@@ -37,6 +37,7 @@ from lantern_city.response import ResponsePayload, compose_response
 from lantern_city.social import (
     append_memory_entry,
     apply_player_flag,
+    apply_player_social_consequence,
     apply_relationship_shift,
     build_conversation_memory_entry,
     summarize_relationship,
@@ -225,6 +226,14 @@ def _handle_npc_conversation(
         if player_flag is not None:
             updated_npc = apply_player_flag(updated_npc, flag=player_flag, updated_at=request.updated_at)
             state_changes.append(f"{npc.name} now remembers: {player_flag}.")
+        consequence_result = apply_player_social_consequence(
+            updated_npc,
+            player_flag=player_flag,
+            player_input=request.input_text,
+            updated_at=request.updated_at,
+        )
+        updated_npc = consequence_result.npc
+        state_changes.extend(consequence_result.state_changes)
         conversation_read = _conversation_outcome_read(
             generation_result.structured_updates.dialogue_act,
             generation_result.structured_updates.npc_stance,
@@ -648,6 +657,14 @@ def _infer_player_flag(
     normalized = f"{player_input} {dialogue_act} {npc_stance}".lower()
     if any(token in normalized for token in ("promise", "swear", "i will", "you have my word")):
         return "promise_made"
+    if any(token in normalized for token in ("sorry", "apolog", "forgive me")):
+        return "apology_offered"
+    if any(token in normalized for token in ("or else", "regret it", "i'll make you")):
+        return "threat_made"
+    if any(token in normalized for token in ("i owe you", "in your debt", "owe you one", "return the favor")):
+        return "debt_acknowledged"
+    if any(token in normalized for token in ("favor", "help me", "do this for me", "i need your help")):
+        return "favor_requested"
     if any(token in normalized for token in ("threat", "pressure", "intimidat", "coerce")):
         return "pressure_applied"
     if any(token in normalized for token in ("help", "protect", "safe", "rescue")):

@@ -121,6 +121,93 @@ def apply_player_flag(npc: NPCState, *, flag: str, updated_at: str) -> NPCState:
     )
 
 
+def apply_player_social_consequence(
+    npc: NPCState,
+    *,
+    player_flag: str | None,
+    player_input: str,
+    updated_at: str,
+) -> SocialUpdateResult:
+    if player_flag is None:
+        return SocialUpdateResult(npc=npc, state_changes=[])
+
+    updated = npc
+    state_changes: list[str] = []
+
+    if player_flag == "promise_made":
+        promise_note = _bounded_note(f"Player promised: {player_input.strip()}")
+        updated = updated.model_copy(
+            update={
+                "known_promises": _merge_note(updated.known_promises, promise_note),
+                "relationship_flags": _merge_flag(updated.relationship_flags, "awaiting_player_promise"),
+                "updated_at": updated_at,
+            }
+        )
+        state_changes.append(f"{updated.name} is now tracking a promise from you.")
+    elif player_flag == "apology_offered":
+        grievance, remaining = _pop_oldest(updated.grievances)
+        updated = updated.model_copy(update={"grievances": remaining, "updated_at": updated_at})
+        soften = apply_relationship_shift(
+            updated,
+            trust_delta=0.03,
+            suspicion_delta=-0.04,
+            fear_delta=-0.02,
+            tag="received_apology",
+            updated_at=updated_at,
+        )
+        updated = soften.npc
+        state_changes.extend(soften.state_changes)
+        if grievance is not None:
+            state_changes.append(f"{updated.name} lets go of one grievance: {grievance}.")
+    elif player_flag == "threat_made":
+        grievance_note = _bounded_note(f"Threat remembered: {player_input.strip()}")
+        updated = updated.model_copy(
+            update={
+                "grievances": _merge_note(updated.grievances, grievance_note),
+                "relationship_flags": _merge_flag(updated.relationship_flags, "threatened_by_player"),
+                "updated_at": updated_at,
+            }
+        )
+        hardened = apply_relationship_shift(
+            updated,
+            suspicion_delta=0.1,
+            fear_delta=0.08,
+            tag="threatened_by_player",
+            updated_at=updated_at,
+        )
+        updated = hardened.npc
+        state_changes.extend(hardened.state_changes)
+        state_changes.append(f"{updated.name} will carry that threat forward.")
+    elif player_flag == "favor_requested":
+        updated = updated.model_copy(
+            update={
+                "relationship_flags": _merge_flag(updated.relationship_flags, "player_asked_for_favor"),
+                "updated_at": updated_at,
+            }
+        )
+        pressure = apply_relationship_shift(
+            updated,
+            suspicion_delta=0.03,
+            tag="favor_pressure",
+            updated_at=updated_at,
+        )
+        updated = pressure.npc
+        state_changes.extend(pressure.state_changes)
+        state_changes.append(f"{updated.name} now weighs whether you are worth the favor.")
+    elif player_flag == "debt_acknowledged":
+        favor_note = _bounded_note(f"Player owes a return favor: {player_input.strip()}")
+        updated = updated.model_copy(
+            update={
+                "owed_favors": _merge_note(updated.owed_favors, favor_note),
+                "relationship_flags": _merge_flag(updated.relationship_flags, "holding_player_debt"),
+                "updated_at": updated_at,
+            }
+        )
+        state_changes.append(f"{updated.name} now expects a return favor from you.")
+
+    return SocialUpdateResult(npc=updated, state_changes=state_changes)
+
+
 def append_memory_entry(
     npc: NPCState,
     *,
@@ -204,37 +291,38 @@ def run_offscreen_npc_tick(
     visible_location_ids: list[str],
     updated_at: str,
 ) -> SocialUpdateResult:
-    new_state = _derive_offscreen_state(npc)
-    new_location_id = npc.location_id
+    current, consequence_changes = _apply_unresolved_promise_pressure(npc, updated_at=updated_at)
+    new_state = _derive_offscreen_state(current)
+    new_location_id = current.location_id
 
-    if visible_location_ids and _can_relocate(npc):
+    if visible_location_ids and _can_relocate(current):
         current_index = 0
-        if npc.location_id in visible_location_ids:
-            current_index = visible_location_ids.index(npc.location_id)
+        if current.location_id in visible_location_ids:
+            current_index = visible_location_ids.index(current.location_id)
         step = 1 if new_state in {"circulating", "searching", "obstructing"} else 0
         if step and len(visible_location_ids) > 1:
             new_location_id = visible_location_ids[(current_index + step) % len(visible_location_ids)]
 
-    recent_event = _build_recent_event(npc, new_state, new_location_id)
-    updated = npc.model_copy(
+    recent_event = _build_recent_event(current, new_state, new_location_id)
+    updated = current.model_copy(
         update={
             "offscreen_state": new_state,
             "location_id": new_location_id,
-            "recent_events": _append_recent(npc.recent_events, recent_event),
+            "recent_events": _append_recent(current.recent_events, recent_event),
             "updated_at": updated_at,
         }
     )
 
-    state_changes = []
-    if new_state != npc.offscreen_state:
-        state_changes.append(f"{npc.name} is now {new_state}.")
-    if new_location_id != npc.location_id and new_location_id is not None:
-        state_changes.append(f"{npc.name} moved to {new_location_id}.")
+    state_changes = list(consequence_changes)
+    if new_state != current.offscreen_state:
+        state_changes.append(f"{current.name} is now {new_state}.")
+    if new_location_id != current.location_id and new_location_id is not None:
+        state_changes.append(f"{current.name} moved to {new_location_id}.")
 
-    if npc.loyalty is not None:
+    if current.loyalty is not None:
         loyalty_result = _apply_loyalty_pressure(
             updated,
-            loyalty_actor_id=npc.loyalty,
+            loyalty_actor_id=current.loyalty,
             offscreen_state=new_state,
             updated_at=updated_at,
         )
@@ -266,6 +354,8 @@ def summarize_relationship(npc: NPCState) -> str:
 
 
 def _derive_offscreen_state(npc: NPCState) -> str:
+    if "awaiting_player_promise" in npc.relationship_flags and npc.grievances:
+        return "waiting_on_player"
     if npc.fear >= 0.8:
         return "withdrawing"
     if npc.suspicion >= 0.7 and npc.trust_in_player <= 0.2:
@@ -350,6 +440,71 @@ def _merge_flag(flags: list[str], flag: str) -> list[str]:
     return [*flags, flag]
 
 
+def _merge_note(notes: list[str], note: str) -> list[str]:
+    if note in notes:
+        return notes
+    return [*notes, note][-6:]
+
+
+def _pop_oldest(notes: list[str]) -> tuple[str | None, list[str]]:
+    if not notes:
+        return None, []
+    return notes[0], notes[1:]
+
+
+def _bounded_note(text: str, *, max_length: int = 120) -> str:
+    normalized = " ".join(text.split())
+    if len(normalized) <= max_length:
+        return normalized
+    return normalized[: max_length - 3].rstrip() + "..."
+
+
+def _apply_unresolved_promise_pressure(
+    npc: NPCState,
+    *,
+    updated_at: str,
+) -> tuple[NPCState, list[str]]:
+    if not npc.known_promises:
+        return npc, []
+    latest_promise_turn = max(
+        (
+            _turn_number(str(entry.get("turn", "")))
+            for entry in npc.memory_log
+            if isinstance(entry, dict) and entry.get("player_flag") == "promise_made"
+        ),
+        default=-1,
+    )
+    current_turn = _turn_number(updated_at)
+    if latest_promise_turn < 0 or current_turn - latest_promise_turn < 2:
+        return npc, []
+    if any("left a promise hanging" in grievance.lower() for grievance in npc.grievances):
+        return npc, []
+
+    updated = npc.model_copy(
+        update={
+            "grievances": _merge_note(npc.grievances, "Player left a promise hanging."),
+            "relationship_flags": _merge_flag(npc.relationship_flags, "awaiting_player_promise"),
+            "updated_at": updated_at,
+        }
+    )
+    strained = apply_relationship_shift(
+        updated,
+        trust_delta=-0.05,
+        suspicion_delta=0.08,
+        fear_delta=0.02,
+        tag="promise_left_hanging",
+        updated_at=updated_at,
+    ).npc
+    return strained, [f"{strained.name} is still waiting on a promise you left unresolved."]
+
+
+def _turn_number(turn_label: str) -> int:
+    if not turn_label.startswith("turn_"):
+        return -1
+    suffix = turn_label.removeprefix("turn_")
+    return int(suffix) if suffix.isdigit() else -1
+
+
 def _clamp01(value: float) -> float:
     return round(max(0.0, min(value, 1.0)), 3)
 
@@ -359,6 +514,7 @@ __all__ = [
     "append_memory_entry",
     "apply_actor_relationship_shift",
     "apply_player_flag",
+    "apply_player_social_consequence",
     "apply_relationship_shift",
     "build_conversation_memory_entry",
     "build_offscreen_memory_entry",

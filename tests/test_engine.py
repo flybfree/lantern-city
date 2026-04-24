@@ -390,6 +390,59 @@ def test_handle_player_request_persists_generated_exit_line_in_npc_memory(
     assert npc.memory_log[-1]["summary_text"] == "Ila answers carefully, then closes the thread."
 
 
+def test_handle_player_request_turns_player_promises_into_durable_social_state(
+    populated_store: SQLiteStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from lantern_city import engine
+
+    request = make_request(
+        intent="conversation",
+        target_id=NPC_ID,
+        input_text="You have my word, I will bring you the clean ledger copy.",
+    )
+
+    monkeypatch.setattr(
+        engine,
+        "_generate_npc_dialogue",
+        lambda *args, **kwargs: NPCResponseGenerationResult.model_validate(
+            {
+                "task_type": "npc_response",
+                "request_id": request.id,
+                "summary_text": "Ila agrees, but expects you to follow through.",
+                "structured_updates": {
+                    "dialogue_act": "guarded_acceptance",
+                    "npc_stance": "careful but hopeful",
+                    "relationship_shift": {
+                        "trust_delta": 0.02,
+                        "suspicion_delta": 0.0,
+                        "fear_delta": 0.0,
+                        "tag": "conditional_trust",
+                    },
+                    "clue_effects": [],
+                    "access_effects": [],
+                    "redirect_targets": [],
+                },
+                "cacheable_text": {
+                    "npc_line": "Bring it back clean, and I will remember that you kept your word.",
+                    "follow_up_suggestions": ["Return with the ledger copy."],
+                    "exit_line_if_needed": "Do not make me regret trusting you.",
+                },
+                "confidence": 0.8,
+                "warnings": [],
+            }
+        ),
+    )
+
+    outcome = engine.handle_player_request(populated_store, city_id=CITY_ID, request=request)
+    npc = populated_store.load_object("NPCState", NPC_ID)
+
+    assert isinstance(npc, NPCState)
+    assert npc.known_promises
+    assert "awaiting_player_promise" in npc.relationship_flags
+    assert npc.memory_log[-1]["player_flag"] == "promise_made"
+    assert any("tracking a promise from you" in line for line in outcome.response.state_changes)
+
+
 def test_handle_player_request_biases_records_pressure_into_redirects_and_paper_trails(
     populated_store: SQLiteStore, monkeypatch: pytest.MonkeyPatch
 ) -> None:

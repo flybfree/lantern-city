@@ -336,6 +336,9 @@ class NPCResponseGenerationRequest:
                 "recent_events": npc.recent_events[-4:],
                 "player_flags": npc.player_flags,
                 "relationship_flags": npc.relationship_flags,
+                "known_promises": npc.known_promises[-3:],
+                "owed_favors": npc.owed_favors[-3:],
+                "grievances": npc.grievances[-3:],
                 "player_relationship": _relationship_snapshot_payload(npc, "player"),
                 "loyalty_relationship": (
                     None if not npc.loyalty else _relationship_snapshot_payload(npc, npc.loyalty)

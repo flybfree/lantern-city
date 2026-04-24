@@ -106,6 +106,8 @@ class NPCState(RuntimeModel):
     loyalty: str | None = None
     known_clue_ids: list[str] = Field(default_factory=list)
     known_promises: list[str] = Field(default_factory=list)
+    owed_favors: list[str] = Field(default_factory=list)
+    grievances: list[str] = Field(default_factory=list)
     relationship_flags: list[str] = Field(default_factory=list)
     relationships: dict[str, RelationshipSnapshot] = Field(default_factory=dict)
     memory_log: list[JSONObject] = Field(default_factory=list)

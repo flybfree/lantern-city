@@ -1516,6 +1516,9 @@ class LanternCityApp:
         social_pressure = self._current_social_pressure_summary(pos)
         if social_pressure:
             lines.append(f"Social pressure: {social_pressure}")
+        social_consequence = self._current_social_consequence_summary(pos)
+        if social_consequence:
+            lines.append(f"Social consequence: {social_consequence}")
         lines.append(
             "Clues: "
             f"{len(clue_objects)} total / {credible_count} credible / "
@@ -1733,6 +1736,11 @@ class LanternCityApp:
             lines.append("Recent social pressure:")
             for item in relationship_shifts:
                 lines.append(f"  - {item}")
+        social_consequences = self._recent_social_consequences(limit=4)
+        if social_consequences:
+            lines.append("Longer-term social consequences:")
+            for item in social_consequences:
+                lines.append(f"  - {item}")
         visible_case_clues = [
             clue
             for clue in clues
@@ -1807,6 +1815,9 @@ class LanternCityApp:
         social_pressure = self._current_social_pressure_summary(pos)
         if social_pressure:
             lines.append(f"Social pressure: {social_pressure}")
+        social_consequence = self._current_social_consequence_summary(pos)
+        if social_consequence:
+            lines.append(f"Social consequence: {social_consequence}")
         standouts: list[str] = []
         for case in local_cases[:2]:
             standouts.extend(self._build_lead_lines(case=case, pos=pos, limit=2))
@@ -2216,6 +2227,21 @@ class LanternCityApp:
             parts.append(f"toward you: {player_rel.status}")
         return "; ".join(parts)
 
+    def _current_social_consequence_summary(self, pos: ActiveWorkingSet | None) -> str:
+        if pos is None or not pos.npc_ids:
+            return ""
+        npc = self._npc(pos.npc_ids[0])
+        if npc is None:
+            return ""
+        parts: list[str] = []
+        if npc.known_promises:
+            parts.append("still tracking a promise from you")
+        if npc.owed_favors:
+            parts.append("expects a return favor")
+        if npc.grievances:
+            parts.append(f"holding {len(npc.grievances)} grievance(s)")
+        return "; ".join(parts)
+
     def _recent_relationship_shifts(self, *, limit: int) -> list[str]:
         reads: list[str] = []
         for npc in sorted(
@@ -2236,6 +2262,27 @@ class LanternCityApp:
                             f"{npc.name}: {npc.loyalty} reads as {loyalty.status} while {npc.offscreen_state}."
                         )
                         break
+            if len(reads) >= limit:
+                break
+        return reads[:limit]
+
+    def _recent_social_consequences(self, *, limit: int) -> list[str]:
+        reads: list[str] = []
+        for npc in sorted(
+            [
+                npc
+                for npc in self.store.list_objects("NPCState")
+                if isinstance(npc, NPCState) and (npc.known_promises or npc.owed_favors or npc.grievances)
+            ],
+            key=lambda npc: npc.updated_at,
+            reverse=True,
+        ):
+            if npc.known_promises:
+                reads.append(f"{npc.name}: waiting on {npc.known_promises[-1].lower()}.")
+            if npc.owed_favors:
+                reads.append(f"{npc.name}: expects a return favor from the player.")
+            if npc.grievances:
+                reads.append(f"{npc.name}: still holds {npc.grievances[-1].lower()}.")
             if len(reads) >= limit:
                 break
         return reads[:limit]

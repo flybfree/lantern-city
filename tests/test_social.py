@@ -4,6 +4,7 @@ from lantern_city.models import NPCState
 from lantern_city.social import (
     append_memory_entry,
     apply_actor_relationship_shift,
+    apply_player_social_consequence,
     apply_relationship_shift,
     build_conversation_memory_entry,
     run_offscreen_npc_tick,
@@ -141,3 +142,53 @@ def test_run_offscreen_npc_tick_updates_loyalty_relationship_snapshot() -> None:
     assert loyalty.trust >= 0.05
     assert loyalty.last_changed_turn == "turn_6"
     assert f"loyalty_{result.npc.offscreen_state}" in result.npc.relationship_flags
+
+
+def test_apply_player_social_consequence_tracks_promises_and_debts() -> None:
+    npc = make_npc()
+
+    promise_result = apply_player_social_consequence(
+        npc,
+        player_flag="promise_made",
+        player_input="I will get you a clean copy of the ledger.",
+        updated_at="turn_4",
+    )
+    debt_result = apply_player_social_consequence(
+        promise_result.npc,
+        player_flag="debt_acknowledged",
+        player_input="I owe you for this.",
+        updated_at="turn_5",
+    )
+
+    assert promise_result.npc.known_promises
+    assert "awaiting_player_promise" in promise_result.npc.relationship_flags
+    assert "tracking a promise" in promise_result.state_changes[0]
+    assert debt_result.npc.owed_favors
+    assert "holding_player_debt" in debt_result.npc.relationship_flags
+
+
+def test_run_offscreen_npc_tick_turns_unresolved_promises_into_grievances() -> None:
+    npc = make_npc().model_copy(
+        update={
+            "known_promises": ["Player promised: I will come back with the ledger copy."],
+            "relationship_flags": ["awaiting_player_promise"],
+            "memory_log": [
+                {
+                    "memory_type": "conversation",
+                    "turn": "turn_1",
+                    "player_flag": "promise_made",
+                    "input_text": "I will come back with the ledger copy.",
+                }
+            ],
+        }
+    )
+
+    result = run_offscreen_npc_tick(
+        npc,
+        visible_location_ids=["location_archive_steps", "location_registry_annex"],
+        updated_at="turn_4",
+    )
+
+    assert "Player left a promise hanging." in result.npc.grievances
+    assert result.npc.offscreen_state == "waiting_on_player"
+    assert any("waiting on a promise" in change for change in result.state_changes)

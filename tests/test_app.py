@@ -649,6 +649,32 @@ def test_status_and_journal_surface_social_pressure(tmp_path) -> None:
     assert "Ila Venn: faction_memory_keepers reads as aligned while obstructing." in journal_output
 
 
+def test_status_and_journal_surface_longer_term_social_consequences(tmp_path) -> None:
+    app = LanternCityApp(tmp_path / "lantern-city.sqlite3")
+    app.start_new_game()
+    app.enter_district("district_old_quarter")
+    app.go("location_shrine_lane")
+    npc = app._npc("npc_shrine_keeper")
+    assert npc is not None
+    app.store.save_object(
+        npc.model_copy(
+            update={
+                "known_promises": ["Player promised: I will bring the clean ledger copy."],
+                "owed_favors": ["Player owes a return favor: I owe you for this."],
+                "grievances": ["Player left a promise hanging."],
+                "relationship_flags": [*npc.relationship_flags, "awaiting_player_promise", "holding_player_debt"],
+            }
+        )
+    )
+
+    status_output = app.status()
+    journal_output = app.journal()
+
+    assert "Social consequence: still tracking a promise from you; expects a return favor; holding 1 grievance(s)" in status_output
+    assert "Longer-term social consequences:" in journal_output
+    assert "Ila Venn: expects a return favor from the player." in journal_output
+
+
 def test_world_turn_output_surfaces_faction_pressure(tmp_path) -> None:
     app = LanternCityApp(tmp_path / "lantern-city.sqlite3")
     app.start_new_game()
