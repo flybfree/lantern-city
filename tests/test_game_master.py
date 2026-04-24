@@ -284,6 +284,32 @@ def test_build_context_includes_social_pressure_for_current_npc(tmp_path) -> Non
     assert "loyalty=faction_memory_keepers:aligned" in context
 
 
+def test_build_context_includes_faction_posture_summary(tmp_path) -> None:
+    llm = _RecordingLLM()
+    app = LanternCityApp(tmp_path / "lantern-city.sqlite3")
+    app.start_new_game()
+    app.enter_district("district_old_quarter")
+    faction = app.store.load_object("FactionState", "faction_memory_keepers")
+    assert faction is not None
+    app.store.save_object(
+        faction.model_copy(
+            update={
+                "attitude_toward_player": "guarded",
+                "active_plans": ["contain scrutiny in district_old_quarter"],
+            }
+        )
+    )
+    gm = GameMaster(app=app, llm=llm)
+
+    context = gm._build_context()
+
+    assert "Faction posture:" in context
+    assert (
+        "Memory Keepers: guarded toward you, focused on district_old_quarter, plan 'contain scrutiny in district_old_quarter'"
+        in context
+    )
+
+
 def test_narrate_system_prompt_mentions_clue_role_distinctions() -> None:
     llm = _RecordingLLM()
     gm = GameMaster(app=None, llm=llm)  # type: ignore[arg-type]

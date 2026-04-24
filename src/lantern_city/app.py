@@ -14,7 +14,7 @@ from lantern_city.case_bootstrap import bootstrap_generated_case
 from lantern_city.cases import advance_case_pressure, case_pressure_summary, note_case_progress, transition_case
 from lantern_city.clues import clarify_clue
 from lantern_city.engine import handle_player_request
-from lantern_city.factions import run_faction_turn
+from lantern_city.factions import FactionOperation, run_faction_turn
 from lantern_city.generation.case_generation import (
     CaseGenerationRequest,
     CaseGenerationError,
@@ -48,7 +48,12 @@ from lantern_city.models import (
 from lantern_city.progression import apply_progress_change, get_tier
 from lantern_city.seed_schema import validate_city_seed
 from lantern_city.simulation import WorldTurnPlan, plan_world_turn, turn_label
-from lantern_city.social import run_offscreen_npc_tick
+from lantern_city.social import (
+    append_memory_entry,
+    apply_relationship_shift,
+    build_offscreen_memory_entry,
+    run_offscreen_npc_tick,
+)
 from lantern_city.store import SQLiteStore
 from lantern_city.log import get_logger
 
@@ -321,7 +326,7 @@ class LanternCityApp:
             lines.append(f"[Time passes: {turn_notices.catch_up_turns} extra turn(s)]")
         if turn_notices.faction_updates:
             lines.append("\nFaction pressure:")
-            lines.extend(f"  - {line}" for line in turn_notices.faction_updates[:4])
+            lines.extend(f"  - {line}" for line in _prioritized_faction_updates(turn_notices.faction_updates))
         if turn_notices.case_pressure_updates:
             lines.append("\nCase pressure:")
             lines.extend(f"  - {line}" for line in turn_notices.case_pressure_updates[:4])
@@ -422,7 +427,7 @@ class LanternCityApp:
             lines.append(f"[Time passes: {turn_notices.catch_up_turns} extra turn(s)]")
         if turn_notices.faction_updates:
             lines.append("[Faction pressure]")
-            lines.extend(turn_notices.faction_updates[:4])
+            lines.extend(_prioritized_faction_updates(turn_notices.faction_updates))
         if turn_notices.case_pressure_updates:
             lines.append("[Case pressure]")
             lines.extend(turn_notices.case_pressure_updates[:4])
@@ -533,7 +538,7 @@ class LanternCityApp:
             lines.append(f"[Time passes: {turn_notices.catch_up_turns} extra turn(s)]")
         if turn_notices.faction_updates:
             lines.append("[Faction pressure]")
-            lines.extend(turn_notices.faction_updates[:4])
+            lines.extend(_prioritized_faction_updates(turn_notices.faction_updates))
         if turn_notices.case_pressure_updates:
             lines.append("[Case pressure]")
             lines.extend(turn_notices.case_pressure_updates[:4])
@@ -635,7 +640,7 @@ class LanternCityApp:
             lines.append(f"\n[Time passes: {turn_notices.catch_up_turns} extra turn(s)]")
         if turn_notices.faction_updates:
             lines.append("\nFaction pressure:")
-            lines.extend(f"  - {line}" for line in turn_notices.faction_updates[:4])
+            lines.extend(f"  - {line}" for line in _prioritized_faction_updates(turn_notices.faction_updates))
         if turn_notices.case_pressure_updates:
             lines.append("\nCase pressure:")
             lines.extend(f"  - {line}" for line in turn_notices.case_pressure_updates[:4])
@@ -691,6 +696,7 @@ class LanternCityApp:
         city: CityState,
         updated_at: str,
         focus_district_id: str | None = None,
+        exclude_npc_ids: set[str] | None = None,
     ) -> list[str]:
         factions = [
             faction
@@ -716,10 +722,183 @@ class LanternCityApp:
             )
             if result.faction != faction:
                 updated_factions.append(result.faction.model_copy(update={"version": faction.version + 1}))
+            notices.extend(
+                self._apply_faction_operations(
+                    faction=result.faction,
+                    operations=result.operations,
+                    updated_at=updated_at,
+                    exclude_npc_ids=exclude_npc_ids or set(),
+                )
+            )
             notices.extend(result.notices)
         if updated_factions:
             self.store.save_objects_atomically(updated_factions)
         return notices
+
+    def _apply_faction_operations(
+        self,
+        *,
+        faction: FactionState,
+        operations: list[FactionOperation],
+        updated_at: str,
+        exclude_npc_ids: set[str],
+    ) -> list[str]:
+        notices: list[str] = []
+        for operation in operations:
+            if operation.kind == "district_pressure" and operation.district_id:
+                notices.extend(
+                    self._apply_faction_district_pressure(
+                        faction=faction,
+                        district_id=operation.district_id,
+                        updated_at=updated_at,
+                    )
+                )
+            elif operation.kind == "case_interference" and operation.case_id:
+                notices.extend(
+                    self._apply_faction_case_interference(
+                        faction=faction,
+                        case_id=operation.case_id,
+                        updated_at=updated_at,
+                    )
+                )
+            elif (
+                operation.kind == "npc_pressure"
+                and operation.case_id
+                and operation.npc_id
+                and operation.npc_id not in exclude_npc_ids
+            ):
+                notices.extend(
+                    self._apply_faction_npc_pressure(
+                        faction=faction,
+                        case_id=operation.case_id,
+                        npc_id=operation.npc_id,
+                        updated_at=updated_at,
+                    )
+                )
+        return notices
+
+    def _apply_faction_district_pressure(
+        self,
+        *,
+        faction: FactionState,
+        district_id: str,
+        updated_at: str,
+    ) -> list[str]:
+        district = self.store.load_object("DistrictState", district_id)
+        if not isinstance(district, DistrictState):
+            return []
+        pressure_flag = f"faction_pressure:{faction.id}"
+        active_problems = list(district.active_problems)
+        changed = False
+        if pressure_flag not in active_problems:
+            active_problems = [*active_problems, pressure_flag][-6:]
+            changed = True
+        next_access = _tighten_district_access(district.current_access_level)
+        if next_access != district.current_access_level:
+            changed = True
+        if not changed:
+            return []
+        updated = district.model_copy(
+            update={
+                "active_problems": active_problems,
+                "current_access_level": next_access,
+                "updated_at": updated_at,
+                "version": district.version + 1,
+            }
+        )
+        self.store.save_object(updated)
+        notices = [f"{faction.name} is constricting access in {district.name}."]
+        if pressure_flag in active_problems:
+            notices.append(f"{district.name} is now carrying active faction pressure from {faction.name}.")
+        return notices
+
+    def _apply_faction_case_interference(
+        self,
+        *,
+        faction: FactionState,
+        case_id: str,
+        updated_at: str,
+    ) -> list[str]:
+        case = self.store.load_object("CaseState", case_id)
+        if not isinstance(case, CaseState) or _case_runtime_mode(case) != "evolved_runtime":
+            return []
+        risk_flag = f"faction_pressure:{faction.id}"
+        district_effect = f"interference:{faction.id}"
+        risk_flags = list(case.offscreen_risk_flags)
+        district_effects = list(case.district_effects)
+        idle_turns = case.time_since_last_progress + (1 if case.time_since_last_progress > 0 else 0)
+        changed = False
+        if risk_flag not in risk_flags:
+            risk_flags = [*risk_flags, risk_flag]
+            changed = True
+        if district_effect not in district_effects:
+            district_effects = [*district_effects, district_effect][-6:]
+            changed = True
+        if idle_turns != case.time_since_last_progress:
+            changed = True
+        next_window = "narrowing" if case.active_resolution_window == "open" else case.active_resolution_window
+        if next_window != case.active_resolution_window:
+            changed = True
+        if not changed:
+            return []
+        updated = case.model_copy(
+            update={
+                "offscreen_risk_flags": risk_flags,
+                "district_effects": district_effects,
+                "time_since_last_progress": idle_turns,
+                "active_resolution_window": next_window,
+                "updated_at": updated_at,
+                "version": case.version + 1,
+            }
+        )
+        self.store.save_object(updated)
+        return [f"{faction.name} is tightening pressure around {case.title}."]
+
+    def _apply_faction_npc_pressure(
+        self,
+        *,
+        faction: FactionState,
+        case_id: str,
+        npc_id: str,
+        updated_at: str,
+    ) -> list[str]:
+        case = self.store.load_object("CaseState", case_id)
+        npc = self.store.load_object("NPCState", npc_id)
+        if (
+            not isinstance(case, CaseState)
+            or not isinstance(npc, NPCState)
+            or _case_runtime_mode(case) != "evolved_runtime"
+        ):
+            return []
+        pressure_event = f"pressured by {faction.name} over {case.title}"
+        updated = apply_relationship_shift(
+            npc,
+            trust_delta=-0.03,
+            suspicion_delta=0.08,
+            tag=f"faction_pressure_{faction.id}",
+            updated_at=updated_at,
+        ).npc
+        recent_events = [*updated.recent_events, pressure_event][-6:]
+        updated = append_memory_entry(
+            updated.model_copy(
+                update={
+                    "offscreen_state": "obstructing",
+                    "recent_events": recent_events,
+                    "updated_at": updated_at,
+                }
+            ),
+            memory_entry=build_offscreen_memory_entry(
+                updated_at=updated_at,
+                offscreen_state="obstructing",
+                summary_text=pressure_event,
+                location_id=npc.location_id,
+            ),
+            updated_at=updated_at,
+        )
+        if updated == npc:
+            return []
+        self.store.save_object(updated.model_copy(update={"version": npc.version + 1}))
+        return [f"{faction.name} is leaning on {npc.name} over {case.title}."]
 
     def _run_offscreen_npc_updates(
         self,
@@ -742,6 +921,8 @@ class LanternCityApp:
         updated_npcs: list[NPCState] = []
         changes: list[str] = []
         for npc in npcs:
+            if npc.updated_at == updated_at:
+                continue
             if focus_district_id is not None and npc.district_id != focus_district_id:
                 continue
             if npc.role_category == "informant" and npc.relevance_rating < 0.4:
@@ -815,6 +996,7 @@ class LanternCityApp:
                     city=current_city,
                     updated_at=updated_at,
                     focus_district_id=focus_district_id,
+                    exclude_npc_ids=exclude_npc_ids,
                 )
             )
 
@@ -932,6 +1114,12 @@ class LanternCityApp:
                 f"  {district.name} [{district.lantern_condition}]"
                 f"  — {loc_count} location(s), {npc_count} known NPC(s)  ({did}){case_tag}"
             )
+        faction_reads = self._faction_pressure_reads(current_district_id=pos.district_id if pos else None, limit=4)
+        if faction_reads:
+            lines.append("")
+            lines.append("Faction posture:")
+            for read in faction_reads:
+                lines.append(f"  - {read}")
         lines.append("")
         lines.append("Active cases:")
         if cases:
@@ -972,6 +1160,9 @@ class LanternCityApp:
             lines.append(f"Case pressure: {cases[0].pressure_level}")
         else:
             lines.append("Current case: None")
+        faction_reads = self._faction_pressure_reads(current_district_id=pos.district_id if pos else None, limit=2)
+        if faction_reads:
+            lines.append(f"Faction posture: {'; '.join(faction_reads)}")
         social_pressure = self._current_social_pressure_summary(pos)
         if social_pressure:
             lines.append(f"Social pressure: {social_pressure}")
@@ -1595,6 +1786,37 @@ class LanternCityApp:
                             f"{npc.name}: {npc.loyalty} reads as {loyalty.status} while {npc.offscreen_state}."
                         )
                         break
+            if len(reads) >= limit:
+                break
+        return reads[:limit]
+
+    def _faction_pressure_reads(
+        self,
+        *,
+        current_district_id: str | None,
+        limit: int,
+    ) -> list[str]:
+        city = self._city()
+        if city is None:
+            return []
+        reads: list[str] = []
+        for faction_id in city.faction_ids:
+            faction = self.store.load_object("FactionState", faction_id)
+            if not isinstance(faction, FactionState):
+                continue
+            target_district_id = current_district_id
+            if target_district_id is None or target_district_id not in faction.influence_by_district:
+                if faction.influence_by_district:
+                    target_district_id = max(
+                        faction.influence_by_district.items(), key=lambda item: item[1]
+                    )[0]
+                else:
+                    target_district_id = None
+            district_label = target_district_id or "the city"
+            plan = faction.active_plans[0] if faction.active_plans else "holding position"
+            reads.append(
+                f"{faction.name}: {faction.attitude_toward_player} toward you, focused on {district_label}, plan '{plan}'"
+            )
             if len(reads) >= limit:
                 break
         return reads[:limit]
@@ -3366,6 +3588,34 @@ def _case_runtime_mode(case: CaseState) -> str:
     if case.id in _MVP_BASELINE_CASE_IDS:
         return "mvp_baseline"
     return "evolved_runtime"
+
+
+def _tighten_district_access(current_access_level: str) -> str:
+    if current_access_level in {"restricted", "controlled", "sealed"}:
+        return current_access_level
+    if current_access_level == "watched":
+        return "restricted"
+    if current_access_level in {"informal", "commercial", "open", "unknown"}:
+        return "watched"
+    return "watched"
+
+
+def _prioritized_faction_updates(notices: list[str], *, limit: int = 6) -> list[str]:
+    def _priority(notice: str) -> tuple[int, int]:
+        if "leaning on" in notice or "tightening pressure around" in notice:
+            return (0, 0)
+        if "constricting access" in notice or "active faction pressure" in notice:
+            return (1, 0)
+        if "now " in notice and "toward you" in notice:
+            return (2, 0)
+        if "moving around" in notice:
+            return (3, 0)
+        if "tightening its posture" in notice:
+            return (4, 0)
+        return (5, 0)
+
+    ranked = sorted(enumerate(notices), key=lambda item: (_priority(item[1]), item[0]))
+    return [notice for _, notice in ranked[:limit]]
 
 
 def _load_default_seed() -> dict[str, object]:

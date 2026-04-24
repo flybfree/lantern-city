@@ -14,6 +14,7 @@ from lantern_city.generation.case_generation import (
     GeneratedResolutionPath,
 )
 from lantern_city.llm_client import OpenAICompatibleConfig
+from lantern_city.models import CaseState
 from lantern_city.response import compose_response
 from lantern_city.seed_schema import validate_city_seed
 
@@ -428,6 +429,72 @@ def test_world_turn_output_surfaces_faction_pressure(tmp_path) -> None:
     assert "Memory Keepers is now guarded toward you." in output
     assert faction is not None
     assert faction.attitude_toward_player == "guarded"
+
+
+def test_faction_turn_operations_pressure_generated_case_and_targeted_npc(tmp_path) -> None:
+    app = LanternCityApp(tmp_path / "lantern-city.sqlite3")
+    app.start_new_game()
+    app.store.save_object(
+        CaseState(
+            id="case_gen_pressure_001",
+            created_at="turn_0",
+            updated_at="turn_0",
+            title="Borrowed Ledger",
+            case_type="records tampering",
+            status="active",
+            involved_district_ids=["district_old_quarter"],
+            involved_npc_ids=["npc_shrine_keeper"],
+            involved_faction_ids=["faction_memory_keepers"],
+            npc_pressure_targets=["npc_shrine_keeper"],
+            pressure_level="rising",
+            time_since_last_progress=2,
+            objective_summary="Work out who is rewriting the ledger trail and why.",
+        )
+    )
+    city = app._require_city()
+    app.store.save_object(
+        city.model_copy(update={"active_case_ids": [*city.active_case_ids, "case_gen_pressure_001"]})
+    )
+    app._introduce_case("case_gen_pressure_001")
+
+    output = app.enter_district("district_old_quarter")
+    pressured_case = app.store.load_object("CaseState", "case_gen_pressure_001")
+    pressured_npc = app.store.load_object("NPCState", "npc_shrine_keeper")
+    district = app.store.load_object("DistrictState", "district_old_quarter")
+
+    assert pressured_case is not None
+    assert pressured_npc is not None
+    assert district is not None
+    assert "Faction pressure:" in output
+    assert "Memory Keepers is tightening pressure around Borrowed Ledger." in output
+    assert "Memory Keepers is leaning on Ila Venn over Borrowed Ledger." in output
+    assert "faction_pressure:faction_memory_keepers" in pressured_case.offscreen_risk_flags
+    assert "interference:faction_memory_keepers" in pressured_case.district_effects
+    assert pressured_npc.offscreen_state == "obstructing"
+    assert pressured_npc.suspicion > 0.0
+    assert any(
+        isinstance(entry, dict)
+        and entry.get("memory_type") == "offscreen_event"
+        and "Borrowed Ledger" in str(entry.get("summary_text", ""))
+        for entry in pressured_npc.memory_log
+    )
+    assert "faction_pressure:faction_memory_keepers" in district.active_problems
+    assert district.current_access_level in {"watched", "restricted"}
+
+
+def test_overview_and_status_surface_faction_posture(tmp_path) -> None:
+    app = LanternCityApp(tmp_path / "lantern-city.sqlite3")
+    app.start_new_game()
+    app.enter_district("district_old_quarter")
+
+    overview_output = app.overview()
+    status_output = app.status()
+
+    assert "Faction posture:" in overview_output
+    assert "Memory Keepers: guarded toward you, focused on district_old_quarter" in overview_output
+    assert "Faction posture:" in status_output
+    assert "toward you" in status_output
+    assert "focused on district_old_quarter" in status_output
 
 
 def test_what_matters_here_includes_exact_next_commands(tmp_path) -> None:

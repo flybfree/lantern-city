@@ -3,7 +3,12 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 from lantern_city.models import ClueState
-from lantern_city.tui import _clue_reading_lines, _format_start_result_markup, _recovery_panel_lines
+from lantern_city.tui import (
+    _clue_reading_lines,
+    _faction_pressure_lines,
+    _format_start_result_markup,
+    _recovery_panel_lines,
+)
 
 
 def test_format_start_result_markup_highlights_model_check_pass() -> None:
@@ -143,3 +148,23 @@ def test_clue_reading_lines_surface_support_contradiction_and_follow_up() -> Non
     assert any("supports case" in line for line in lines)
     assert any("contradiction" in line for line in lines)
     assert any("paper trail" in line for line in lines)
+
+
+def test_faction_pressure_lines_surface_attitude_and_plan() -> None:
+    lines = _faction_pressure_lines(
+        [
+            SimpleNamespace(
+                name="Memory Keepers",
+                attitude_toward_player="guarded",
+                active_plans=["contain scrutiny in district_old_quarter"],
+            ),
+            SimpleNamespace(
+                name="Council of Lights",
+                attitude_toward_player="wary",
+                active_plans=["manage missing clerk fallout"],
+            ),
+        ]
+    )
+
+    assert any("Memory Keepers: guarded / contain scrutiny in district_old_quarter" in line for line in lines)
+    assert any("Council of Lights: wary / manage missing clerk fallout" in line for line in lines)

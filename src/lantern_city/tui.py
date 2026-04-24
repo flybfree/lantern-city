@@ -1335,6 +1335,17 @@ class LanternCityTUI(App[None]):
                 lines.append(f"  [dim]{escape(case.status)}[/dim]")
             lines.append("")
 
+        factions = []
+        for fid in city.faction_ids:
+            faction = self._game.store.load_object("FactionState", fid)
+            if isinstance(faction, FactionState):
+                factions.append(faction)
+        faction_lines = _faction_pressure_lines(factions)
+        if faction_lines:
+            lines.append("[bold]Faction Posture:[/bold]")
+            lines.extend(faction_lines)
+            lines.append("")
+
         # ── Clues ────────────────────────────────────────────────────
         clue_count = len(pos.clue_ids) if pos is not None else 0
         clue_color = "green" if clue_count > 0 else "dim"
@@ -1534,6 +1545,18 @@ def _clue_reading_lines(clues: list[ClueState]) -> list[str]:
     for clue in sorted(clues, key=lambda clue: (0 if clue.reliability in {"credible", "solid"} else 1 if clue.reliability == "contradicted" else 2, clue.id))[:3]:
         lines.append(
             f"  [dim]- {_clue_short_role(clue)}: {escape(_clue_label(clue.id))}[/dim]"
+        )
+    return lines
+
+
+def _faction_pressure_lines(factions: list) -> list[str]:
+    if not factions:
+        return []
+    lines: list[str] = []
+    for faction in factions[:3]:
+        plan = faction.active_plans[0] if getattr(faction, "active_plans", None) else "holding position"
+        lines.append(
+            f"  [dim]- {escape(faction.name)}: {escape(faction.attitude_toward_player)} / {escape(plan)}[/dim]"
         )
     return lines
 

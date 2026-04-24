@@ -253,6 +253,15 @@ class GameMaster:
                     f"  lanterns: {district.lantern_condition}{marker}"
                 )
 
+        faction_reads = self.app._faction_pressure_reads(
+            current_district_id=current_district_id,
+            limit=4,
+        )
+        if faction_reads:
+            lines.append("\nFaction posture:")
+            for read in faction_reads:
+                lines.append(f"  {read}")
+
         # Cases — only include cases the player has been introduced to
         known_case_ids: set[str] = set(pos.known_case_ids) if pos is not None else set()
         active_cases = [

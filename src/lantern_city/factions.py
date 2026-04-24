@@ -6,9 +6,19 @@ from lantern_city.models import CaseState, CityState, FactionState
 
 
 @dataclass(frozen=True, slots=True)
+class FactionOperation:
+    kind: str
+    faction_id: str
+    district_id: str | None = None
+    case_id: str | None = None
+    npc_id: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class FactionTurnResult:
     faction: FactionState
     notices: list[str]
+    operations: list[FactionOperation]
 
 
 _ATTITUDE_ORDER = ("neutral", "wary", "guarded", "hostile")
@@ -23,11 +33,20 @@ def run_faction_turn(
     focus_district_id: str | None = None,
 ) -> FactionTurnResult:
     notices: list[str] = []
+    operations: list[FactionOperation] = []
     district_id = _target_district(faction, focus_district_id)
     active_plans = list(faction.active_plans)
     attitude = faction.attitude_toward_player
 
     if district_id is not None and city.player_presence_level >= 0.1:
+        if faction.influence_by_district.get(district_id, 0.0) >= 0.5:
+            operations.append(
+                FactionOperation(
+                    kind="district_pressure",
+                    faction_id=faction.id,
+                    district_id=district_id,
+                )
+            )
         plan = f"contain scrutiny in {district_id}"
         if plan not in active_plans:
             active_plans = [plan, *active_plans][:4]
@@ -47,6 +66,23 @@ def run_faction_turn(
         if pressure_plan not in active_plans:
             active_plans = [pressure_plan, *active_plans][:4]
             notices.append(f"{faction.name} is moving around {hottest_case.title}.")
+        operations.append(
+            FactionOperation(
+                kind="case_interference",
+                faction_id=faction.id,
+                case_id=hottest_case.id,
+                district_id=district_id,
+            )
+        )
+        if hottest_case.npc_pressure_targets:
+            operations.append(
+                FactionOperation(
+                    kind="npc_pressure",
+                    faction_id=faction.id,
+                    case_id=hottest_case.id,
+                    npc_id=hottest_case.npc_pressure_targets[0],
+                )
+            )
 
     updated = faction.model_copy(
         update={
@@ -55,7 +91,7 @@ def run_faction_turn(
             "updated_at": updated_at,
         }
     )
-    return FactionTurnResult(faction=updated, notices=notices)
+    return FactionTurnResult(faction=updated, notices=notices, operations=operations)
 
 
 def _target_district(faction: FactionState, focus_district_id: str | None) -> str | None:
@@ -75,4 +111,4 @@ def _escalate_attitude(attitude: str) -> str:
     return _ATTITUDE_ORDER[index + 1]
 
 
-__all__ = ["FactionTurnResult", "run_faction_turn"]
+__all__ = ["FactionOperation", "FactionTurnResult", "run_faction_turn"]
