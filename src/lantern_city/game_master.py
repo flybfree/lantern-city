@@ -29,6 +29,7 @@ Available commands (use exact syntax):
   start                       — begin a new game with a generated city (only if no game is active)
   start <concept>             — begin a new game; concept guides the generated city
   overview                    — city-level summary (no arguments)
+  status                      — investigator and case status
   look                        — show detail for the CURRENT DISTRICT (no arguments)
   look <district_id>          — show detail for a named district (use a district_id only)
   enter <district_id>         — travel to a district (use a district_id only)
@@ -36,6 +37,11 @@ Available commands (use exact syntax):
   inspect <location_id>       — examine a location and gather clues
   talk <npc_id> <prompt>      — speak with an NPC; preserve player's words as the prompt
   clues                       — list acquired clues
+  journal                     — run-level chronicle and recall
+  board [case_id]             — review the current case board
+  leads                       — show the strongest current leads
+  matters                     — show what matters in the current scene
+  compare <clue_a> <clue_b>   — compare two known clues
   case <case_id>              — attempt to resolve a case
 
 ID rules — CRITICAL:
@@ -55,6 +61,8 @@ Output rules — CRITICAL:
 - If the player asks a question answerable from context (e.g. "what cases do I have?"),
   output 0 commands — the narrator will answer from context alone.
 - If the requested action is impossible, output 0 commands.
+- Never describe or imply that movement, inspection, or conversation happened unless you emitted a command
+  and the game results confirm it.
 - Return JSON matching the schema exactly. No extra keys. No reasoning text.
 """
 
@@ -70,6 +78,8 @@ self-commentary. Begin immediately with the narrative sentence.
 - Ground every detail in the game data provided — never invent clues, NPCs, or facts.
 - Noir tone: spare, evocative, foreboding. No exclamation marks. No purple prose.
 - If an action failed, narrate it naturally without breaking immersion.
+- If the game events contain "[action not possible:", treat the action as a failure. Do not narrate it as if it succeeded.
+- If no game actions executed, do not narrate movement or discovery as though the state changed.
 - If the game events include a "[Case opened: …]" tag, this is a pivotal moment. \
 You MUST make clear in the narrative that the player has just become aware of a new \
 investigation — name the case or its subject explicitly so the player understands \
@@ -93,6 +103,8 @@ class GameMaster:
     app: LanternCityApp
     llm: OpenAICompatibleLLMClient
     _history: list[dict[str, str]] = field(default_factory=list, init=False)
+    last_commands: list[str] = field(default_factory=list, init=False)
+    last_results: list[str] = field(default_factory=list, init=False)
 
     # ------------------------------------------------------------------
     # Public API
@@ -106,6 +118,8 @@ class GameMaster:
         log.debug("GM.interpret commands=%r", commands)
         results = self._execute(commands)
         log.debug("GM.execute results=%r", results)
+        self.last_commands = list(commands)
+        self.last_results = list(results)
         # Rebuild context after execution so newly activated cases are visible to the narrator
         narrate_context = self._build_context()
         narrative = self._narrate(player_input, commands, results, narrate_context)
@@ -351,9 +365,10 @@ class GameMaster:
         results: list[str] = []
         for cmd in commands:
             try:
-                results.append(self.app.run_command(cmd))
+                result = self.app.run_command(cmd)
+                results.append(f"[command ok: {cmd}]\n{result}")
             except Exception as exc:
-                results.append(f"[action not possible: {exc}]")
+                results.append(f"[command failed: {cmd}]\n[action not possible: {exc}]")
         return results
 
     # ------------------------------------------------------------------
@@ -435,7 +450,23 @@ class GameMaster:
 
 
 _KNOWN_VERBS: frozenset[str] = frozenset(
-    ["start", "overview", "look", "enter", "go", "inspect", "talk", "clues", "case"]
+    [
+        "start",
+        "overview",
+        "status",
+        "look",
+        "enter",
+        "go",
+        "inspect",
+        "talk",
+        "clues",
+        "journal",
+        "board",
+        "leads",
+        "matters",
+        "compare",
+        "case",
+    ]
 )
 
 _TOOL_CALL_RE = re.compile(r"[`{}<|]|tool_call|```", re.IGNORECASE)

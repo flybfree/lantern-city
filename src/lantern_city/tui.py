@@ -21,6 +21,7 @@ import argparse
 import asyncio
 import datetime
 import json
+import os
 from pathlib import Path
 
 from rich.markup import escape
@@ -145,14 +146,24 @@ class TurnLogger:
     def __init__(self, database_path: str) -> None:
         self._path = Path(database_path).with_suffix(".log.json")
 
-    def record(self, *, mode: str, player_input: str, response: str) -> None:
+    def record(
+        self,
+        *,
+        mode: str,
+        player_input: str,
+        response: str,
+        debug: dict | None = None,
+    ) -> None:
         entries: list[dict] = self._load()
-        entries.append({
+        entry = {
             "ts": datetime.datetime.now().isoformat(timespec="seconds"),
             "mode": mode,
             "input": player_input,
             "response": response,
-        })
+        }
+        if debug:
+            entry["debug"] = debug
+        entries.append(entry)
         entries = entries[-self.MAX_ENTRIES:]
         try:
             self._path.write_text(
@@ -1039,8 +1050,30 @@ class LanternCityTUI(App[None]):
         if event.state == WorkerState.SUCCESS:
             if name == "gm":
                 prose = event.worker.result  # type: ignore[assignment]
+                if os.getenv("LANTERN_DEBUG") and self._gm is not None:
+                    commands = list(self._gm.last_commands)
+                    if commands:
+                        command_text = "\n".join(f"  - {cmd}" for cmd in commands)
+                    else:
+                        command_text = "  - (no command executed)"
+                    self.query_one("#narrative", RichLog).write(
+                        Text.from_markup(
+                            f"[dim]GM debug commands:[/dim]\n[dim]{escape(command_text)}[/dim]"
+                        )
+                    )
                 self.query_one("#narrative", RichLog).write(escape(prose))
-                self._turn_log.record(mode="GM", player_input=self._last_input, response=prose)
+                gm_debug: dict | None = None
+                if self._gm is not None:
+                    gm_debug = {
+                        "commands": list(self._gm.last_commands),
+                        "results": list(self._gm.last_results),
+                    }
+                self._turn_log.record(
+                    mode="GM",
+                    player_input=self._last_input,
+                    response=prose,
+                    debug=gm_debug,
+                )
             else:
                 result: str = event.worker.result  # type: ignore[assignment]
                 self.query_one("#narrative", RichLog).write(escape(result))
