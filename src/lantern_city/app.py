@@ -5,6 +5,7 @@ import shlex
 import sys
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from pathlib import Path
 from time import perf_counter
 
@@ -45,6 +46,7 @@ from lantern_city.models import (
 )
 from lantern_city.progression import apply_progress_change, get_tier
 from lantern_city.seed_schema import validate_city_seed
+from lantern_city.simulation import WorldTurnPlan, plan_world_turn, turn_label
 from lantern_city.social import run_offscreen_npc_tick
 from lantern_city.store import SQLiteStore
 from lantern_city.log import get_logger
@@ -52,10 +54,6 @@ from lantern_city.log import get_logger
 log = get_logger(__name__)
 
 TURN_ZERO = "turn_0"
-TURN_ONE = "turn_1"
-TURN_TWO = "turn_2"
-TURN_THREE = "turn_3"
-TURN_FOUR = "turn_4"
 
 _AWS_ID = "aws_player_001"
 
@@ -123,6 +121,14 @@ _MODEL_QUALITY_PROBE_SCHEMA: dict[str, object] = {
 _MVP_BASELINE_CASE_IDS: frozenset[str] = frozenset({"case_missing_clerk"})
 
 
+@dataclass(frozen=True, slots=True)
+class _AppliedWorldTurn:
+    updated_at: str
+    catch_up_turns: int
+    case_pressure_updates: list[str]
+    offscreen_updates: list[str]
+
+
 @dataclass(slots=True)
 class LanternCityApp:
     database_path: str | Path
@@ -132,6 +138,9 @@ class LanternCityApp:
 
     def __post_init__(self) -> None:
         self.store = SQLiteStore(self.database_path)
+
+    def _now(self) -> datetime:
+        return datetime.now(UTC)
 
     def start_new_game(
         self,
@@ -240,10 +249,12 @@ class LanternCityApp:
     def enter_district(self, district_id: str) -> str:
         log.debug("enter_district %r", district_id)
         city = self._require_city()
+        turn_plan = self._plan_world_turn()
+        updated_at = self._planned_updated_at(turn_plan)
         outcome = handle_player_request(
             self.store,
             city_id=city.id,
-            request=self._request("district entry", target_id=district_id, updated_at=TURN_ONE),
+            request=self._request("district entry", target_id=district_id, updated_at=updated_at),
             llm_config=self.llm_config,
         )
         district = outcome.active_slice.district
@@ -253,7 +264,13 @@ class LanternCityApp:
         visited = list(existing_pos.visited_district_ids) if existing_pos else []
         if district_id not in visited:
             visited.append(district_id)
-        self._save_position(district_id=district_id, location_id=None, npc_ids=[], visited_district_ids=visited)
+        self._save_position(
+            district_id=district_id,
+            location_id=None,
+            npc_ids=[],
+            visited_district_ids=visited,
+            updated_at=updated_at,
+        )
         visible_npc = "None"
         preferred_npc = next(
             (npc for npc in outcome.active_slice.npcs if npc.id == "npc_shrine_keeper"),
@@ -291,26 +308,28 @@ class LanternCityApp:
             now_available=outcome.response.now_available,
             next_actions=outcome.response.next_actions,
         )
-        transient_text = self._maybe_transient_encounter(district_id, district, updated_at=TURN_ONE)
+        transient_text = self._maybe_transient_encounter(district_id, district, updated_at=updated_at)
         if transient_text:
             lines.append(f"\n{transient_text}")
-        case_pressure_updates = self._run_case_pressure_updates(
-            updated_at=TURN_ONE,
-            progressed_case_ids=set(),
+        turn_notices = self._apply_world_turn_plan(
+            turn_plan,
             focus_district_id=district_id,
         )
-        if case_pressure_updates:
+        if turn_notices.catch_up_turns:
+            lines.append(f"[Time passes: {turn_notices.catch_up_turns} extra turn(s)]")
+        if turn_notices.case_pressure_updates:
             lines.append("\nCase pressure:")
-            lines.extend(f"  - {line}" for line in case_pressure_updates[:4])
-        offscreen_updates = self._run_offscreen_npc_updates(updated_at=TURN_ONE, focus_district_id=district_id)
-        if offscreen_updates:
+            lines.extend(f"  - {line}" for line in turn_notices.case_pressure_updates[:4])
+        if turn_notices.offscreen_updates:
             lines.append("\nOffscreen movement:")
-            lines.extend(f"  - {line}" for line in offscreen_updates[:4])
+            lines.extend(f"  - {line}" for line in turn_notices.offscreen_updates[:4])
         return "\n".join(lines)
 
     def talk_to_npc(self, npc_id: str, prompt: str) -> str:
         city = self._require_city()
         progress = self._require_progress()
+        turn_plan = self._plan_world_turn()
+        updated_at = self._planned_updated_at(turn_plan)
 
         # Peek at any pending case hook BEFORE generation so the LLM can weave it in
         pending_case, case_intro_text = self._peek_npc_case_hook(npc_id)
@@ -322,14 +341,14 @@ class LanternCityApp:
                 "talk to NPC",
                 target_id=npc_id,
                 input_text=prompt,
-                updated_at=TURN_TWO,
+                updated_at=updated_at,
             ),
             llm_config=self.llm_config,
             progress=progress,
             case_intro_text=case_intro_text,
         )
         npc = outcome.active_slice.npcs[0]
-        self._save_position(npc_ids=[npc.id])
+        self._save_position(npc_ids=[npc.id], updated_at=updated_at)
         clue = self._npc_clue(npc)
         progress = self._require_progress()
         updates = []
@@ -338,7 +357,7 @@ class LanternCityApp:
             clue = clarify_clue(
                 clue,
                 clarification_text=f"{npc.name} provides testimony connecting the evidence to the case.",
-                updated_at=TURN_TWO,
+                updated_at=updated_at,
             )
             updates.append(clue)
 
@@ -347,25 +366,25 @@ class LanternCityApp:
             track="clue_mastery",
             amount=4,
             reason=f"Gained testimony from {npc.name}.",
-            updated_at=TURN_TWO,
+            updated_at=updated_at,
         )
         updates.append(progress)
         self.store.save_objects_atomically(updates)
         if clue is not None:
-            self._acquire_clues([clue.id])
+            self._acquire_clues([clue.id], updated_at=updated_at)
 
         district = outcome.active_slice.district
         propagation_notices = []
         if district is not None:
             city = self._require_city()
-            propagation_notices = self._propagate_missingness(city, district, updated_at=TURN_TWO)
+            propagation_notices = self._propagate_missingness(city, district, updated_at=updated_at)
 
         # Activate the pending case now that dialogue has surfaced it
         progressed_case_ids: set[str] = set()
         if pending_case is not None:
-            activated = transition_case(pending_case, "active", updated_at=TURN_TWO)
+            activated = transition_case(pending_case, "active", updated_at=updated_at)
             self.store.save_object(activated)
-            self._introduce_case(pending_case.id)
+            self._introduce_case(pending_case.id, updated_at=updated_at)
             progressed_case_ids.add(pending_case.id)
         if clue is not None and clue.related_case_ids:
             progressed_case_ids.update(clue.related_case_ids)
@@ -388,23 +407,27 @@ class LanternCityApp:
             now_available=outcome.response.now_available,
             next_actions=outcome.response.next_actions,
         )
-        case_pressure_updates = self._run_case_pressure_updates(
-            updated_at=TURN_TWO,
+        turn_notices = self._apply_world_turn_plan(
+            turn_plan,
             progressed_case_ids=progressed_case_ids,
             focus_district_id=outcome.active_slice.district.id if outcome.active_slice.district else None,
+            exclude_npc_ids={npc_id},
         )
-        if case_pressure_updates:
+        if turn_notices.catch_up_turns:
+            lines.append(f"[Time passes: {turn_notices.catch_up_turns} extra turn(s)]")
+        if turn_notices.case_pressure_updates:
             lines.append("[Case pressure]")
-            lines.extend(case_pressure_updates[:4])
-        offscreen_updates = self._run_offscreen_npc_updates(updated_at=TURN_TWO, focus_district_id=outcome.active_slice.district.id if outcome.active_slice.district else None, exclude_npc_ids={npc_id})
-        if offscreen_updates:
+            lines.extend(turn_notices.case_pressure_updates[:4])
+        if turn_notices.offscreen_updates:
             lines.append("[Offscreen shifts]")
-            lines.extend(offscreen_updates[:4])
+            lines.extend(turn_notices.offscreen_updates[:4])
         return "\n".join(lines)
 
     def inspect_location(self, location_id: str, object_name: str | None = None) -> str:
         city = self._require_city()
         progress = self._require_progress()
+        turn_plan = self._plan_world_turn()
+        updated_at = self._planned_updated_at(turn_plan)
         outcome = handle_player_request(
             self.store,
             city_id=city.id,
@@ -412,7 +435,7 @@ class LanternCityApp:
                 "inspect location",
                 target_id=location_id,
                 input_text=object_name or "",
-                updated_at=TURN_THREE,
+                updated_at=updated_at,
             ),
             llm_config=self.llm_config,
             progress=progress,
@@ -420,7 +443,7 @@ class LanternCityApp:
         district = outcome.active_slice.district
         if district is None:
             return outcome.response.narrative_text
-        self._save_position(location_id=location_id)
+        self._save_position(location_id=location_id, updated_at=updated_at)
 
         lantern_profile = LanternRuleProfile(
             state=district.lantern_condition,
@@ -439,11 +462,11 @@ class LanternCityApp:
                 apply_lantern_to_clue(
                     clue,
                     lantern_profile,
-                    updated_at=TURN_THREE,
+                    updated_at=updated_at,
                     corroborated=is_corroborated(clue, all_clues),
                 ),
                 location_id=inspected_location_id,
-                updated_at=TURN_THREE,
+                updated_at=updated_at,
             )
             for clue in discoverable
         ]
@@ -453,12 +476,12 @@ class LanternCityApp:
             track="lantern_understanding",
             amount=3,
             reason="Checked clues against local lantern conditions.",
-            updated_at=TURN_THREE,
+            updated_at=updated_at,
         )
         self.store.save_objects_atomically([*updated_clues, progress])
-        self._acquire_clues([c.id for c in updated_clues])
+        self._acquire_clues([c.id for c in updated_clues], updated_at=updated_at)
 
-        propagation_notices = self._propagate_missingness(city, district, updated_at=TURN_THREE)
+        propagation_notices = self._propagate_missingness(city, district, updated_at=updated_at)
 
         lines = []
         if object_name:
@@ -493,26 +516,29 @@ class LanternCityApp:
             for clue in updated_clues
             for case_id in clue.related_case_ids
         }
-        case_pressure_updates = self._run_case_pressure_updates(
-            updated_at=TURN_THREE,
+        turn_notices = self._apply_world_turn_plan(
+            turn_plan,
             progressed_case_ids=progressed_case_ids,
             focus_district_id=district.id,
         )
-        if case_pressure_updates:
+        if turn_notices.catch_up_turns:
+            lines.append(f"[Time passes: {turn_notices.catch_up_turns} extra turn(s)]")
+        if turn_notices.case_pressure_updates:
             lines.append("[Case pressure]")
-            lines.extend(case_pressure_updates[:4])
-        offscreen_updates = self._run_offscreen_npc_updates(updated_at=TURN_THREE, focus_district_id=district.id)
-        if offscreen_updates:
+            lines.extend(turn_notices.case_pressure_updates[:4])
+        if turn_notices.offscreen_updates:
             lines.append("[Offscreen shifts]")
-            lines.extend(offscreen_updates[:4])
+            lines.extend(turn_notices.offscreen_updates[:4])
         return "\n".join(lines)
 
     def advance_case(self, case_id: str) -> str:
         city = self._require_city()
+        turn_plan = self._plan_world_turn()
+        updated_at = self._planned_updated_at(turn_plan)
         handle_player_request(
             self.store,
             city_id=city.id,
-            request=self._request("review case", target_id=case_id, updated_at=TURN_FOUR),
+            request=self._request("review case", target_id=case_id, updated_at=updated_at),
             llm_config=self.llm_config,
         )
         case_obj = self.store.load_object("CaseState", case_id)
@@ -538,7 +564,7 @@ class LanternCityApp:
         updated_case = transition_case(
             case,
             new_status,
-            updated_at=TURN_FOUR,
+            updated_at=updated_at,
             resolution_summary=resolution_summary,
             fallout_summary=fallout_summary,
         )
@@ -551,7 +577,7 @@ class LanternCityApp:
                 track=track,
                 amount=amount,
                 reason=reason,
-                updated_at=TURN_FOUR,
+                updated_at=updated_at,
             )
         self.store.save_object(progress)
 
@@ -590,17 +616,18 @@ class LanternCityApp:
         lines.append("Follow-up:")
         lines.append("  - overview")
         lines.append("  - leads")
-        case_pressure_updates = self._run_case_pressure_updates(
-            updated_at=TURN_FOUR,
+        turn_notices = self._apply_world_turn_plan(
+            turn_plan,
             progressed_case_ids={case_id},
         )
-        if case_pressure_updates:
+        if turn_notices.catch_up_turns:
+            lines.append(f"\n[Time passes: {turn_notices.catch_up_turns} extra turn(s)]")
+        if turn_notices.case_pressure_updates:
             lines.append("\nCase pressure:")
-            lines.extend(f"  - {line}" for line in case_pressure_updates[:4])
-        offscreen_updates = self._run_offscreen_npc_updates(updated_at=TURN_FOUR)
-        if offscreen_updates:
+            lines.extend(f"  - {line}" for line in turn_notices.case_pressure_updates[:4])
+        if turn_notices.offscreen_updates:
             lines.append("\nOffscreen shifts:")
-            lines.extend(f"  - {line}" for line in offscreen_updates[:4])
+            lines.extend(f"  - {line}" for line in turn_notices.offscreen_updates[:4])
         return "\n".join(lines)
 
     def _run_case_pressure_updates(
@@ -687,6 +714,82 @@ class LanternCityApp:
         if updated_npcs:
             self.store.save_objects_atomically(updated_npcs)
         return changes
+
+    def _plan_world_turn(self) -> WorldTurnPlan:
+        city = self._require_city()
+        pos = self._load_position()
+        last_meaningful_action_at = None if pos is None else pos.last_meaningful_action_at
+        if self._resolved_startup_mode() == "mvp_baseline":
+            last_meaningful_action_at = None
+        return plan_world_turn(
+            current_time_index=city.time_index,
+            last_meaningful_action_at=last_meaningful_action_at,
+            now=self._now(),
+        )
+
+    def _planned_updated_at(self, turn_plan: WorldTurnPlan) -> str:
+        city = self._require_city()
+        return turn_label(city.time_index + turn_plan.total_turns)
+
+    def _apply_world_turn_plan(
+        self,
+        turn_plan: WorldTurnPlan,
+        *,
+        progressed_case_ids: set[str] | None = None,
+        focus_district_id: str | None = None,
+        exclude_npc_ids: set[str] | None = None,
+    ) -> _AppliedWorldTurn:
+        city = self._require_city()
+        current_city = city
+        case_pressure_updates: list[str] = []
+        offscreen_updates: list[str] = []
+        progressed_ids = progressed_case_ids or set()
+
+        for step_index in range(turn_plan.total_turns):
+            next_time_index = current_city.time_index + 1
+            updated_at = turn_label(next_time_index)
+            updated_city = current_city.model_copy(
+                update={
+                    "time_index": next_time_index,
+                    "updated_at": updated_at,
+                    "version": current_city.version + 1,
+                }
+            )
+            self.store.save_object(updated_city)
+            current_city = updated_city
+
+            step_progress = progressed_ids if step_index == turn_plan.total_turns - 1 else set()
+            case_pressure_updates.extend(
+                self._run_case_pressure_updates(
+                    updated_at=updated_at,
+                    progressed_case_ids=step_progress,
+                    focus_district_id=focus_district_id,
+                )
+            )
+            offscreen_updates.extend(
+                self._run_offscreen_npc_updates(
+                    updated_at=updated_at,
+                    focus_district_id=focus_district_id,
+                    exclude_npc_ids=exclude_npc_ids,
+                )
+            )
+
+        self._mark_meaningful_action(
+            current_time_iso=turn_plan.current_time_iso,
+            updated_at=current_city.updated_at,
+        )
+        return _AppliedWorldTurn(
+            updated_at=current_city.updated_at,
+            catch_up_turns=turn_plan.catch_up_turns,
+            case_pressure_updates=case_pressure_updates,
+            offscreen_updates=offscreen_updates,
+        )
+
+    def _mark_meaningful_action(self, *, current_time_iso: str, updated_at: str) -> None:
+        self._save_position(
+            last_meaningful_action_at=current_time_iso,
+            updated_at=updated_at,
+        )
 
     def _append_scene_affordances(
         self,
@@ -1254,6 +1357,7 @@ class LanternCityApp:
                 lantern_condition = district.lantern_condition
         return {
             "city_id": city.id,
+            "time_index": city.time_index,
             "case_status": None if case is None else case.status,
             "clue_reliability": None if clue is None else clue.reliability,
             "lantern_condition": lantern_condition,
@@ -2701,16 +2805,21 @@ class LanternCityApp:
             ]
         )
 
-    def _introduce_case(self, case_id: str) -> None:
+    def _introduce_case(self, case_id: str, *, updated_at: str | None = None) -> None:
         """Mark a case as known to the player so it appears in the sidebar."""
         pos = self._load_position()
         if pos is None or case_id in pos.known_case_ids:
             return
         self.store.save_object(
-            pos.model_copy(update={"known_case_ids": [*pos.known_case_ids, case_id], "updated_at": TURN_ONE})
+            pos.model_copy(
+                update={
+                    "known_case_ids": [*pos.known_case_ids, case_id],
+                    "updated_at": updated_at or pos.updated_at,
+                }
+            )
         )
 
-    def _acquire_clues(self, clue_ids: list[str]) -> None:
+    def _acquire_clues(self, clue_ids: list[str], *, updated_at: str | None = None) -> None:
         """Merge clue_ids into the player's ActiveWorkingSet without duplicates."""
         if not clue_ids:
             return
@@ -2721,14 +2830,19 @@ class LanternCityApp:
         new_ids = [cid for cid in clue_ids if cid not in existing]
         if new_ids:
             self.store.save_object(
-                pos.model_copy(update={"clue_ids": [*pos.clue_ids, *new_ids], "updated_at": TURN_ONE})
+                pos.model_copy(
+                    update={
+                        "clue_ids": [*pos.clue_ids, *new_ids],
+                        "updated_at": updated_at or pos.updated_at,
+                    }
+                )
             )
 
     def _load_position(self) -> ActiveWorkingSet | None:
         obj = self.store.load_object("ActiveWorkingSet", _AWS_ID)
         return obj if isinstance(obj, ActiveWorkingSet) else None
 
-    def _save_position(self, **updates: object) -> None:
+    def _save_position(self, *, updated_at: str | None = None, **updates: object) -> None:
         log.debug("_save_position %r", updates)
         city = self._require_city()
         pos = self._load_position()
@@ -2736,10 +2850,12 @@ class LanternCityApp:
             pos = ActiveWorkingSet(
                 id=_AWS_ID,
                 created_at=TURN_ZERO,
-                updated_at=TURN_ONE,
+                updated_at=updated_at or turn_label(city.time_index),
                 city_id=city.id,
             )
-        self.store.save_object(pos.model_copy(update={**updates, "updated_at": TURN_ONE}))
+        self.store.save_object(
+            pos.model_copy(update={**updates, "updated_at": updated_at or pos.updated_at})
+        )
 
     def _request(
         self,

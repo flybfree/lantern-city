@@ -255,6 +255,7 @@ class ActiveWorkingSet(RuntimeModel):
     clue_ids: list[str] = Field(default_factory=list)
     known_case_ids: list[str] = Field(default_factory=list)
     visited_district_ids: list[str] = Field(default_factory=list)
+    last_meaningful_action_at: str = ""
     cached_summaries: dict[str, str] = Field(default_factory=dict)
 
 

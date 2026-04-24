@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from lantern_city.active_slice import ActiveSlice
 from lantern_city.case_bootstrap import bootstrap_generated_case
+from datetime import UTC, datetime, timedelta
+
 from lantern_city.app import LanternCityApp, _case_runtime_mode, _load_default_seed
 from lantern_city.cases import transition_case
 from lantern_city.engine import EngineOutcome
@@ -171,7 +173,11 @@ def test_start_new_game_reports_successful_model_check(tmp_path, monkeypatch) ->
         "_generate_city_seed",
         lambda self, concept=None, on_progress=None: validate_city_seed(_load_default_seed()),
     )
-    monkeypatch.setattr(LanternCityApp, "_generate_world_content", lambda self, on_progress=None: None)
+    monkeypatch.setattr(
+        LanternCityApp,
+        "_generate_world_content",
+        lambda self, on_progress=None: self._seed_authored_scene_objects(),
+    )
     monkeypatch.setattr(LanternCityApp, "_generate_latent_cases", lambda self, count=2: None)
 
     app = LanternCityApp(
@@ -203,7 +209,11 @@ def test_start_new_game_reports_warning_when_model_probe_fails(tmp_path, monkeyp
         "_generate_city_seed",
         lambda self, concept=None, on_progress=None: validate_city_seed(_load_default_seed()),
     )
-    monkeypatch.setattr(LanternCityApp, "_generate_world_content", lambda self, on_progress=None: None)
+    monkeypatch.setattr(
+        LanternCityApp,
+        "_generate_world_content",
+        lambda self, on_progress=None: self._seed_authored_scene_objects(),
+    )
     monkeypatch.setattr(LanternCityApp, "_generate_latent_cases", lambda self, count=2: None)
 
     app = LanternCityApp(
@@ -216,6 +226,74 @@ def test_start_new_game_reports_warning_when_model_probe_fails(tmp_path, monkeyp
     assert "Lantern City ready:" in output
     assert "Startup mode: generated_runtime" in output
     assert "Model check: warning" in output
+
+
+def test_meaningful_commands_advance_city_time_index(tmp_path) -> None:
+    app = LanternCityApp(tmp_path / "lantern-city.sqlite3")
+
+    app.start_new_game()
+    assert app.get_state_snapshot()["time_index"] == 0
+
+    app.enter_district("district_old_quarter")
+    assert app.get_state_snapshot()["time_index"] == 1
+
+    app.talk_to_npc("npc_shrine_keeper", "Ask who last saw the missing clerk.")
+    assert app.get_state_snapshot()["time_index"] == 2
+
+    app.inspect_location("location_shrine_lane")
+    assert app.get_state_snapshot()["time_index"] == 3
+
+
+def test_generated_runtime_applies_idle_delay_catch_up_turns(tmp_path, monkeypatch) -> None:
+    start_time = datetime(2026, 4, 24, 12, 0, tzinfo=UTC)
+    times = iter([start_time, start_time + timedelta(minutes=12)])
+
+    monkeypatch.setattr(LanternCityApp, "_now", lambda self: next(times))
+    monkeypatch.setattr(
+        LanternCityApp,
+        "_probe_llm_quality",
+        lambda self: "Model check: pass — startup probe validated NPC response quality in 0.1s.",
+    )
+    monkeypatch.setattr(
+        LanternCityApp,
+        "_generate_city_seed",
+        lambda self, concept=None, on_progress=None: validate_city_seed(_load_default_seed()),
+    )
+    monkeypatch.setattr(
+        LanternCityApp,
+        "_generate_world_content",
+        lambda self, on_progress=None: self._seed_authored_scene_objects(),
+    )
+    monkeypatch.setattr(LanternCityApp, "_generate_latent_cases", lambda self, count=2: None)
+
+    app = LanternCityApp(
+        tmp_path / "lantern-city.sqlite3",
+        llm_config=OpenAICompatibleConfig(base_url="http://localhost:1234/v1", model="test-model"),
+        startup_mode="generated_runtime",
+    )
+
+    app.start_new_game()
+    app.enter_district("district_old_quarter")
+    output = app.talk_to_npc("npc_shrine_keeper", "Ask what changed after the outage.")
+
+    assert "[Time passes: 2 extra turn(s)]" in output
+    assert app.get_state_snapshot()["time_index"] == 4
+
+
+def test_mvp_baseline_ignores_idle_delay_catch_up(tmp_path, monkeypatch) -> None:
+    start_time = datetime(2026, 4, 24, 12, 0, tzinfo=UTC)
+    times = iter([start_time, start_time + timedelta(minutes=12)])
+
+    monkeypatch.setattr(LanternCityApp, "_now", lambda self: next(times))
+
+    app = LanternCityApp(tmp_path / "lantern-city.sqlite3")
+
+    app.start_new_game()
+    app.enter_district("district_old_quarter")
+    output = app.talk_to_npc("npc_shrine_keeper", "Ask what changed after the outage.")
+
+    assert "[Time passes:" not in output
+    assert app.get_state_snapshot()["time_index"] == 2
 
 
 def test_case_board_includes_actionable_recovery_section(tmp_path) -> None:
