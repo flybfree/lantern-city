@@ -38,6 +38,7 @@ from lantern_city.cli import (
     _default_player_startup_mode,
     _load_llm_config,
     _load_startup_mode,
+    _parse_startup_mode_arg,
     _save_llm_config,
 )
 from lantern_city.game_master import GameMaster
@@ -1612,8 +1613,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--startup-mode",
         dest="startup_mode",
-        choices=("auto", "mvp_baseline", "generated_runtime"),
+        type=_parse_startup_mode_arg,
+        metavar="{generated_runtime,mvp_baseline}",
         default="auto",
+        help="player-facing startup style; internal 'auto' compatibility is still accepted",
     )
     args = parser.parse_args(argv)
 

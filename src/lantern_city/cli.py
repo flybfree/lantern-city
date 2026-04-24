@@ -11,6 +11,14 @@ from lantern_city.app import LanternCityApp
 from lantern_city.llm_client import OpenAICompatibleConfig
 
 
+def _parse_startup_mode_arg(value: str) -> str:
+    if value in {"auto", "mvp_baseline", "generated_runtime"}:
+        return value
+    raise argparse.ArgumentTypeError(
+        "startup mode must be one of: generated_runtime, mvp_baseline"
+    )
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="lantern-city")
     parser.add_argument("--db", dest="database_path", default="lantern-city.sqlite3")
@@ -19,8 +27,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--startup-mode",
         dest="startup_mode",
-        choices=("auto", "mvp_baseline", "generated_runtime"),
+        type=_parse_startup_mode_arg,
+        metavar="{generated_runtime,mvp_baseline}",
         default="auto",
+        help="player-facing startup style; internal 'auto' compatibility is still accepted",
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
