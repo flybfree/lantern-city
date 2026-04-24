@@ -277,6 +277,7 @@ A builder that gathers only the current district, location, scene, NPCs, clues, 
 
 **Deliverable:**
 A single function that loads relevant state, generates narrow output if needed, applies rules, persists changes, and returns a response object.
+Responses must make meaningful outcomes legible, including introducing pre-case clues as noteworthy even when their meaning is still unclear.
 
 ---
 
@@ -318,6 +319,7 @@ Structured district summary, local locations, rumor pool, and nearby NPC anchors
 
 **Deliverable:**
 Dialogue text plus structured updates such as clue changes, relationship deltas, and next actions.
+If an NPC surfaces a clue tied to a case the player has not formally discovered yet, the response should flag it as unusual, relevant, or worth remembering without explaining the whole case too early.
 
 ---
 
@@ -331,6 +333,7 @@ Dialogue text plus structured updates such as clue changes, relationship deltas,
 
 **Deliverable:**
 A clue lifecycle with reliability and status management.
+This includes pre-case clue discovery, with enough signaling metadata or rule support for the response layer to present the clue as significant before the case is active.
 
 ---
 

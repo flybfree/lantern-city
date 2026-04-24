@@ -6,6 +6,7 @@
 
 **Architecture:**
 Use a persistent world-state model backed by cached JSON objects. Generate the city in layers: seed -> district -> location/scene -> NPC response -> fallout. Keep only the active slice of the city in memory while storing all other state durably. The runtime should be able to load a narrow context, generate only missing detail, apply rule-based state changes, and persist updates after every meaningful action.
+Meaningful outcomes must be legible in the response layer; if the player encounters a clue before the related case is formally active, the game should still frame it as significant even if its meaning is unclear.
 
 **Tech Stack:**
 - Python backend
@@ -584,6 +585,7 @@ Expected: FAIL
 **Step 3: Write minimal implementation**
 
 Load state, generate narrow content, apply consequences, persist updates, return response.
+Ensure the response clearly signals meaningful outcomes, including pre-case clue discovery.
 
 **Step 4: Run test to verify pass**
 
@@ -623,6 +625,7 @@ Expected: FAIL
 **Step 3: Write minimal implementation**
 
 Return narrative text, state changes, and next actions.
+Format clue discoveries so the player can tell when something important was found, even before the game can fully explain what it means.
 
 **Step 4: Run test to verify pass**
 

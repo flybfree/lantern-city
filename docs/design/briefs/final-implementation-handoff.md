@@ -124,6 +124,7 @@ It must create targeted instability, not random nonsense.
 
 ### 7. Mystery through partial truth, not unclear writing
 The player may lack information, but the system and prose should remain legible.
+If the player finds a clue before its related case is formally active, the game should frame that clue as noteworthy so the player knows it matters even if the meaning is not yet clear.
 
 ### 8. The city must remember
 Case resolution must change persistent state in a visible way.
@@ -243,6 +244,8 @@ The first real playable vertical slice should be:
 - persist state
 - show updated next actions
 
+That first clue may precede formal case activation, but the response must still signal that it is significant rather than dropping it with no framing.
+
 This is a better early milestone than trying to build the whole case at once.
 
 ## Review Rules
@@ -303,6 +306,7 @@ Do:
 - cache summaries separately from durable truth
 - expose player-facing consequences clearly
 - let failure create new state rather than dead ends
+- make meaningful clue discoveries legible, especially before the player fully understands what case they belong to
 
 ## Recommended Runtime Priorities
 
