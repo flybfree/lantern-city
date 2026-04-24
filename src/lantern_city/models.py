@@ -32,6 +32,7 @@ class RelationshipSnapshot(LanternCityModel):
     fear: float = 0.0
     status: str = ""
     last_updated_at: str = ""
+    last_changed_turn: str = ""
 
 
 class CitySeed(RuntimeModel):

@@ -21,18 +21,63 @@ def apply_relationship_shift(
     source_actor_id: str = "player",
     updated_at: str,
 ) -> SocialUpdateResult:
-    trust = _clamp01(npc.trust_in_player + trust_delta)
-    suspicion = _clamp01(npc.suspicion + suspicion_delta)
-    fear = _clamp01(npc.fear + fear_delta)
+    result = apply_actor_relationship_shift(
+        npc,
+        actor_id=source_actor_id,
+        trust_delta=trust_delta,
+        suspicion_delta=suspicion_delta,
+        fear_delta=fear_delta,
+        tag=tag,
+        updated_at=updated_at,
+    )
+    if source_actor_id != "player":
+        return result
 
-    relationship_status = _relationship_status(trust=trust, suspicion=suspicion, fear=fear)
+    snapshot = result.npc.relationships[source_actor_id]
+    return SocialUpdateResult(
+        npc=result.npc.model_copy(
+            update={
+                "trust_in_player": snapshot.trust,
+                "suspicion": snapshot.suspicion,
+                "fear": snapshot.fear,
+                "updated_at": updated_at,
+            }
+        ),
+        state_changes=result.state_changes,
+    )
+
+
+def apply_actor_relationship_shift(
+    npc: NPCState,
+    *,
+    actor_id: str,
+    trust_delta: float = 0.0,
+    suspicion_delta: float = 0.0,
+    fear_delta: float = 0.0,
+    tag: str | None = None,
+    status_override: str | None = None,
+    updated_at: str,
+) -> SocialUpdateResult:
+    baseline = npc.relationships.get(actor_id)
+    trust_seed = npc.trust_in_player if actor_id == "player" else (0.0 if baseline is None else baseline.trust)
+    suspicion_seed = npc.suspicion if actor_id == "player" else (0.0 if baseline is None else baseline.suspicion)
+    fear_seed = npc.fear if actor_id == "player" else (0.0 if baseline is None else baseline.fear)
+
+    trust = _clamp01(trust_seed + trust_delta)
+    suspicion = _clamp01(suspicion_seed + suspicion_delta)
+    fear = _clamp01(fear_seed + fear_delta)
+
+    relationship_status = status_override or _relationship_status(
+        trust=trust, suspicion=suspicion, fear=fear
+    )
     relationships = dict(npc.relationships)
-    relationships[source_actor_id] = RelationshipSnapshot(
+    relationships[actor_id] = RelationshipSnapshot(
         trust=trust,
         suspicion=suspicion,
         fear=fear,
         status=relationship_status,
         last_updated_at=updated_at,
+        last_changed_turn=updated_at,
     )
 
     relationship_flags = _merge_flag(npc.relationship_flags, relationship_status)
@@ -40,24 +85,24 @@ def apply_relationship_shift(
         relationship_flags = _merge_flag(relationship_flags, tag)
 
     state_changes: list[str] = []
+    actor_label = "trust" if actor_id == "player" else f"stance toward {actor_id}"
     if trust_delta:
         direction = "rose" if trust_delta > 0 else "fell"
-        state_changes.append(f"{npc.name}'s trust {direction}.")
+        state_changes.append(f"{npc.name}'s {actor_label} {direction}.")
     if suspicion_delta:
         direction = "rose" if suspicion_delta > 0 else "fell"
-        state_changes.append(f"{npc.name}'s suspicion {direction}.")
+        suffix = "" if actor_id == "player" else f" around {actor_id}"
+        state_changes.append(f"{npc.name}'s suspicion{suffix} {direction}.")
     if fear_delta:
         direction = "rose" if fear_delta > 0 else "fell"
-        state_changes.append(f"{npc.name}'s fear {direction}.")
+        suffix = "" if actor_id == "player" else f" around {actor_id}"
+        state_changes.append(f"{npc.name}'s fear{suffix} {direction}.")
     if tag:
         state_changes.append(f"Social signal: {tag}.")
 
     return SocialUpdateResult(
         npc=npc.model_copy(
             update={
-                "trust_in_player": trust,
-                "suspicion": suspicion,
-                "fear": fear,
                 "relationships": relationships,
                 "relationship_flags": relationship_flags,
                 "updated_at": updated_at,
@@ -186,6 +231,16 @@ def run_offscreen_npc_tick(
     if new_location_id != npc.location_id and new_location_id is not None:
         state_changes.append(f"{npc.name} moved to {new_location_id}.")
 
+    if npc.loyalty is not None:
+        loyalty_result = _apply_loyalty_pressure(
+            updated,
+            loyalty_actor_id=npc.loyalty,
+            offscreen_state=new_state,
+            updated_at=updated_at,
+        )
+        updated = loyalty_result.npc
+        state_changes.extend(loyalty_result.state_changes)
+
     if state_changes:
         updated = append_memory_entry(
             updated,
@@ -252,6 +307,43 @@ def _append_recent(events: list[str], event: str, *, keep: int = 6) -> list[str]
     return [*events, event][-keep:]
 
 
+def _apply_loyalty_pressure(
+    npc: NPCState,
+    *,
+    loyalty_actor_id: str,
+    offscreen_state: str,
+    updated_at: str,
+) -> SocialUpdateResult:
+    if offscreen_state in {"pursuing_objective", "obstructing", "circulating"}:
+        return apply_actor_relationship_shift(
+            npc,
+            actor_id=loyalty_actor_id,
+            trust_delta=0.05,
+            suspicion_delta=-0.02,
+            tag=f"loyalty_{offscreen_state}",
+            status_override="aligned",
+            updated_at=updated_at,
+        )
+    if offscreen_state in {"hiding", "withdrawing"}:
+        return apply_actor_relationship_shift(
+            npc,
+            actor_id=loyalty_actor_id,
+            suspicion_delta=0.05,
+            fear_delta=0.08,
+            tag="under_faction_pressure",
+            status_override="strained",
+            updated_at=updated_at,
+        )
+    return apply_actor_relationship_shift(
+        npc,
+        actor_id=loyalty_actor_id,
+        trust_delta=0.01,
+        tag="routine_alignment",
+        status_override="steady",
+        updated_at=updated_at,
+    )
+
+
 def _merge_flag(flags: list[str], flag: str) -> list[str]:
     if flag in flags:
         return flags
@@ -265,6 +357,7 @@ def _clamp01(value: float) -> float:
 __all__ = [
     "SocialUpdateResult",
     "append_memory_entry",
+    "apply_actor_relationship_shift",
     "apply_player_flag",
     "apply_relationship_shift",
     "build_conversation_memory_entry",

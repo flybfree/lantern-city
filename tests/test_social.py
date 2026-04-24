@@ -3,6 +3,7 @@ from __future__ import annotations
 from lantern_city.models import NPCState
 from lantern_city.social import (
     append_memory_entry,
+    apply_actor_relationship_shift,
     apply_relationship_shift,
     build_conversation_memory_entry,
     run_offscreen_npc_tick,
@@ -21,6 +22,7 @@ def make_npc() -> NPCState:
         trust_in_player=0.15,
         suspicion=0.55,
         fear=0.42,
+        loyalty="faction_memory_keepers",
         current_objective="Keep the archives orderly.",
     )
 
@@ -100,4 +102,42 @@ def test_apply_relationship_shift_records_status_for_player_snapshot() -> None:
     snapshot = result.npc.relationships["player"]
     assert snapshot.status == "trusted"
     assert snapshot.last_updated_at == "turn_4"
+    assert snapshot.last_changed_turn == "turn_4"
     assert "earned_trust" in result.npc.relationship_flags
+
+
+def test_apply_actor_relationship_shift_tracks_non_player_relationships() -> None:
+    npc = make_npc()
+
+    result = apply_actor_relationship_shift(
+        npc,
+        actor_id="faction_memory_keepers",
+        trust_delta=0.25,
+        suspicion_delta=0.1,
+        tag="pressured_to_comply",
+        status_override="strained",
+        updated_at="turn_5",
+    )
+
+    snapshot = result.npc.relationships["faction_memory_keepers"]
+    assert snapshot.trust == 0.25
+    assert snapshot.suspicion == 0.1
+    assert snapshot.status == "strained"
+    assert snapshot.last_changed_turn == "turn_5"
+    assert "pressured_to_comply" in result.npc.relationship_flags
+
+
+def test_run_offscreen_npc_tick_updates_loyalty_relationship_snapshot() -> None:
+    npc = make_npc()
+
+    result = run_offscreen_npc_tick(
+        npc,
+        visible_location_ids=["location_archive_steps", "location_registry_annex"],
+        updated_at="turn_6",
+    )
+
+    loyalty = result.npc.relationships["faction_memory_keepers"]
+    assert loyalty.status == "aligned"
+    assert loyalty.trust >= 0.05
+    assert loyalty.last_changed_turn == "turn_6"
+    assert f"loyalty_{result.npc.offscreen_state}" in result.npc.relationship_flags
