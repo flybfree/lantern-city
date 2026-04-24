@@ -927,12 +927,17 @@ class LanternCityApp:
                 lines.append(f"  - [{clue.reliability}] {_clue_label(clue.id)}")
         synthesis = self._summarize_case_clues(ranked_clues)
         if synthesis:
-            lines.append(f"Synthesis: {synthesis}")
+            lines.append(f"What this suggests: {synthesis}")
+        else:
+            lines.append("What this suggests: You have a live case, but the evidence picture is still thin.")
         leads = self._build_lead_lines(case=case, pos=pos, limit=4)
         if leads:
             lines.append("Strongest leads:")
             for lead in leads:
                 lines.append(f"  - {lead}")
+        lines.append("Do next:")
+        for step in self._case_recovery_actions(case=case, leads=leads):
+            lines.append(f"  - {step}")
         return "\n".join(lines)
 
     def journal(self) -> str:
@@ -990,7 +995,11 @@ class LanternCityApp:
             lines.append(
                 f"Current synthesis: {self._summarize_case_clues(sorted(visible_case_clues, key=_clue_sort_key))}"
             )
-        lines.append("Use 'board' for the active case or 'compare <clue_a> <clue_b>' to test two clues directly.")
+        lines.append("If you are stuck:")
+        lines.append("  - board")
+        lines.append("  - leads")
+        lines.append("  - matters")
+        lines.append("  - compare <clue_a> <clue_b>")
         return "\n".join(lines)
 
     def strongest_leads(self) -> str:
@@ -1004,6 +1013,10 @@ class LanternCityApp:
             lines.append(f"{case.title} [{case.pressure_level}]")
             for lead in self._build_lead_lines(case=case, pos=pos, limit=3):
                 lines.append(f"  - {lead}")
+        lines.append("Recovery:")
+        lines.append("  - matters")
+        lines.append("  - board")
+        lines.append("  - compare <clue_a> <clue_b>")
         return "\n".join(lines)
 
     def what_matters_here(self) -> str:
@@ -1288,6 +1301,22 @@ class LanternCityApp:
             if district is not None:
                 lines.append(f"Inspect a location in {district.name} tied to this case.")
         return lines[:limit]
+
+    def _case_recovery_actions(self, *, case: CaseState, leads: list[str]) -> list[str]:
+        actions: list[str] = []
+        if leads:
+            actions.append(leads[0])
+        if case.involved_district_ids:
+            district = self._district(case.involved_district_ids[0])
+            if district is not None:
+                actions.append(f"Use 'matters' in {district.name} to re-check the live scene.")
+        actions.append("Use 'leads' to rank the strongest unresolved thread.")
+        actions.append("Use 'compare <clue_a> <clue_b>' if two clues seem related or inconsistent.")
+        deduped: list[str] = []
+        for action in actions:
+            if action not in deduped:
+                deduped.append(action)
+        return deduped[:4]
 
     def _summarize_case_clues(self, clues: list[ClueState]) -> str:
         if not clues:

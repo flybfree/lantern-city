@@ -206,3 +206,46 @@ def test_start_new_game_reports_warning_when_model_probe_fails(tmp_path, monkeyp
 
     assert "Lantern City ready:" in output
     assert "Model check: warning" in output
+
+
+def test_case_board_includes_actionable_recovery_section(tmp_path) -> None:
+    app = LanternCityApp(tmp_path / "lantern-city.sqlite3")
+    app.start_new_game()
+    app.enter_district("district_old_quarter")
+    app._introduce_case("case_missing_clerk")
+    app.talk_to_npc("npc_shrine_keeper", "Ask who last saw the missing clerk.")
+
+    output = app.case_board()
+
+    assert "=== Case Board: Missing Clerk ===" in output
+    assert "What this suggests:" in output
+    assert "Do next:" in output
+    assert "Use 'leads' to rank the strongest unresolved thread." in output
+
+
+def test_journal_includes_stuck_recovery_actions(tmp_path) -> None:
+    app = LanternCityApp(tmp_path / "lantern-city.sqlite3")
+    app.start_new_game()
+    app.enter_district("district_old_quarter")
+
+    output = app.journal()
+
+    assert "=== Journal ===" in output
+    assert "If you are stuck:" in output
+    assert "  - board" in output
+    assert "  - leads" in output
+    assert "  - matters" in output
+
+
+def test_strongest_leads_includes_recovery_footer(tmp_path) -> None:
+    app = LanternCityApp(tmp_path / "lantern-city.sqlite3")
+    app.start_new_game()
+    app.enter_district("district_old_quarter")
+    app._introduce_case("case_missing_clerk")
+
+    output = app.strongest_leads()
+
+    assert "=== Strongest Leads ===" in output
+    assert "Recovery:" in output
+    assert "  - matters" in output
+    assert "  - board" in output

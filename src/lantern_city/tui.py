@@ -1076,7 +1076,12 @@ class LanternCityTUI(App[None]):
                 )
             else:
                 result: str = event.worker.result  # type: ignore[assignment]
-                self.query_one("#narrative", RichLog).write(escape(result))
+                if name == "cmd:start":
+                    self.query_one("#narrative", RichLog).write(
+                        Text.from_markup(_format_start_result_markup(result))
+                    )
+                else:
+                    self.query_one("#narrative", RichLog).write(escape(result))
                 self._turn_log.record(mode="CMD", player_input=self._last_input, response=result)
                 if name == "cmd:start":
                     self._show_case_opening_hook()
@@ -1323,6 +1328,11 @@ class LanternCityTUI(App[None]):
         if hint:
             lines.append("")
             lines.append(f"[bold]Next:[/bold] [dim]{escape(hint)}[/dim]")
+        recovery = _recovery_panel_lines(active_cases, clue_count, credible_count)
+        if recovery:
+            lines.append("")
+            lines.append("[bold]Recovery:[/bold]")
+            lines.extend(recovery)
 
         return "\n".join(lines)
 
@@ -1453,6 +1463,45 @@ def _next_step_hint(active_cases: list, clue_count: int, credible_count: int) ->
     if credible_count == 0:
         return "Talk to NPCs to raise clue reliability before resolving. Use 'board' to review open questions."
     return f"Ready to attempt resolution — type: case {case.id} or use 'leads' for one more pass."
+
+
+def _recovery_panel_lines(active_cases: list, clue_count: int, credible_count: int) -> list[str]:
+    lines: list[str] = []
+    if active_cases:
+        case = active_cases[0]
+        lines.append(
+            f"  [yellow]{escape(case.title)}[/yellow] [dim]{escape(case.pressure_level)} pressure[/dim]"
+        )
+    if clue_count == 0:
+        lines.append("  [dim]- matters  to re-check the current scene[/dim]")
+        lines.append("  [dim]- board    to review the active case[/dim]")
+        lines.append("  [dim]- leads    to pull the strongest thread[/dim]")
+        return lines
+    if credible_count == 0:
+        lines.append("  [dim]- talk to clarify an uncertain clue[/dim]")
+        lines.append("  [dim]- board    to review open questions[/dim]")
+        lines.append("  [dim]- compare  to test two clues together[/dim]")
+        return lines
+    lines.append("  [dim]- leads    to choose the strongest unresolved thread[/dim]")
+    lines.append("  [dim]- board    to review pressure and open questions[/dim]")
+    lines.append("  [dim]- compare  if two clues seem related or inconsistent[/dim]")
+    return lines
+
+
+def _format_start_result_markup(result: str) -> str:
+    lines: list[str] = []
+    for raw_line in result.splitlines():
+        line = raw_line.strip()
+        escaped = escape(raw_line)
+        if line.startswith("Model check: pass"):
+            lines.append(f"[green]{escaped}[/green]")
+        elif line.startswith("Model check: warning"):
+            lines.append(f"[yellow]{escaped}[/yellow]")
+        elif line.startswith("Lantern City ready:"):
+            lines.append(f"[bold green]{escaped}[/bold green]")
+        else:
+            lines.append(escaped)
+    return "\n".join(lines)
 
 
 # ------------------------------------------------------------------
