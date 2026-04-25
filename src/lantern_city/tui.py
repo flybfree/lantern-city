@@ -1549,6 +1549,8 @@ def _clue_reading_lines(clues: list[ClueState]) -> list[str]:
     credible = [clue for clue in clues if clue.reliability in {"credible", "solid"}]
     contradicted = [clue for clue in clues if clue.reliability == "contradicted"]
     uncertain = [clue for clue in clues if clue.reliability not in {"credible", "solid", "contradicted"}]
+    revealed = [clue for clue in clues if clue.status == "revealed"]
+    primed = [clue for clue in clues if clue.status == "primed"]
     lines: list[str] = []
     parts: list[str] = []
     if credible:
@@ -1557,6 +1559,10 @@ def _clue_reading_lines(clues: list[ClueState]) -> list[str]:
         parts.append(f"{len(contradicted)} contradict")
     if uncertain:
         parts.append(f"{len(uncertain)} need follow-up")
+    if revealed:
+        parts.append(f"{len(revealed)} revealed")
+    if primed:
+        parts.append(f"{len(primed)} primed")
     if parts:
         lines.append(f"  [dim]{' / '.join(parts)}[/dim]")
     for clue in sorted(clues, key=lambda clue: (0 if clue.reliability in {"credible", "solid"} else 1 if clue.reliability == "contradicted" else 2, clue.id))[:3]:
@@ -1580,6 +1586,10 @@ def _faction_pressure_lines(factions: list) -> list[str]:
 
 
 def _clue_short_role(clue: ClueState) -> str:
+    if clue.status == "revealed":
+        return "revealed route"
+    if clue.status == "primed":
+        return "primed clue"
     if clue.reliability == "contradicted":
         return "contradiction"
     if clue.reliability in {"credible", "solid"}:

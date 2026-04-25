@@ -1579,6 +1579,9 @@ class LanternCityApp:
                 readability_tag = self._clue_readability_tag(clue)
                 lines.append(f"  [{clue.reliability}] {_clue_label(clue.id)} ({clue.id})")
                 lines.append(f"    Role: {readability_tag}")
+                status_read = self._clue_status_read(clue)
+                if status_read:
+                    lines.append(f"    Status: {status_read}")
                 lines.append(f"    Source: {clue.source_type} / {clue.source_id.replace('_', ' ').title()}")
                 lines.append(f"    {clue.clue_text}")
                 implication = self._summarize_clue_implication(clue)
@@ -1660,6 +1663,9 @@ class LanternCityApp:
             for clue in ranked_clues[:4]:
                 lines.append(f"  - [{clue.reliability}] {_clue_label(clue.id)}")
                 lines.append(f"    Role: {self._clue_readability_tag(clue)}")
+                status_read = self._clue_status_read(clue)
+                if status_read:
+                    lines.append(f"    Status: {status_read}")
                 implication = self._summarize_clue_implication(clue)
                 if implication:
                     lines.append(f"    Why it matters: {implication}")
@@ -1727,6 +1733,9 @@ class LanternCityApp:
                     f" from {clue.source_type}"
                 )
                 lines.append(f"    role: {self._clue_readability_tag(clue)}")
+                status_read = self._clue_status_read(clue)
+                if status_read:
+                    lines.append(f"    status: {status_read}")
         if recent_npc_events:
             lines.append("Recent city movement:")
             for event in recent_npc_events:
@@ -1773,6 +1782,15 @@ class LanternCityApp:
             case_clues = self._clues_for_case(case, pos)
             if case_clues:
                 lines.append(f"  Read: {self._summarize_case_clues(sorted(case_clues, key=_clue_sort_key))}")
+                highlighted = [
+                    clue
+                    for clue in sorted(case_clues, key=_clue_sort_key)
+                    if clue.status in {"revealed", "primed"}
+                ]
+                for clue in highlighted[:2]:
+                    status_read = self._clue_status_read(clue)
+                    if status_read:
+                        lines.append(f"  Fresh opening: {_clue_label(clue.id)} ({status_read})")
             for lead in self._build_lead_lines(case=case, pos=pos, limit=3):
                 lines.append(f"  - {lead}")
         social_routes = self._recent_social_route_reads(limit=2)
@@ -2071,6 +2089,15 @@ class LanternCityApp:
     ) -> list[str]:
         clues = self._clues_for_case(case, pos)
         lines: list[str] = []
+        for clue in sorted(clues, key=_clue_sort_key):
+            if clue.status == "revealed":
+                lines.append(
+                    f"Use {_clue_label(clue.id)} now while the social opening is still fresh."
+                )
+            elif clue.status == "primed":
+                lines.append(self._clue_next_step(clue))
+            if len(lines) >= limit:
+                return lines[:limit]
         uncertain = [
             self._clue_uncertainty_prompt(clue)
             for clue in sorted(clues, key=_clue_sort_key)
@@ -2472,6 +2499,8 @@ class LanternCityApp:
         credible = [clue for clue in clues if clue.reliability in _CREDIBLE_RELIABILITIES]
         contradicted = [clue for clue in clues if clue.reliability == "contradicted"]
         uncertain = [clue for clue in clues if clue.reliability not in _CREDIBLE_RELIABILITIES and clue.reliability != "contradicted"]
+        revealed = [clue for clue in clues if clue.status == "revealed"]
+        primed = [clue for clue in clues if clue.status == "primed"]
         parts: list[str] = []
         if credible:
             parts.append(f"{len(credible)} clue(s) currently support the case theory")
@@ -2479,9 +2508,17 @@ class LanternCityApp:
             parts.append(f"{len(uncertain)} still need confirmation")
         if contradicted:
             parts.append(f"{len(contradicted)} are actively in conflict")
+        if revealed:
+            parts.append(f"{len(revealed)} were newly exposed through social follow-through")
+        if primed:
+            parts.append(f"{len(primed)} are primed for clarification")
         return "; ".join(parts)
 
     def _summarize_clue_implication(self, clue: ClueState) -> str:
+        if clue.status == "revealed":
+            return "Someone finally opened this up for you. Treat it as a fresh angle that needs to be used before pressure closes it again."
+        if clue.status == "primed":
+            return "This is ready to be clarified right now. A follow-up conversation or comparison should pay off more than usual."
         if clue.reliability in {"solid", "credible"}:
             if clue.related_case_ids:
                 return "This currently supports the strongest case theory you can defend."
@@ -2495,6 +2532,10 @@ class LanternCityApp:
         return "This is a follow-up lead rather than a conclusion. Treat it as something to test."
 
     def _clue_readability_tag(self, clue: ClueState) -> str:
+        if clue.status == "revealed":
+            return "freshly opened route"
+        if clue.status == "primed":
+            return "clarification window"
         if clue.reliability == "contradicted":
             return "contradiction to explain"
         if clue.reliability in _CREDIBLE_RELIABILITIES:
@@ -2508,6 +2549,16 @@ class LanternCityApp:
         return "possible follow-up"
 
     def _clue_next_step(self, clue: ClueState) -> str:
+        if clue.status == "revealed":
+            if clue.related_case_ids:
+                return "Use this in board or compare while the fresh reveal is still actionable."
+            return "Press this fresh reveal with compare or journal before it gets buried again."
+        if clue.status == "primed":
+            if clue.related_npc_ids:
+                npc = self._npc(clue.related_npc_ids[0])
+                if npc is not None:
+                    return f"Talk to {npc.name} while this clue is primed for clarification."
+            return "Use compare or a follow-up conversation while this clue is primed."
         if clue.reliability == "contradicted":
             return self._clue_uncertainty_prompt(clue)
         if clue.reliability in _CREDIBLE_RELIABILITIES:
@@ -2515,6 +2566,13 @@ class LanternCityApp:
                 return "Use this in board or compare to see what it strengthens."
             return "Keep this in mind when a case or second clue lines up with it."
         return self._clue_uncertainty_prompt(clue)
+
+    def _clue_status_read(self, clue: ClueState) -> str:
+        if clue.status == "revealed":
+            return "newly revealed through a social route"
+        if clue.status == "primed":
+            return "primed for clarification"
+        return ""
 
     def _clue_uncertainty_prompt(self, clue: ClueState) -> str:
         label = _clue_label(clue.id)

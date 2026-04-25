@@ -730,6 +730,41 @@ def test_journal_and_leads_surface_recent_social_routes(tmp_path) -> None:
     assert "Ila Venn: opened a testimony route around Archive Story Conflict" in leads_output
 
 
+def test_journal_and_leads_surface_revealed_and_primed_clue_openings(tmp_path) -> None:
+    app = LanternCityApp(tmp_path / "lantern-city.sqlite3")
+    app.start_new_game()
+    app.enter_district("district_old_quarter")
+    app._introduce_case("case_missing_clerk")
+    app._acquire_clues(
+        [
+            "clue_missing_clerk_ledgers",
+            "clue_family_record_discrepancy",
+        ]
+    )
+    revealed = app.store.load_object("ClueState", "clue_missing_clerk_ledgers")
+    primed = app.store.load_object("ClueState", "clue_family_record_discrepancy")
+    assert isinstance(revealed, ClueState)
+    assert isinstance(primed, ClueState)
+    app.store.save_objects_atomically(
+        [
+            revealed.model_copy(update={"status": "revealed"}),
+            primed.model_copy(update={"status": "primed"}),
+        ]
+    )
+
+    journal_output = app.journal()
+    leads_output = app.strongest_leads()
+
+    assert "status: newly revealed through a social route" in journal_output
+    assert "status: primed for clarification" in journal_output
+    assert "1 were newly exposed through social follow-through" in leads_output
+    assert "1 are primed for clarification" in leads_output
+    assert "Fresh opening: Missing Clerk Ledgers (newly revealed through a social route)" in leads_output
+    assert "Fresh opening: Family Record Discrepancy (primed for clarification)" in leads_output
+    assert "Use Missing Clerk Ledgers now while the social opening is still fresh." in leads_output
+    assert "Talk to Sered Marr while this clue is primed for clarification." in leads_output
+
+
 def test_world_turn_output_surfaces_faction_pressure(tmp_path) -> None:
     app = LanternCityApp(tmp_path / "lantern-city.sqlite3")
     app.start_new_game()
@@ -967,6 +1002,36 @@ def test_clues_surface_support_contradiction_and_follow_up_roles(tmp_path) -> No
     assert "Role: paper trail to test" in output
     assert "Why it matters:" in output
     assert "Follow up:" in output
+
+
+def test_clues_surface_revealed_and_primed_social_clue_states(tmp_path) -> None:
+    app = LanternCityApp(tmp_path / "lantern-city.sqlite3")
+    app.start_new_game()
+    app.enter_district("district_old_quarter")
+    app._introduce_case("case_missing_clerk")
+    app._acquire_clues(
+        [
+            "clue_missing_clerk_ledgers",
+            "clue_family_record_discrepancy",
+        ]
+    )
+    revealed = app.store.load_object("ClueState", "clue_missing_clerk_ledgers")
+    primed = app.store.load_object("ClueState", "clue_family_record_discrepancy")
+    assert isinstance(revealed, ClueState)
+    assert isinstance(primed, ClueState)
+    app.store.save_objects_atomically(
+        [
+            revealed.model_copy(update={"status": "revealed"}),
+            primed.model_copy(update={"status": "primed"}),
+        ]
+    )
+
+    output = app.clues()
+
+    assert "Status: newly revealed through a social route" in output
+    assert "Status: primed for clarification" in output
+    assert "Follow up: Use this in board or compare while the fresh reveal is still actionable." in output
+    assert "Follow up: Talk to Sered Marr while this clue is primed for clarification." in output
 
 
 def test_generated_case_recovery_surfaces_use_generated_case_id(tmp_path) -> None:

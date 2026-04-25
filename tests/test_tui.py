@@ -223,6 +223,40 @@ def test_clue_reading_lines_surface_support_contradiction_and_follow_up() -> Non
     assert any("paper trail" in line for line in lines)
 
 
+def test_clue_reading_lines_surface_revealed_and_primed_states() -> None:
+    lines = _clue_reading_lines(
+        [
+            ClueState(
+                id="clue_hidden_copy_sheet",
+                created_at="turn_0",
+                updated_at="turn_0",
+                source_type="document",
+                source_id="location_archive_steps",
+                clue_text="revealed document clue",
+                reliability="credible",
+                related_case_ids=["case_missing_clerk"],
+                status="revealed",
+            ),
+            ClueState(
+                id="clue_archive_story_conflict",
+                created_at="turn_0",
+                updated_at="turn_0",
+                source_type="testimony",
+                source_id="npc_archive_clerk",
+                clue_text="primed testimony clue",
+                reliability="contradicted",
+                related_case_ids=["case_missing_clerk"],
+                status="primed",
+            ),
+        ]
+    )
+
+    assert any("revealed" in line for line in lines)
+    assert any("primed" in line for line in lines)
+    assert any("revealed route" in line for line in lines)
+    assert any("primed clue" in line for line in lines)
+
+
 def test_faction_pressure_lines_surface_attitude_and_plan() -> None:
     lines = _faction_pressure_lines(
         [
