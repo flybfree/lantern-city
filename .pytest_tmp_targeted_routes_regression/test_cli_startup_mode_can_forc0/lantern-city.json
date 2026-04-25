@@ -1,0 +1,5 @@
+{
+  "llm_url": "http://localhost:1234/v1",
+  "llm_model": "test-model",
+  "startup_mode": "mvp_baseline"
+}

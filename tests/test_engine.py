@@ -505,8 +505,8 @@ def test_handle_player_request_can_resolve_a_tracked_promise(
     assert "awaiting_player_promise" not in updated_npc.relationship_flags
     assert outcome.response.narrative_text == "You kept your word. I won't forget that."
     assert any("promise as kept" in line for line in outcome.response.state_changes)
-    assert f"Ask {updated_npc.name} what they will risk telling you now." in outcome.response.now_available
-    assert "Ask for the detail they were holding back." in outcome.response.next_actions
+    assert f"Ask {updated_npc.name} what they will risk telling you about Shrine Lane now." in outcome.response.now_available
+    assert "Ask for the detail they were holding back about Shrine Lane." in outcome.response.next_actions
     assert any("opened a more direct line" in line for line in outcome.response.state_changes)
 
 
@@ -573,6 +573,133 @@ def test_handle_player_request_marks_broken_promise_as_closed_route(
     assert "Look for another contact instead of leaning on Ila Venn right now." in outcome.response.now_available
     assert "Rebuild trust before asking this NPC for protected details again." in outcome.response.next_actions
     assert any("closed an easier route" in line for line in outcome.response.state_changes)
+
+
+def test_handle_player_request_promise_kept_opens_access_route_for_authority_npc(
+    populated_store: SQLiteStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from lantern_city import engine
+
+    npc = populated_store.load_object("NPCState", NPC_ID)
+    assert isinstance(npc, NPCState)
+    populated_store.save_object(
+        npc.model_copy(
+            update={
+                "role_category": "authority",
+                "public_identity": "acting archive registrar",
+                "known_promises": ["Player promised: I will bring you the clean ledger copy."],
+                "relationship_flags": [*npc.relationship_flags, "awaiting_player_promise"],
+            }
+        )
+    )
+
+    request = make_request(
+        intent="conversation",
+        target_id=NPC_ID,
+        input_text="As promised, I brought the clean ledger copy.",
+    )
+
+    monkeypatch.setattr(
+        engine,
+        "_generate_npc_dialogue",
+        lambda *args, **kwargs: NPCResponseGenerationResult.model_validate(
+            {
+                "task_type": "npc_response",
+                "request_id": request.id,
+                "summary_text": "The registrar decides to move the request forward.",
+                "structured_updates": {
+                    "dialogue_act": "accepts_follow_through",
+                    "npc_stance": "relieved",
+                    "relationship_shift": {
+                        "trust_delta": 0.0,
+                        "suspicion_delta": 0.0,
+                        "fear_delta": 0.0,
+                        "tag": "steady",
+                    },
+                    "clue_effects": [],
+                    "access_effects": [],
+                    "redirect_targets": [],
+                },
+                "cacheable_text": {
+                    "npc_line": "Very well. I can move the request through the proper desk now.",
+                    "follow_up_suggestions": ["Ask what route just opened."],
+                    "exit_line_if_needed": "Do not waste the access I just gave you.",
+                },
+                "confidence": 0.8,
+                "warnings": [],
+            }
+        ),
+    )
+
+    outcome = engine.handle_player_request(populated_store, city_id=CITY_ID, request=request)
+
+    assert "Ask Ila Venn to open the formal route into Shrine Lane." in outcome.response.now_available
+    assert "Ask which door, desk, or permit gets you into Shrine Lane." in outcome.response.next_actions
+    assert any("opened an institutional route" in line for line in outcome.response.state_changes)
+
+
+def test_handle_player_request_promise_kept_opens_document_route_for_records_npc(
+    populated_store: SQLiteStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from lantern_city import engine
+
+    npc = populated_store.load_object("NPCState", NPC_ID)
+    assert isinstance(npc, NPCState)
+    populated_store.save_object(
+        npc.model_copy(
+            update={
+                "role_category": "informant",
+                "public_identity": "commercial records clerk",
+                "current_objective": "Protect the archive corrections trail.",
+                "known_promises": ["Player promised: I will bring you the clean ledger copy."],
+                "relationship_flags": [*npc.relationship_flags, "awaiting_player_promise"],
+            }
+        )
+    )
+
+    request = make_request(
+        intent="conversation",
+        target_id=NPC_ID,
+        input_text="As promised, I brought the clean ledger copy.",
+    )
+
+    monkeypatch.setattr(
+        engine,
+        "_generate_npc_dialogue",
+        lambda *args, **kwargs: NPCResponseGenerationResult.model_validate(
+            {
+                "task_type": "npc_response",
+                "request_id": request.id,
+                "summary_text": "The clerk agrees to expose the record trail.",
+                "structured_updates": {
+                    "dialogue_act": "accepts_follow_through",
+                    "npc_stance": "relieved",
+                    "relationship_shift": {
+                        "trust_delta": 0.0,
+                        "suspicion_delta": 0.0,
+                        "fear_delta": 0.0,
+                        "tag": "steady",
+                    },
+                    "clue_effects": [],
+                    "access_effects": [],
+                    "redirect_targets": [],
+                },
+                "cacheable_text": {
+                    "npc_line": "Then I can show you the line they tried to bury.",
+                    "follow_up_suggestions": ["Ask for the buried entry."],
+                    "exit_line_if_needed": "Make this count.",
+                },
+                "confidence": 0.8,
+                "warnings": [],
+            }
+        ),
+    )
+
+    outcome = engine.handle_player_request(populated_store, city_id=CITY_ID, request=request)
+
+    assert "Ask Ila Venn for the document trail they were holding back around Shrine Lane." in outcome.response.now_available
+    assert "Ask for the copy, ledger, or certification tied to Shrine Lane." in outcome.response.next_actions
+    assert any("opened a document path" in line for line in outcome.response.state_changes)
 
 
 def test_handle_player_request_biases_records_pressure_into_redirects_and_paper_trails(

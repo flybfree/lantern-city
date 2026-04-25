@@ -234,7 +234,11 @@ def _handle_npc_conversation(
         )
         updated_npc = consequence_result.npc
         state_changes.extend(consequence_result.state_changes)
-        followthrough_read = _social_followthrough_effects(updated_npc, player_flag=player_flag)
+        followthrough_read = _social_followthrough_effects(
+            active_slice,
+            updated_npc,
+            player_flag=player_flag,
+        )
         conversation_read = _conversation_outcome_read(
             generation_result.structured_updates.dialogue_act,
             generation_result.structured_updates.npc_stance,
@@ -741,34 +745,99 @@ def _conversation_next_actions(case_title: str | None) -> list[str]:
 
 
 def _social_followthrough_effects(
+    active_slice: ActiveSlice,
     npc: NPCState,
     *,
     player_flag: str | None,
 ) -> _GeneratedNPCOutcomeRead:
+    target_label = _promise_route_target(active_slice, npc)
     if player_flag == "promise_honored":
-        now_available = [f"Ask {npc.name} what they will risk telling you now."]
-        if npc.location_id is not None:
-            now_available.append(f"Use the opening around {_display_name(npc.location_id)}.")
+        payoff_kind = _promise_payoff_kind(npc)
+        if payoff_kind == "access":
+            now_available = [f"Ask {npc.name} to open the formal route into {target_label}."]
+            now_available.append(f"Use the access opening around {target_label}.")
+            return _GeneratedNPCOutcomeRead(
+                learned=[f"{npc.name} is now willing to bend procedure or access around {target_label} on your behalf."],
+                now_available=now_available,
+                next_actions=[
+                    f"Ask which door, desk, or permit gets you into {target_label}.",
+                    "Push the access advantage before the opening closes.",
+                ],
+                state_changes=["Access shift: keeping your word opened an institutional route through this NPC."],
+            )
+        if payoff_kind == "document":
+            now_available = [f"Ask {npc.name} for the document trail they were holding back around {target_label}."]
+            now_available.append(f"Follow the records opening around {target_label}.")
+            return _GeneratedNPCOutcomeRead(
+                learned=[f"{npc.name} is ready to expose part of the paper trail around {target_label}."],
+                now_available=now_available,
+                next_actions=[
+                    f"Ask for the copy, ledger, or certification tied to {target_label}.",
+                    "Compare the new paperwork quickly before it gets corrected away.",
+                ],
+                state_changes=["Access shift: keeping your word opened a document path through this NPC."],
+            )
+        now_available = [f"Ask {npc.name} what they will risk telling you about {target_label} now."]
+        now_available.append(f"Use the opening around {target_label}.")
         return _GeneratedNPCOutcomeRead(
-            learned=[f"{npc.name} treats the favor-based opening as real now."],
+            learned=[f"{npc.name} treats the favor-based opening around {target_label} as real now."],
             now_available=now_available,
             next_actions=[
-                "Ask for the detail they were holding back.",
+                f"Ask for the detail they were holding back about {target_label}.",
                 "Press the strongest follow-up while the goodwill is fresh.",
             ],
             state_changes=["Access shift: keeping your word opened a more direct line with this NPC."],
         )
     if player_flag == "promise_broken":
-        return _GeneratedNPCOutcomeRead(
-            learned=[f"{npc.name} closes the favor-based path you were relying on."],
-            now_available=[f"Look for another contact instead of leaning on {npc.name} right now."],
-            next_actions=[
+        payoff_kind = _promise_payoff_kind(npc)
+        if payoff_kind == "access":
+            learned = [f"{npc.name} closes the access route you were relying on."]
+            next_actions = [
+                "Find another route or sponsor instead of expecting procedural help here.",
+                "Rebuild trust before asking this NPC for permits or access again.",
+            ]
+            state_change = "Access shift: breaking your word closed an institutional route through this NPC."
+        elif payoff_kind == "document":
+            learned = [f"{npc.name} closes the document trail they might have exposed for you."]
+            next_actions = [
+                "Find corroborating paperwork elsewhere instead of expecting this record source to help.",
+                "Rebuild trust before asking this NPC for protected records again.",
+            ]
+            state_change = "Access shift: breaking your word closed a document route through this NPC."
+        else:
+            learned = [f"{npc.name} closes the favor-based path you were relying on."]
+            next_actions = [
                 "Rebuild trust before asking this NPC for protected details again.",
                 "Find corroboration elsewhere instead of expecting the promised help.",
-            ],
-            state_changes=["Access shift: breaking your word closed an easier route through this NPC."],
+            ]
+            state_change = "Access shift: breaking your word closed an easier route through this NPC."
+        return _GeneratedNPCOutcomeRead(
+            learned=learned,
+            now_available=[f"Look for another contact instead of leaning on {npc.name} right now."],
+            next_actions=next_actions,
+            state_changes=[state_change],
         )
     return _GeneratedNPCOutcomeRead([], [], [], [])
+
+
+def _promise_payoff_kind(npc: NPCState) -> str:
+    role = npc.role_category.lower()
+    identity = f"{npc.public_identity} {npc.current_objective} {npc.hidden_objective}".lower()
+    if role in {"authority", "gatekeeper"}:
+        return "access"
+    if any(token in identity for token in ("record", "ledger", "archive", "registr", "certification", "copy sheet")):
+        return "document"
+    return "testimony"
+
+
+def _promise_route_target(active_slice: ActiveSlice, npc: NPCState) -> str:
+    if active_slice.location is not None:
+        return active_slice.location.name
+    if npc.location_id is not None:
+        return _display_name(npc.location_id)
+    if active_slice.district is not None:
+        return active_slice.district.name
+    return npc.name
 
 
 def _district_notable_objects(active_slice: ActiveSlice) -> list[str]:
