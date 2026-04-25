@@ -6,6 +6,7 @@ from pathlib import Path
 
 from lantern_city.app import LanternCityApp, _load_default_seed
 from lantern_city.cli import _default_player_startup_mode, _load_startup_mode, main
+from lantern_city.prompt_diagnostics import PromptCheckStageResult, PromptDiagnosticsReport
 from lantern_city.seed_schema import validate_city_seed
 
 
@@ -169,3 +170,59 @@ def test_cli_defaults_to_generated_runtime_when_llm_is_present_and_no_mode_is_sp
 def test_default_player_startup_mode_prefers_generated_runtime_when_llm_exists() -> None:
     assert _default_player_startup_mode(has_llm_config=True) == "generated_runtime"
     assert _default_player_startup_mode(has_llm_config=False) == "mvp_baseline"
+
+
+def test_cli_prompt_check_requires_llm_config(tmp_path: Path) -> None:
+    database_path = tmp_path / "lantern-city.sqlite3"
+
+    output = run_cli("--db", str(database_path), "prompt-check")
+
+    assert "Error: prompt-check requires llm_config" in output
+
+
+def test_cli_prompt_check_renders_report_and_can_save_json(tmp_path: Path, monkeypatch) -> None:
+    database_path = tmp_path / "lantern-city.sqlite3"
+    report_path = tmp_path / "prompt-check.json"
+
+    def _fake_prompt_check(*, llm_config, concept=""):
+        assert llm_config.model == "test-model"
+        assert concept == "fog-bound records city"
+        return PromptDiagnosticsReport(
+            base_url=llm_config.base_url,
+            model=llm_config.model,
+            concept=concept,
+            stages=[
+                PromptCheckStageResult(
+                    name="startup_probe",
+                    status="pass",
+                    elapsed_seconds=0.4,
+                    summary="NPC probe validated with confidence 0.92",
+                    sample="A careful witness points you toward the archive cart.",
+                )
+            ],
+        )
+
+    monkeypatch.setattr("lantern_city.cli.run_prompt_diagnostics", _fake_prompt_check)
+
+    output = run_cli(
+        "--db",
+        str(database_path),
+        "--llm-url",
+        "http://localhost:1234/v1",
+        "--llm-model",
+        "test-model",
+        "prompt-check",
+        "--concept",
+        "fog-bound records city",
+        "--report",
+        str(report_path),
+    )
+
+    assert "=== Prompt Check ===" in output
+    assert "Overall: pass" in output
+    assert "startup_probe" in output
+    assert "Report saved:" in output
+
+    report_payload = json.loads(report_path.read_text(encoding="utf-8"))
+    assert report_payload["model"] == "test-model"
+    assert report_payload["overall_status"] == "pass"

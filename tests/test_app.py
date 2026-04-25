@@ -238,6 +238,66 @@ def test_start_new_game_reports_warning_when_model_probe_fails(tmp_path, monkeyp
     assert "Model check: warning" in output
 
 
+def test_start_new_game_accepts_probe_payload_with_loose_string_effect_lists(tmp_path, monkeypatch) -> None:
+    class _LooseProbeClient:
+        def __init__(self, config) -> None:
+            self.config = config
+
+        def generate_json(self, **kwargs):
+            return {
+                "task_type": "npc_response",
+                "request_id": "LCCM-042A",
+                "summary_text": "A witness describes the fresh ink and where the ledger was left.",
+                "structured_updates": {
+                    "dialogue_act": "witness_testimony",
+                    "npc_stance": "cautious/evasive",
+                    "relationship_shift": {
+                        "trust_delta": -0.1,
+                        "suspicion_delta": 0.25,
+                        "fear_delta": 0.15,
+                        "tag": "guarded",
+                    },
+                    "clue_effects": ["ledger_altered", "sector_gamma_conduit"],
+                    "access_effects": ["maintenance_records_review"],
+                    "redirect_targets": ["cart_witnessing"],
+                },
+                "cacheable_text": {
+                    "npc_line": "The ledger was open on a cart near the main conduit, but I never saw who touched it.",
+                    "follow_up_suggestions": ["Check the cart.", "Ask who worked that sector after dusk."],
+                    "exit_line_if_needed": None,
+                },
+                "confidence": 0.98,
+                "warnings": [],
+            }
+
+        def close(self) -> None:
+            return None
+
+    monkeypatch.setattr("lantern_city.app.OpenAICompatibleLLMClient", _LooseProbeClient)
+    monkeypatch.setattr(
+        LanternCityApp,
+        "_generate_city_seed",
+        lambda self, concept=None, on_progress=None: validate_city_seed(_load_default_seed()),
+    )
+    monkeypatch.setattr(
+        LanternCityApp,
+        "_generate_world_content",
+        lambda self, on_progress=None: self._seed_authored_scene_objects(),
+    )
+    monkeypatch.setattr(LanternCityApp, "_generate_latent_cases", lambda self, count=2: None)
+
+    app = LanternCityApp(
+        tmp_path / "lantern-city.sqlite3",
+        llm_config=OpenAICompatibleConfig(base_url="http://localhost:1234/v1", model="test-model"),
+    )
+
+    output = app.start_new_game()
+
+    assert "Lantern City ready:" in output
+    assert "Startup mode: generated_runtime" in output
+    assert "Model check: pass" in output
+
+
 def test_meaningful_commands_advance_city_time_index(tmp_path) -> None:
     app = LanternCityApp(tmp_path / "lantern-city.sqlite3")
 

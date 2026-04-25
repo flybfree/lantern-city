@@ -30,7 +30,10 @@ from lantern_city.generation.city_seed import (
     CitySeedGenerationRequest,
     CitySeedGenerator,
 )
-from lantern_city.generation.npc_response import NPCResponseGenerationResult
+from lantern_city.generation.npc_response import (
+    NPCResponseGenerationResult,
+    sanitize_npc_response_payload,
+)
 from lantern_city.generation.world_content import WorldContentGenerator
 from lantern_city.generation.transient_response import (
     TransientGenerationError,
@@ -3017,6 +3020,7 @@ class LanternCityApp:
                 schema=_MODEL_QUALITY_PROBE_SCHEMA,
             )
             elapsed = perf_counter() - started_at
+            payload = sanitize_npc_response_payload(payload)
             result = NPCResponseGenerationResult.model_validate(payload)
         except Exception as exc:
             log.warning("llm quality probe failed: %s", exc)

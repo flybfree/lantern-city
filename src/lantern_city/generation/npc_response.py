@@ -23,6 +23,7 @@ class NPCResponseGenerationError(RuntimeError):
 
 RELATIONSHIP_DELTA_MIN = -1.0
 RELATIONSHIP_DELTA_MAX = 1.0
+_UNKNOWN_LOCATION_ID = "location_unknown"
 
 
 def _require_bounded_text(value: str, *, field_name: str, max_length: int) -> str:
@@ -231,6 +232,72 @@ class NPCResponseGenerationResult(LanternCityModel):
         return [
             _require_bounded_text(item, field_name="warnings", max_length=120) for item in value
         ]
+
+
+def _humanize_loose_effect_text(value: object) -> str:
+    text = str(value).strip().replace("_", " ").replace("-", " ")
+    text = re.sub(r"\s+", " ", text)
+    return text[:160] if len(text) > 160 else text
+
+
+def sanitize_npc_response_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    """Normalize near-miss structured outputs from smaller or looser local models.
+
+    Some OpenAI-compatible local models return simple string lists for nested structured
+    fields even when asked for json_schema output. Convert those into minimally valid
+    object shapes so downstream validation can keep useful responses instead of failing
+    outright.
+    """
+    updates = payload.get("structured_updates")
+    if not isinstance(updates, dict):
+        return payload
+
+    if "redirect_targets" in updates:
+        normalized_redirects: list[dict[str, Any]] = []
+        for entry in updates["redirect_targets"]:
+            if isinstance(entry, str):
+                normalized_redirects.append(
+                    {
+                        "target_type": "redirect hint",
+                        "target_id": _UNKNOWN_LOCATION_ID,
+                        "reason": _humanize_loose_effect_text(entry),
+                    }
+                )
+            elif isinstance(entry, dict):
+                normalized_redirects.append(entry)
+        updates["redirect_targets"] = normalized_redirects
+
+    if "access_effects" in updates:
+        normalized_access: list[dict[str, Any]] = []
+        for entry in updates["access_effects"]:
+            if isinstance(entry, str):
+                normalized_access.append(
+                    {
+                        "effect_type": "access hint",
+                        "target_id": None,
+                        "note": _humanize_loose_effect_text(entry),
+                    }
+                )
+            elif isinstance(entry, dict):
+                normalized_access.append(entry)
+        updates["access_effects"] = normalized_access
+
+    if "clue_effects" in updates:
+        normalized_clues: list[dict[str, Any]] = []
+        for entry in updates["clue_effects"]:
+            if isinstance(entry, str):
+                normalized_clues.append(
+                    {
+                        "effect_type": "clue hint",
+                        "clue_id": None,
+                        "note": _humanize_loose_effect_text(entry),
+                    }
+                )
+            elif isinstance(entry, dict):
+                normalized_clues.append(entry)
+        updates["clue_effects"] = normalized_clues
+
+    return payload
 
 
 @dataclass(frozen=True, slots=True)
@@ -516,13 +583,16 @@ class NPCResponseGenerator:
         Small models sometimes put clue or NPC ids into location-prefixed fields.
         Dropping bad entries preserves the dialogue line rather than failing entirely.
         """
+        payload = sanitize_npc_response_payload(payload)
         updates = payload.get("structured_updates")
         if not isinstance(updates, dict):
             return payload
         if "redirect_targets" in updates:
             updates["redirect_targets"] = [
                 t for t in updates["redirect_targets"]
-                if isinstance(t, dict) and str(t.get("target_id", "")).startswith("location_")
+                if isinstance(t, dict)
+                and str(t.get("target_id", "")).startswith("location_")
+                and str(t.get("target_id", "")) != _UNKNOWN_LOCATION_ID
             ]
         if "access_effects" in updates:
             updates["access_effects"] = [
@@ -661,4 +731,5 @@ __all__ = [
     "RedirectTarget",
     "RelationshipShift",
     "SupportsJSONGeneration",
+    "sanitize_npc_response_payload",
 ]

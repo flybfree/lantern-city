@@ -12,6 +12,7 @@ from lantern_city.generation.npc_response import (
     NPCResponseGenerationResult,
     NPCResponseGenerator,
     RelationshipShift,
+    sanitize_npc_response_payload,
 )
 from lantern_city.models import (
     ActiveWorkingSet,
@@ -619,6 +620,32 @@ def test_npc_response_generator_rejects_access_target_outside_visible_slice() ->
                 player_request=make_player_request(),
             )
         )
+
+
+def test_sanitize_npc_response_payload_normalizes_loose_string_effect_lists() -> None:
+    payload = copy.deepcopy(make_valid_payload())
+    payload["structured_updates"]["clue_effects"] = ["ledger_altered", "sector_gamma_conduit"]
+    payload["structured_updates"]["access_effects"] = ["maintenance_records_review"]
+    payload["structured_updates"]["redirect_targets"] = ["cart_witnessing"]
+
+    normalized = sanitize_npc_response_payload(payload)
+
+    assert normalized["structured_updates"]["clue_effects"] == [
+        {"effect_type": "clue hint", "clue_id": None, "note": "ledger altered"},
+        {"effect_type": "clue hint", "clue_id": None, "note": "sector gamma conduit"},
+    ]
+    assert normalized["structured_updates"]["access_effects"] == [
+        {"effect_type": "access hint", "target_id": None, "note": "maintenance records review"}
+    ]
+    assert normalized["structured_updates"]["redirect_targets"] == [
+        {
+            "target_type": "redirect hint",
+            "target_id": "location_unknown",
+            "reason": "cart witnessing",
+        }
+    ]
+    result = NPCResponseGenerationResult.model_validate(normalized)
+    assert result.structured_updates.clue_effects[0].effect_type == "clue hint"
 
 
 def test_npc_response_generator_rejects_clue_effect_outside_active_slice() -> None:

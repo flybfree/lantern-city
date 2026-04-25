@@ -9,6 +9,7 @@ from typing import TextIO
 from lantern_city.active_slice import MissingWorldObjectError
 from lantern_city.app import LanternCityApp
 from lantern_city.llm_client import OpenAICompatibleConfig
+from lantern_city.prompt_diagnostics import run_prompt_diagnostics
 
 
 def _parse_startup_mode_arg(value: str) -> str:
@@ -57,6 +58,14 @@ def build_parser() -> argparse.ArgumentParser:
 
     case_parser = subparsers.add_parser("case")
     case_parser.add_argument("case_id")
+
+    prompt_check_parser = subparsers.add_parser("prompt-check")
+    prompt_check_parser.add_argument("--concept", default="", help="optional city concept for diagnostics")
+    prompt_check_parser.add_argument(
+        "--report",
+        default=None,
+        help="optional path to save the prompt diagnostics JSON report",
+    )
     return parser
 
 
@@ -160,7 +169,20 @@ def main(argv: list[str] | None = None, *, stdout: TextIO | None = None) -> int:
     )
 
     try:
-        if args.command == "start":
+        if args.command == "prompt-check":
+            if llm_config is None:
+                output = "Error: prompt-check requires llm_config (--llm-url / --llm-model or saved config)."
+            else:
+                report = run_prompt_diagnostics(
+                    llm_config=llm_config,
+                    concept=getattr(args, "concept", ""),
+                )
+                output = report.to_text()
+                report_path = getattr(args, "report", None)
+                if report_path:
+                    saved = report.write_json(report_path)
+                    output = f"{output}\n\nReport saved: {saved}"
+        elif args.command == "start":
             output = app.start_new_game()
         elif args.command == "overview":
             output = app.overview()
