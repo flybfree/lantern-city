@@ -179,6 +179,48 @@ def _command_reference_lines() -> list[str]:
     ]
 
 
+def _command_target_lines(
+    *,
+    districts: list[tuple[str, str]],
+    locations: list[tuple[str, str]],
+    npcs: list[tuple[str, str]],
+    cases: list[tuple[str, str]],
+    clues: list[tuple[str, str]],
+    current_location_id: str | None = None,
+    scene_objects: list[str] | None = None,
+) -> list[str]:
+    lines: list[str] = ["[bold]CMD Targets:[/bold]"]
+    if districts:
+        lines.append("  [dim]look / enter[/dim]")
+        for name, district_id in districts[:6]:
+            lines.append(f"    {escape(name)} [dim]-> {escape(district_id)}[/dim]")
+    if locations:
+        lines.append("  [dim]go / inspect[/dim]")
+        for name, location_id in locations[:6]:
+            lines.append(f"    {escape(name)} [dim]-> {escape(location_id)}[/dim]")
+    if current_location_id and scene_objects:
+        lines.append('  [dim]inspect <location_id> "<object>"[/dim]')
+        for object_name in scene_objects[:4]:
+            lines.append(
+                f'    {escape(object_name)} [dim]-> inspect {escape(current_location_id)} "{escape(object_name)}"[/dim]'
+            )
+    if npcs:
+        lines.append("  [dim]talk[/dim]")
+        for name, npc_id in npcs[:5]:
+            lines.append(f"    {escape(name)} [dim]-> {escape(npc_id)}[/dim]")
+    if cases:
+        lines.append("  [dim]board / case[/dim]")
+        for title, case_id in cases[:4]:
+            lines.append(f"    {escape(title)} [dim]-> {escape(case_id)}[/dim]")
+    if clues:
+        lines.append("  [dim]compare[/dim]")
+        for label, clue_id in clues[:6]:
+            lines.append(f"    {escape(label)} [dim]-> {escape(clue_id)}[/dim]")
+    if len(lines) == 1:
+        lines.append("  [dim]Targets appear here once the city exposes places, people, cases, or clues.[/dim]")
+    return lines
+
+
 class TurnLogger:
     """Writes a rolling log of the last N turns to a JSON file beside the database.
 
@@ -1512,6 +1554,12 @@ class LanternCityTUI(App[None]):
             return "\n".join(lines)
 
         lines: list[str] = []
+        command_target_districts: list[tuple[str, str]] = []
+        command_target_locations: list[tuple[str, str]] = []
+        command_target_npcs: list[tuple[str, str]] = []
+        command_target_cases: list[tuple[str, str]] = []
+        command_target_clues: list[tuple[str, str]] = []
+        current_scene_objects: list[str] = []
 
         # Sync visited districts from persisted store + current session
         if pos is not None:
@@ -1542,12 +1590,16 @@ class LanternCityTUI(App[None]):
                         loc = self._game.store.load_object("LocationState", loc_id)
                         if not isinstance(loc, LocationState):
                             continue
+                        command_target_locations.append((loc.name, loc_id))
                         is_here = loc_id == pos.location_id
                         marker = "[bold cyan]▶[/bold cyan]" if is_here else " "
                         lines.append(f"  {marker} [cyan]{escape(loc.name)}[/cyan]")
+                        if is_here and loc.scene_objects:
+                            current_scene_objects = list(loc.scene_objects)
                         for nid in loc.known_npc_ids:
                             npc = self._game._npc(nid)
                             if npc:
+                                command_target_npcs.append((npc.name, nid))
                                 lines.append(f"      · {escape(npc.name)}")
                     lines.append("")
 
@@ -1573,6 +1625,7 @@ class LanternCityTUI(App[None]):
             district = self._game._district(did)
             if not district:
                 continue
+            command_target_districts.append((district.name, did))
             is_current = pos is not None and did == pos.district_id
             was_visited = did in self._visited_districts
             lc = district.lantern_condition
@@ -1612,6 +1665,7 @@ class LanternCityTUI(App[None]):
         if active_cases:
             lines.append("[bold]Cases:[/bold]")
             for case in active_cases:
+                command_target_cases.append((case.title, case.id))
                 lines.append(f"  [yellow]{escape(case.title)}[/yellow]")
                 lines.append(f"  [dim]{escape(case.status)}[/dim]")
             lines.append("")
@@ -1640,6 +1694,7 @@ class LanternCityTUI(App[None]):
                     clue = self._game.store.load_object("ClueState", clue_id)
                     if isinstance(clue, ClueState):
                         clue_objects.append(clue)
+                        command_target_clues.append((_clue_label(clue.id), clue.id))
                         if clue.reliability in ("credible", "solid"):
                             credible_count += 1
                         elif clue.reliability != "contradicted":
@@ -1684,6 +1739,18 @@ class LanternCityTUI(App[None]):
             lines.extend(recovery)
 
         if not self._gm_mode:
+            lines.append("")
+            lines.extend(
+                _command_target_lines(
+                    districts=command_target_districts,
+                    locations=command_target_locations,
+                    npcs=command_target_npcs,
+                    cases=command_target_cases,
+                    clues=command_target_clues,
+                    current_location_id=None if pos is None else pos.location_id,
+                    scene_objects=current_scene_objects,
+                )
+            )
             lines.append("")
             lines.extend(_command_reference_lines())
 

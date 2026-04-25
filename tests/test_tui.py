@@ -4,6 +4,7 @@ from types import SimpleNamespace
 
 from lantern_city.models import ClueState
 from lantern_city.tui import (
+    _command_target_lines,
     _command_reference_lines,
     _clue_reading_lines,
     _faction_pressure_lines,
@@ -197,6 +198,26 @@ def test_command_reference_lines_include_core_direct_commands() -> None:
     assert '  inspect <location_id> "<object>"' in lines
     assert "  board [case_id]" in lines
     assert "  compare <clue_a> <clue_b>" in lines
+
+
+def test_command_target_lines_link_human_names_to_valid_arguments() -> None:
+    lines = _command_target_lines(
+        districts=[("Old Quarter", "district_old_quarter")],
+        locations=[("Ledger Room", "location_ledger_room")],
+        npcs=[("Ila Venn", "npc_ila_venn")],
+        cases=[("Missing Clerk", "case_missing_clerk")],
+        clues=[("Hidden Copy Sheet", "clue_hidden_copy_sheet")],
+        current_location_id="location_ledger_room",
+        scene_objects=["ledger shelf"],
+    )
+
+    assert lines[0] == "[bold]CMD Targets:[/bold]"
+    assert any("Old Quarter" in line and "district_old_quarter" in line for line in lines)
+    assert any("Ledger Room" in line and "location_ledger_room" in line for line in lines)
+    assert any("Ila Venn" in line and "npc_ila_venn" in line for line in lines)
+    assert any("Missing Clerk" in line and "case_missing_clerk" in line for line in lines)
+    assert any("Hidden Copy Sheet" in line and "clue_hidden_copy_sheet" in line for line in lines)
+    assert any('inspect location_ledger_room "ledger shelf"' in line for line in lines)
 
 
 def test_clue_reading_lines_surface_support_contradiction_and_follow_up() -> None:
