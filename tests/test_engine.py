@@ -1095,6 +1095,151 @@ def test_handle_player_request_flags_pre_case_clue_as_significant_during_inspect
     ]
 
 
+def test_handle_player_request_conversation_prefers_npc_known_clue_over_first_slice_clue(
+    populated_store: SQLiteStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from lantern_city import engine
+
+    extra_clue = ClueState(
+        id="clue_archive_log_gap",
+        created_at=TURN_ZERO,
+        updated_at=TURN_ZERO,
+        source_type="document",
+        source_id=LOCATION_ID,
+        clue_text="The archive log skips one numbered entry just before curfew.",
+        reliability="uncertain",
+        related_npc_ids=[NPC_ID],
+        related_case_ids=[CASE_ID],
+        related_district_ids=[DISTRICT_ID],
+    )
+    npc = populated_store.load_object("NPCState", NPC_ID)
+    location = populated_store.load_object("LocationState", LOCATION_ID)
+    case = populated_store.load_object("CaseState", CASE_ID)
+    assert isinstance(npc, NPCState)
+    assert isinstance(location, LocationState)
+    assert isinstance(case, CaseState)
+    populated_store.save_objects_atomically(
+        [
+            extra_clue,
+            npc.model_copy(update={"known_clue_ids": [extra_clue.id]}),
+            location.model_copy(update={"clue_ids": [CLUE_ID, extra_clue.id]}),
+            case.model_copy(update={"known_clue_ids": [CLUE_ID, extra_clue.id]}),
+        ]
+    )
+
+    request = make_request(
+        intent="conversation",
+        target_id=NPC_ID,
+        input_text="Ask what looks wrong in the archive.",
+    )
+    active_slice = replace(
+        _district_entry_slice(request),
+        location=LocationState(
+            id=LOCATION_ID,
+            created_at=TURN_ZERO,
+            updated_at=TURN_ZERO,
+            district_id=DISTRICT_ID,
+            name="Shrine Lane",
+            location_type="shrine",
+            known_npc_ids=[NPC_ID],
+            clue_ids=[CLUE_ID, extra_clue.id],
+        ),
+        clues=[
+            ClueState(
+                id=CLUE_ID,
+                created_at=TURN_ZERO,
+                updated_at=TURN_ZERO,
+                source_type="location",
+                source_id=LOCATION_ID,
+                clue_text="Fresh scoring marks suggest recent tampering.",
+                reliability="solid",
+                related_npc_ids=[NPC_ID],
+                related_case_ids=[CASE_ID],
+                related_district_ids=[DISTRICT_ID],
+            ),
+            extra_clue,
+        ],
+        npcs=[
+            NPCState(
+                id=NPC_ID,
+                created_at=TURN_ZERO,
+                updated_at=TURN_ZERO,
+                name="Ila Venn",
+                role_category="informant",
+                district_id=DISTRICT_ID,
+                location_id=LOCATION_ID,
+                public_identity="shrine keeper",
+                known_clue_ids=[extra_clue.id],
+            )
+        ],
+    )
+
+    monkeypatch.setattr(
+        engine,
+        "orchestrate_request",
+        lambda store, *, city_id, request: OrchestratedRequest(
+            request=request,
+            intent="talk_to_npc",
+            active_slice=active_slice,
+        ),
+    )
+
+    outcome = engine.handle_player_request(populated_store, city_id=CITY_ID, request=request)
+
+    assert outcome.response.learned == ["The archive log skips one numbered entry just before curfew."]
+
+
+def test_learned_clues_surface_only_primary_clue_line_when_clue_has_clarification_history(
+    populated_store: SQLiteStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from lantern_city import engine
+
+    clarified_clue = ClueState(
+        id=CLUE_ID,
+        created_at=TURN_ZERO,
+        updated_at=TURN_ONE,
+        source_type="location",
+        source_id=LOCATION_ID,
+        clue_text=(
+            "Fresh scoring marks suggest recent tampering.\n"
+            "Clarification: Captain Keller provides testimony connecting the evidence to the case."
+        ),
+        reliability="credible",
+        related_npc_ids=[NPC_ID],
+        related_case_ids=[CASE_ID],
+        related_district_ids=[DISTRICT_ID],
+    )
+    active_slice = replace(
+        _district_entry_slice(make_request(intent="conversation", target_id=NPC_ID, input_text="Ask again.")),
+        location=LocationState(
+            id=LOCATION_ID,
+            created_at=TURN_ZERO,
+            updated_at=TURN_ZERO,
+            district_id=DISTRICT_ID,
+            name="Shrine Lane",
+            location_type="shrine",
+            known_npc_ids=[NPC_ID],
+            clue_ids=[CLUE_ID],
+        ),
+        clues=[clarified_clue],
+    )
+    request = make_request(intent="conversation", target_id=NPC_ID, input_text="Ask again.")
+
+    monkeypatch.setattr(
+        engine,
+        "orchestrate_request",
+        lambda store, *, city_id, request: OrchestratedRequest(
+            request=request,
+            intent="talk_to_npc",
+            active_slice=active_slice,
+        ),
+    )
+
+    outcome = engine.handle_player_request(populated_store, city_id=CITY_ID, request=request)
+
+    assert outcome.response.learned == ["Fresh scoring marks suggest recent tampering."]
+
+
 def test_handle_player_request_returns_generic_action_response_without_state_changes(
     populated_store: SQLiteStore,
 ) -> None:

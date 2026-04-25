@@ -35,6 +35,7 @@ Available commands (use exact syntax):
   enter <district_id>         — travel to a district (use a district_id only)
   go <location_id>            — move to a specific location inside the current district
   inspect <location_id>       — examine a location and gather clues
+  inspect <location_id> <object_name> — examine a specific visible object in the current location
   talk <npc_id> <prompt>      — speak with an NPC; preserve player's words as the prompt
   clues                       — list acquired clues
   journal                     — run-level chronicle and recall
@@ -422,6 +423,14 @@ class GameMaster:
         return []
 
     def _normalize_commands(self, commands: list[str], player_input: str) -> list[str]:
+        theory_command = self._theory_or_recovery_override(player_input)
+        if theory_command is not None:
+            return [theory_command]
+
+        object_inspect_command = self._object_inspect_override(player_input)
+        if object_inspect_command is not None:
+            return [object_inspect_command]
+
         normalized: list[str] = []
         for command in commands:
             parts = command.split(maxsplit=1)
@@ -436,8 +445,84 @@ class GameMaster:
                     normalized.append(f"{verb} {district_id}")
                     continue
 
+            if verb == "look" and arg.startswith("location_"):
+                normalized.append(f"inspect {arg}")
+                continue
+
+            if verb == "look" and not arg:
+                current_location_id = self._current_location_id()
+                if current_location_id is not None and _is_scene_examination_request(player_input):
+                    normalized.append(f"inspect {current_location_id}")
+                    continue
+
             normalized.append(command)
+        if normalized:
+            return normalized
+
+        fallback_scene_command = self._scene_inspect_override(player_input)
+        if fallback_scene_command is not None:
+            return [fallback_scene_command]
         return normalized
+
+    def _current_location_id(self) -> str | None:
+        try:
+            pos = self.app._load_position()
+        except Exception:
+            return None
+        if pos is None:
+            return None
+        return pos.location_id
+
+    def _theory_or_recovery_override(self, player_input: str) -> str | None:
+        if not (_is_case_theory_request(player_input) or _is_recovery_request(player_input)):
+            return None
+        try:
+            pos = self.app._load_position()
+            city = self.app._city()
+        except Exception:
+            return None
+        if city is None:
+            return None
+        known_case_ids = set() if pos is None else set(pos.known_case_ids)
+        active_cases = [
+            case
+            for cid in city.active_case_ids
+            if cid in known_case_ids
+            if isinstance(case := self.app.store.load_object("CaseState", cid), CaseState) and case.status != "latent"
+        ]
+        if _is_case_theory_request(player_input):
+            if active_cases:
+                return f"board {active_cases[0].id}"
+            return "leads"
+        if _is_recovery_request(player_input):
+            if "lead" in _normalize_match_text(player_input):
+                return "leads"
+            if active_cases:
+                return f"board {active_cases[0].id}"
+            return "matters"
+        return None
+
+    def _scene_inspect_override(self, player_input: str) -> str | None:
+        if not _is_scene_examination_request(player_input):
+            return None
+        current_location_id = self._current_location_id()
+        if current_location_id is None:
+            return None
+        return f"inspect {current_location_id}"
+
+    def _object_inspect_override(self, player_input: str) -> str | None:
+        current_location_id = self._current_location_id()
+        if current_location_id is None:
+            return None
+        location = self.app.store.load_object("LocationState", current_location_id)
+        if not isinstance(location, LocationState) or not location.scene_objects:
+            return None
+        if not _is_object_examination_request(player_input):
+            return None
+        matched_object = _match_scene_object(player_input, location.scene_objects)
+        if matched_object is None:
+            return None
+        return f'inspect {current_location_id} "{matched_object}"'
 
     def _match_district_from_player_text(self, player_input: str) -> str | None:
         city = self.app._city()
@@ -792,6 +877,62 @@ def _is_recovery_request(player_input: str) -> bool:
         "help me recover",
     )
     return any(phrase in text for phrase in recovery_phrases)
+
+
+def _is_case_theory_request(player_input: str) -> bool:
+    text = _normalize_match_text(player_input)
+    if not text:
+        return False
+    theory_phrases = (
+        "what is my case theory",
+        "what s my case theory",
+        "what is the case theory",
+        "what do i think happened",
+        "what happened here",
+        "what is the current theory",
+        "show my case theory",
+        "what is the theory",
+    )
+    return any(phrase in text for phrase in theory_phrases)
+
+
+def _is_scene_examination_request(player_input: str) -> bool:
+    text = _normalize_match_text(player_input)
+    if not text:
+        return False
+    scene_phrases = (
+        "look around",
+        "look closer",
+        "look more closely",
+        "inspect around",
+        "inspect the room",
+        "inspect the area",
+        "examine the room",
+        "examine the area",
+        "scan the room",
+        "scan the area",
+    )
+    return any(phrase in text for phrase in scene_phrases)
+
+
+def _is_object_examination_request(player_input: str) -> bool:
+    text = _normalize_match_text(player_input)
+    if not text:
+        return False
+    prefixes = ("examine ", "inspect ", "look at ", "check ", "study ")
+    return text.startswith(prefixes)
+
+
+def _match_scene_object(player_input: str, scene_objects: list[str]) -> str | None:
+    player_text = _normalize_match_text(player_input)
+    best_object: str | None = None
+    best_score = 0
+    for object_name in scene_objects:
+        score = _score_named_target(player_text, object_name, object_name)
+        if score > best_score:
+            best_score = score
+            best_object = object_name
+    return best_object if best_score >= 6 else None
 
 
 def _institutional_pressure_guidance(institutional_pressure: str) -> str:

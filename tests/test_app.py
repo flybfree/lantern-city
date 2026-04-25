@@ -298,6 +298,28 @@ def test_start_new_game_accepts_probe_payload_with_loose_string_effect_lists(tmp
     assert "Model check: pass" in output
 
 
+def test_run_command_inspect_passes_object_name(tmp_path) -> None:
+    app = LanternCityApp(tmp_path / "lantern-city.sqlite3")
+    app.start_new_game()
+
+    captured: dict[str, str | None] = {}
+
+    def _fake_inspect(location_id: str, object_name: str | None = None) -> str:
+        captured["location_id"] = location_id
+        captured["object_name"] = object_name
+        return "ok"
+
+    app.inspect_location = _fake_inspect  # type: ignore[method-assign]
+
+    result = app.run_command('inspect location_ledger_room "ledger shelf"')
+
+    assert result == "ok"
+    assert captured == {
+        "location_id": "location_ledger_room",
+        "object_name": "ledger shelf",
+    }
+
+
 def test_meaningful_commands_advance_city_time_index(tmp_path) -> None:
     app = LanternCityApp(tmp_path / "lantern-city.sqlite3")
 

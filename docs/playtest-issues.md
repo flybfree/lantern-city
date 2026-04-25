@@ -5,6 +5,34 @@ Model used: `unsloth/qwen3.5-35b-a3b` via LM Studio at `http://192.168.3.181:123
 
 ---
 
+## 2026-04-24 live playtest addendum
+
+Model used during current `dist` playtest: `google/gemma-4-e4b` via LM Studio.
+Primary session reviewed: `dist/city-20260424-2051.log` and `dist/city-20260424-2051.log.json`.
+
+### P1 — GM intent routing still breaks player agency
+The GM layer still misroutes natural-language requests often enough to make the investigation feel arbitrary:
+- asking about a specific NPC can become a different question entirely
+- theory/recovery requests can be routed into `talk` instead of `board` or `leads`
+- location/object examination can degrade into invalid commands or district-only `look` failures
+
+**Concrete examples from the session:**
+- `tell me about senator reed` became a question about Mr. Li
+- `what is my case theory` got routed into `talk npc_elara_vance ...`
+- `look around` in a location became `look location_succession_gallery`
+- `examine holographic screens` produced an explicitly invalid command string
+
+**Impact:** The player feels motion without control. Atmosphere remains strong, but trust in the action loop drops because the game is no longer reliably doing what the player asked.
+
+**Fix direction:** Add hard normalization overrides ahead of generic GM output:
+- theory/recovery requests should prefer `board`, `leads`, or `matters`
+- `look around` in a location should prefer `inspect <current_location>`
+- visible object references should prefer `inspect <current_location> <object_name>`
+
+**Status:** In progress. First routing overrides added in `game_master.py`, plus object-aware `inspect` command parsing in `app.py`.
+
+---
+
 ## P1 — Breaks the experience
 
 ### ~~NPC conversation is stateless across turns~~ ✅ Fixed

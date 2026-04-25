@@ -230,6 +230,54 @@ def test_narrate_recovery_guidance_supports_generated_case_ids(tmp_path) -> None
     assert "board case_gen_002" in user_prompt
 
 
+def test_normalize_commands_routes_case_theory_requests_to_board(tmp_path) -> None:
+    llm = _RecordingLLM()
+    app = LanternCityApp(tmp_path / "lantern-city.sqlite3")
+    app.start_new_game()
+    app.enter_district("district_old_quarter")
+    app._introduce_case("case_missing_clerk")
+    gm = GameMaster(app=app, llm=llm)
+
+    normalized = gm._normalize_commands(
+        ["talk npc_archive_clerk What is my case theory?"],
+        "what is my case theory",
+    )
+
+    assert normalized == ["board case_missing_clerk"]
+
+
+def test_normalize_commands_routes_look_around_to_current_location_inspection(tmp_path) -> None:
+    llm = _RecordingLLM()
+    app = LanternCityApp(tmp_path / "lantern-city.sqlite3")
+    app.start_new_game()
+    app.enter_district("district_old_quarter")
+    app.go("location_ledger_room")
+    gm = GameMaster(app=app, llm=llm)
+
+    normalized = gm._normalize_commands(
+        ["look location_ledger_room"],
+        "look around",
+    )
+
+    assert normalized == ["inspect location_ledger_room"]
+
+
+def test_normalize_commands_routes_object_examination_to_specific_object_inspect(tmp_path) -> None:
+    llm = _RecordingLLM()
+    app = LanternCityApp(tmp_path / "lantern-city.sqlite3")
+    app.start_new_game()
+    app.enter_district("district_old_quarter")
+    app.go("location_archive_steps")
+    gm = GameMaster(app=app, llm=llm)
+
+    normalized = gm._normalize_commands(
+        ["inspect location_archive_steps", "talk npc_archive_clerk What is this registry board?"],
+        "examine registry board",
+    )
+
+    assert normalized == ['inspect location_archive_steps "registry board"']
+
+
 def test_build_context_includes_clue_readability_distinctions(tmp_path) -> None:
     llm = _RecordingLLM()
     app = LanternCityApp(tmp_path / "lantern-city.sqlite3")

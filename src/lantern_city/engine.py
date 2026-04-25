@@ -184,7 +184,6 @@ def _handle_npc_conversation(
     case_intro_text: str | None = None,
 ) -> tuple[ResponsePayload, list[str]]:
     npc = _require_npc(active_slice)
-    clue = _first_clue(active_slice.clues)
     case_title = None if active_slice.case is None else active_slice.case.title
     loyalty_faction = _load_loyalty_faction(active_slice, npc, state_update_engine.store)
 
@@ -196,6 +195,7 @@ def _handle_npc_conversation(
         progress=progress,
         case_intro_text=case_intro_text,
     )
+    clue = _conversation_clue(active_slice, npc, generation_result)
     generation_read = _read_generated_npc_outcome(
         generation_result,
         loyalty_faction=loyalty_faction,
@@ -1029,9 +1029,10 @@ def _case_relevance(active_slice: ActiveSlice, clue: ClueState | None = None) ->
 def _learned_clues(active_slice: ActiveSlice, clue: ClueState | None) -> list[str]:
     if clue is None:
         return []
+    clue_text = _surface_clue_text(clue)
     if _is_pre_case_significant_clue(active_slice, clue):
-        return [f"Notable clue: {clue.clue_text}"]
-    return [clue.clue_text]
+        return [f"Notable clue: {clue_text}"]
+    return [clue_text]
 
 
 def _pre_case_clue_signals(active_slice: ActiveSlice, clue: ClueState | None) -> list[str]:
@@ -1064,6 +1065,39 @@ def _first_clue(clues: list[ClueState]) -> ClueState | None:
     if not clues:
         return None
     return clues[0]
+
+
+def _conversation_clue(
+    active_slice: ActiveSlice,
+    npc: NPCState,
+    generation_result: NPCResponseGenerationResult | None,
+) -> ClueState | None:
+    clue_by_id = {clue.id: clue for clue in active_slice.clues}
+    if generation_result is not None:
+        for effect in generation_result.structured_updates.clue_effects:
+            if effect.clue_id and effect.clue_id in clue_by_id:
+                return clue_by_id[effect.clue_id]
+
+    for clue_id in npc.known_clue_ids:
+        clue = clue_by_id.get(clue_id)
+        if clue is not None and clue.reliability != "solid":
+            return clue
+
+    for clue_id in npc.known_clue_ids:
+        clue = clue_by_id.get(clue_id)
+        if clue is not None:
+            return clue
+
+    for clue in active_slice.clues:
+        if clue.reliability != "solid":
+            return clue
+
+    return _first_clue(active_slice.clues)
+
+
+def _surface_clue_text(clue: ClueState) -> str:
+    primary_line = clue.clue_text.splitlines()[0].strip()
+    return primary_line or clue.clue_text.strip()
 
 
 def _display_name(identifier: str) -> str:

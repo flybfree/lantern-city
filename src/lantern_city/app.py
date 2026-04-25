@@ -256,7 +256,8 @@ class LanternCityApp:
         if verb == "talk" and len(parts) >= 3:
             return self.talk_to_npc(parts[1], " ".join(parts[2:]))
         if verb == "inspect" and len(parts) >= 2:
-            return self.inspect_location(parts[1])
+            object_name = " ".join(parts[2:]) if len(parts) > 2 else None
+            return self.inspect_location(parts[1], object_name=object_name)
         if verb == "case" and len(parts) >= 2:
             return self.advance_case(parts[1])
         raise ValueError(f"Unsupported command: {command}")
