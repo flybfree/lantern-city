@@ -4,6 +4,7 @@ from types import SimpleNamespace
 
 from lantern_city.models import ClueState
 from lantern_city.tui import (
+    _command_reference_lines,
     _clue_reading_lines,
     _faction_pressure_lines,
     _format_command_result_markup,
@@ -185,6 +186,17 @@ def test_should_block_generation_on_prompt_check_only_blocks_failures() -> None:
     assert _should_block_generation_on_prompt_check("fail") is True
     assert _should_block_generation_on_prompt_check("warning") is False
     assert _should_block_generation_on_prompt_check("pass") is False
+
+
+def test_command_reference_lines_include_core_direct_commands() -> None:
+    lines = _command_reference_lines()
+
+    assert lines[0] == "[bold]CMD Reference:[/bold]"
+    assert "  start" in lines
+    assert "  enter <district_id>" in lines
+    assert '  inspect <location_id> "<object>"' in lines
+    assert "  board [case_id]" in lines
+    assert "  compare <clue_a> <clue_b>" in lines
 
 
 def test_clue_reading_lines_surface_support_contradiction_and_follow_up() -> None:

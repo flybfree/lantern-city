@@ -76,7 +76,8 @@ separate what is solid from what the light has made uncertain.
 
 [bold]── How to play ─────────────────────────────────────[/bold]
 
-The Game Master understands natural language. Just describe what you want to do:
+[bold]GM mode[/bold] is for natural language. The Game Master interprets what you mean and turns it into game actions.
+Use it when you want immersion or want to say things like:
 
   [italic]"go to the old quarter"[/italic]
   [italic]"look around"[/italic]
@@ -89,6 +90,10 @@ The Game Master understands natural language. Just describe what you want to do:
   [italic]"show my strongest leads"[/italic]
   [italic]"compare clue_missing_clerk_ledgers with clue_hidden_copy_sheet"[/italic]
   [italic]"show my journal"[/italic]
+
+[bold]Command mode[/bold] is for direct testing and precise control. It skips GM interpretation and runs the command you typed.
+Use command mode when you want to validate mechanics, solve a case cleanly, or avoid translation mistakes.
+The right panel shows the available command verbs whenever command mode is active.
 
 [bold]── Navigation ──────────────────────────────────────[/bold]
 
@@ -150,6 +155,28 @@ _HELP_TEXT = """\
   [bold]help[/bold]                         show this panel
 
 [dim]Ctrl+G — GM/CMD  |  Ctrl+R — map/stats  |  Ctrl+C — quit  |  ↑↓ history[/dim]"""
+
+
+def _command_reference_lines() -> list[str]:
+    return [
+        "[bold]CMD Reference:[/bold]",
+        "  start",
+        "  overview",
+        "  status",
+        "  look [district_id]",
+        "  enter <district_id>",
+        "  go <location_id>",
+        "  inspect <location_id>",
+        '  inspect <location_id> "<object>"',
+        "  talk <npc_id> <text>",
+        "  clues",
+        "  journal",
+        "  board [case_id]",
+        "  leads",
+        "  matters",
+        "  compare <clue_a> <clue_b>",
+        "  case <case_id>",
+    ]
 
 
 class TurnLogger:
@@ -1475,10 +1502,14 @@ class LanternCityTUI(App[None]):
             return _HELP_TEXT
 
         if city is None:
-            return (
+            lines = [
                 "[dim]Ctrl+G — GM/CMD  |  Ctrl+R — map/stats  |  Ctrl+S — startup/LLM[/dim]\n\n"
                 "Type [bold]start[/bold] to begin a new game."
-            )
+            ]
+            if not self._gm_mode:
+                lines.append("")
+                lines.extend(_command_reference_lines())
+            return "\n".join(lines)
 
         lines: list[str] = []
 
@@ -1651,6 +1682,10 @@ class LanternCityTUI(App[None]):
             lines.append("")
             lines.append("[bold]Recovery:[/bold]")
             lines.extend(recovery)
+
+        if not self._gm_mode:
+            lines.append("")
+            lines.extend(_command_reference_lines())
 
         return "\n".join(lines)
 
