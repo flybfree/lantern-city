@@ -92,7 +92,7 @@ The Game Master understands natural language. Just describe what you want to do:
 
 [bold]── Navigation ──────────────────────────────────────[/bold]
 
-The city has six districts, each with its own lantern condition and locations. \
+Generated cities have 3 to 6 districts, each with its own lantern condition and locations. \
 The panel on the right shows all districts — [dim]unexplored[/dim] ones are waiting. \
 Within a district, locations hold objects, clues, and NPCs. Move between them \
 freely; inspect locations to gather evidence.
