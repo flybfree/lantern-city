@@ -443,6 +443,138 @@ def test_handle_player_request_turns_player_promises_into_durable_social_state(
     assert any("tracking a promise from you" in line for line in outcome.response.state_changes)
 
 
+def test_handle_player_request_can_resolve_a_tracked_promise(
+    populated_store: SQLiteStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from lantern_city import engine
+
+    npc = populated_store.load_object("NPCState", NPC_ID)
+    assert isinstance(npc, NPCState)
+    populated_store.save_object(
+        npc.model_copy(
+            update={
+                "known_promises": ["Player promised: I will bring you the clean ledger copy."],
+                "relationship_flags": [*npc.relationship_flags, "awaiting_player_promise"],
+            }
+        )
+    )
+
+    request = make_request(
+        intent="conversation",
+        target_id=NPC_ID,
+        input_text="As promised, I brought the clean ledger copy.",
+    )
+
+    monkeypatch.setattr(
+        engine,
+        "_generate_npc_dialogue",
+        lambda *args, **kwargs: NPCResponseGenerationResult.model_validate(
+            {
+                "task_type": "npc_response",
+                "request_id": request.id,
+                "summary_text": "Ila accepts that you followed through.",
+                "structured_updates": {
+                    "dialogue_act": "accepts_follow_through",
+                    "npc_stance": "relieved",
+                    "relationship_shift": {
+                        "trust_delta": 0.0,
+                        "suspicion_delta": 0.0,
+                        "fear_delta": 0.0,
+                        "tag": "steady",
+                    },
+                    "clue_effects": [],
+                    "access_effects": [],
+                    "redirect_targets": [],
+                },
+                "cacheable_text": {
+                    "npc_line": "You kept your word. I won't forget that.",
+                    "follow_up_suggestions": ["Ask what else Ila will risk now."],
+                    "exit_line_if_needed": "That changes what I can tell you.",
+                },
+                "confidence": 0.8,
+                "warnings": [],
+            }
+        ),
+    )
+
+    outcome = engine.handle_player_request(populated_store, city_id=CITY_ID, request=request)
+    updated_npc = populated_store.load_object("NPCState", NPC_ID)
+
+    assert isinstance(updated_npc, NPCState)
+    assert not updated_npc.known_promises
+    assert "awaiting_player_promise" not in updated_npc.relationship_flags
+    assert outcome.response.narrative_text == "You kept your word. I won't forget that."
+    assert any("promise as kept" in line for line in outcome.response.state_changes)
+    assert f"Ask {updated_npc.name} what they will risk telling you now." in outcome.response.now_available
+    assert "Ask for the detail they were holding back." in outcome.response.next_actions
+    assert any("opened a more direct line" in line for line in outcome.response.state_changes)
+
+
+def test_handle_player_request_marks_broken_promise_as_closed_route(
+    populated_store: SQLiteStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from lantern_city import engine
+
+    npc = populated_store.load_object("NPCState", NPC_ID)
+    assert isinstance(npc, NPCState)
+    populated_store.save_object(
+        npc.model_copy(
+            update={
+                "known_promises": ["Player promised: I will bring you the clean ledger copy."],
+                "relationship_flags": [*npc.relationship_flags, "awaiting_player_promise"],
+            }
+        )
+    )
+
+    request = make_request(
+        intent="conversation",
+        target_id=NPC_ID,
+        input_text="I couldn't get it. I broke my word.",
+    )
+
+    monkeypatch.setattr(
+        engine,
+        "_generate_npc_dialogue",
+        lambda *args, **kwargs: NPCResponseGenerationResult.model_validate(
+            {
+                "task_type": "npc_response",
+                "request_id": request.id,
+                "summary_text": "Ila hardens when you admit you failed her.",
+                "structured_updates": {
+                    "dialogue_act": "disappointed_refusal",
+                    "npc_stance": "hurt and guarded",
+                    "relationship_shift": {
+                        "trust_delta": 0.0,
+                        "suspicion_delta": 0.0,
+                        "fear_delta": 0.0,
+                        "tag": "steady",
+                    },
+                    "clue_effects": [],
+                    "access_effects": [],
+                    "redirect_targets": [],
+                },
+                "cacheable_text": {
+                    "npc_line": "Then I won't make that mistake twice.",
+                    "follow_up_suggestions": ["Ask whether any trust can be repaired."],
+                    "exit_line_if_needed": "Go find another way in.",
+                },
+                "confidence": 0.8,
+                "warnings": [],
+            }
+        ),
+    )
+
+    outcome = engine.handle_player_request(populated_store, city_id=CITY_ID, request=request)
+    updated_npc = populated_store.load_object("NPCState", NPC_ID)
+
+    assert isinstance(updated_npc, NPCState)
+    assert not updated_npc.known_promises
+    assert updated_npc.grievances
+    assert "Look for another contact instead of leaning on Ila Venn right now." in outcome.response.now_available
+    assert "Rebuild trust before asking this NPC for protected details again." in outcome.response.next_actions
+    assert any("closed an easier route" in line for line in outcome.response.state_changes)
+
+
 def test_handle_player_request_biases_records_pressure_into_redirects_and_paper_trails(
     populated_store: SQLiteStore, monkeypatch: pytest.MonkeyPatch
 ) -> None:

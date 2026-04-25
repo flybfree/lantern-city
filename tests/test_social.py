@@ -192,3 +192,46 @@ def test_run_offscreen_npc_tick_turns_unresolved_promises_into_grievances() -> N
     assert "Player left a promise hanging." in result.npc.grievances
     assert result.npc.offscreen_state == "waiting_on_player"
     assert any("waiting on a promise" in change for change in result.state_changes)
+
+
+def test_apply_player_social_consequence_can_mark_promise_as_kept() -> None:
+    npc = make_npc().model_copy(
+        update={
+            "known_promises": ["Player promised: I will bring the ledger copy."],
+            "relationship_flags": ["awaiting_player_promise"],
+        }
+    )
+
+    result = apply_player_social_consequence(
+        npc,
+        player_flag="promise_honored",
+        player_input="As promised, I brought the ledger copy.",
+        updated_at="turn_6",
+    )
+
+    assert not result.npc.known_promises
+    assert "awaiting_player_promise" not in result.npc.relationship_flags
+    assert result.npc.trust_in_player > npc.trust_in_player
+    assert any("promise as kept" in change for change in result.state_changes)
+
+
+def test_apply_player_social_consequence_can_mark_promise_as_broken() -> None:
+    npc = make_npc().model_copy(
+        update={
+            "known_promises": ["Player promised: I will bring the ledger copy."],
+            "relationship_flags": ["awaiting_player_promise"],
+        }
+    )
+
+    result = apply_player_social_consequence(
+        npc,
+        player_flag="promise_broken",
+        player_input="I couldn't get it. I broke my word.",
+        updated_at="turn_6",
+    )
+
+    assert not result.npc.known_promises
+    assert result.npc.grievances
+    assert "broken_promise" in result.npc.relationship_flags
+    assert result.npc.suspicion > npc.suspicion
+    assert any("broke your word" in change for change in result.state_changes)

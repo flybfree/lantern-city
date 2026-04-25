@@ -144,6 +144,56 @@ def apply_player_social_consequence(
             }
         )
         state_changes.append(f"{updated.name} is now tracking a promise from you.")
+    elif player_flag == "promise_honored":
+        fulfilled, remaining = _pop_oldest(updated.known_promises)
+        relationship_flags = [
+            flag for flag in updated.relationship_flags if flag != "awaiting_player_promise"
+        ]
+        updated = updated.model_copy(
+            update={
+                "known_promises": remaining,
+                "relationship_flags": relationship_flags,
+                "updated_at": updated_at,
+            }
+        )
+        trust_result = apply_relationship_shift(
+            updated,
+            trust_delta=0.08,
+            suspicion_delta=-0.05,
+            fear_delta=-0.02,
+            tag="promise_kept",
+            updated_at=updated_at,
+        )
+        updated = trust_result.npc
+        state_changes.extend(trust_result.state_changes)
+        if fulfilled is not None:
+            state_changes.append(f"{updated.name} marks one promise as kept: {fulfilled}.")
+    elif player_flag == "promise_broken":
+        broken, remaining = _pop_oldest(updated.known_promises)
+        grievance_note = _bounded_note(
+            "Broken promise remembered."
+            if broken is None
+            else f"Broken promise remembered: {broken}"
+        )
+        updated = updated.model_copy(
+            update={
+                "known_promises": remaining,
+                "grievances": _merge_note(updated.grievances, grievance_note),
+                "relationship_flags": _merge_flag(updated.relationship_flags, "broken_promise"),
+                "updated_at": updated_at,
+            }
+        )
+        hardened = apply_relationship_shift(
+            updated,
+            trust_delta=-0.08,
+            suspicion_delta=0.1,
+            fear_delta=0.03,
+            tag="promise_broken",
+            updated_at=updated_at,
+        )
+        updated = hardened.npc
+        state_changes.extend(hardened.state_changes)
+        state_changes.append(f"{updated.name} will remember that you broke your word.")
     elif player_flag == "apology_offered":
         grievance, remaining = _pop_oldest(updated.grievances)
         updated = updated.model_copy(update={"grievances": remaining, "updated_at": updated_at})

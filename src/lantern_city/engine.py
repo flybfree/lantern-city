@@ -234,6 +234,7 @@ def _handle_npc_conversation(
         )
         updated_npc = consequence_result.npc
         state_changes.extend(consequence_result.state_changes)
+        followthrough_read = _social_followthrough_effects(updated_npc, player_flag=player_flag)
         conversation_read = _conversation_outcome_read(
             generation_result.structured_updates.dialogue_act,
             generation_result.structured_updates.npc_stance,
@@ -242,23 +243,28 @@ def _handle_npc_conversation(
             state_changes.append(f"Conversation read: {conversation_read}.")
         state_changes.append(f"Relationship state: {summarize_relationship(updated_npc)}.")
         state_changes.extend(generation_read.state_changes)
+        state_changes.extend(followthrough_read.state_changes)
     else:
         player_flag = None
+        followthrough_read = _GeneratedNPCOutcomeRead([], [], [], [])
 
     response = compose_response(
         narrative_text=narrative_text,
         state_changes=state_changes,
-        learned=_merge_unique_lines(_learned_clues(active_slice, clue), generation_read.learned),
+        learned=_merge_unique_lines(
+            _merge_unique_lines(_learned_clues(active_slice, clue), generation_read.learned),
+            followthrough_read.learned,
+        ),
         visible_npcs=[npc.name] if npc.name else [],
         notable_objects=_conversation_notable_objects(active_slice, npc),
         exits=_conversation_exits(active_slice),
         case_relevance=_case_relevance(active_slice, clue=clue),
         now_available=_merge_unique_lines(
-            _conversation_now_available(active_slice, npc),
-            generation_read.now_available,
+            _merge_unique_lines(_conversation_now_available(active_slice, npc), generation_read.now_available),
+            followthrough_read.now_available,
         ),
         next_actions=_merge_unique_lines(
-            generation_read.next_actions,
+            _merge_unique_lines(generation_read.next_actions, followthrough_read.next_actions),
             _conversation_next_actions(case_title),
         ),
     )
@@ -655,6 +661,31 @@ def _infer_player_flag(
     npc_stance: str,
 ) -> str | None:
     normalized = f"{player_input} {dialogue_act} {npc_stance}".lower()
+    if any(
+        token in normalized
+        for token in (
+            "kept my word",
+            "kept your word",
+            "as promised",
+            "i brought it",
+            "here it is",
+            "i followed through",
+        )
+    ):
+        return "promise_honored"
+    if any(
+        token in normalized
+        for token in (
+            "can't do it",
+            "cannot do it",
+            "won't do it",
+            "couldn't get it",
+            "i failed",
+            "broke my word",
+            "can't keep that promise",
+        )
+    ):
+        return "promise_broken"
     if any(token in normalized for token in ("promise", "swear", "i will", "you have my word")):
         return "promise_made"
     if any(token in normalized for token in ("sorry", "apolog", "forgive me")):
@@ -707,6 +738,37 @@ def _conversation_next_actions(case_title: str | None) -> list[str]:
     if case_title is not None:
         next_actions.append(f"Review {case_title}")
     return next_actions
+
+
+def _social_followthrough_effects(
+    npc: NPCState,
+    *,
+    player_flag: str | None,
+) -> _GeneratedNPCOutcomeRead:
+    if player_flag == "promise_honored":
+        now_available = [f"Ask {npc.name} what they will risk telling you now."]
+        if npc.location_id is not None:
+            now_available.append(f"Use the opening around {_display_name(npc.location_id)}.")
+        return _GeneratedNPCOutcomeRead(
+            learned=[f"{npc.name} treats the favor-based opening as real now."],
+            now_available=now_available,
+            next_actions=[
+                "Ask for the detail they were holding back.",
+                "Press the strongest follow-up while the goodwill is fresh.",
+            ],
+            state_changes=["Access shift: keeping your word opened a more direct line with this NPC."],
+        )
+    if player_flag == "promise_broken":
+        return _GeneratedNPCOutcomeRead(
+            learned=[f"{npc.name} closes the favor-based path you were relying on."],
+            now_available=[f"Look for another contact instead of leaning on {npc.name} right now."],
+            next_actions=[
+                "Rebuild trust before asking this NPC for protected details again.",
+                "Find corroboration elsewhere instead of expecting the promised help.",
+            ],
+            state_changes=["Access shift: breaking your word closed an easier route through this NPC."],
+        )
+    return _GeneratedNPCOutcomeRead([], [], [], [])
 
 
 def _district_notable_objects(active_slice: ActiveSlice) -> list[str]:
