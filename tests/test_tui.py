@@ -8,7 +8,9 @@ from lantern_city.tui import (
     _faction_pressure_lines,
     _format_command_result_markup,
     _format_start_result_markup,
+    _is_new_profile_definition,
     _recovery_panel_lines,
+    _should_block_generation_on_prompt_check,
 )
 
 
@@ -179,6 +181,12 @@ def test_recovery_panel_lines_surface_social_route_summary() -> None:
     assert any("social route: Ila Venn: opened a testimony route around Witness Instability" in line for line in lines)
 
 
+def test_should_block_generation_on_prompt_check_only_blocks_failures() -> None:
+    assert _should_block_generation_on_prompt_check("fail") is True
+    assert _should_block_generation_on_prompt_check("warning") is False
+    assert _should_block_generation_on_prompt_check("pass") is False
+
+
 def test_clue_reading_lines_surface_support_contradiction_and_follow_up() -> None:
     lines = _clue_reading_lines(
         [
@@ -281,3 +289,54 @@ def test_faction_pressure_lines_surface_attitude_and_plan() -> None:
 
     assert any("Memory Keepers: guarded / records control / tightening official scrutiny" in line for line in lines)
     assert any("Council of Lights: wary / civic enforcement / tightening official scrutiny" in line for line in lines)
+
+
+def test_is_new_profile_definition_returns_false_for_existing_named_profile() -> None:
+    assert not _is_new_profile_definition(
+        [
+            {
+                "name": "office-gemma",
+                "llm_url": "http://localhost:1234/v1",
+                "llm_model": "gemma",
+                "prompt_profile": "default",
+            }
+        ],
+        profile_name="office-gemma",
+        url="http://localhost:1234/v1",
+        model="gemma",
+        prompt_profile="default",
+    )
+
+
+def test_is_new_profile_definition_returns_false_for_existing_endpoint_model_prompt_combo() -> None:
+    assert not _is_new_profile_definition(
+        [
+            {
+                "name": "office-gemma",
+                "llm_url": "http://localhost:1234/v1",
+                "llm_model": "gemma",
+                "prompt_profile": "city_v2",
+            }
+        ],
+        profile_name="new-name",
+        url="http://localhost:1234/v1",
+        model="gemma",
+        prompt_profile="city_v2",
+    )
+
+
+def test_is_new_profile_definition_returns_true_for_new_profile() -> None:
+    assert _is_new_profile_definition(
+        [
+            {
+                "name": "office-gemma",
+                "llm_url": "http://localhost:1234/v1",
+                "llm_model": "gemma",
+                "prompt_profile": "default",
+            }
+        ],
+        profile_name="office-nemotron",
+        url="http://localhost:2234/v1",
+        model="nemotron",
+        prompt_profile="city_v3",
+    )

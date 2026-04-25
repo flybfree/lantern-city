@@ -648,6 +648,44 @@ def test_sanitize_npc_response_payload_normalizes_loose_string_effect_lists() ->
     assert result.structured_updates.clue_effects[0].effect_type == "clue hint"
 
 
+def test_sanitize_npc_response_payload_normalizes_alternate_redirect_and_delta_shapes() -> None:
+    payload = copy.deepcopy(make_valid_payload())
+    payload["task_type"] = "investigation"
+    payload["structured_updates"]["relationship_shift"] = {
+        "trust_delta": "1.8",
+        "suspicion_delta": -4,
+        "fear_delta": "0.4",
+        "tag": "procedural_pressure",
+    }
+    payload["structured_updates"]["redirect_targets"] = [
+        {"type": "physical_search", "area": "Sector Gamma maintenance cart area"},
+        {"type": "investigation", "focus": "security camera logs for Sector Gamma entrance"},
+    ]
+
+    normalized = sanitize_npc_response_payload(payload)
+
+    assert normalized["task_type"] == "npc_response"
+    assert normalized["structured_updates"]["relationship_shift"] == {
+        "trust_delta": 1.0,
+        "suspicion_delta": -1.0,
+        "fear_delta": 0.4,
+        "tag": "procedural_pressure",
+    }
+    assert normalized["structured_updates"]["redirect_targets"] == [
+        {
+            "target_type": "physical search",
+            "target_id": "location_unknown",
+            "reason": "Sector Gamma maintenance cart area",
+        },
+        {
+            "target_type": "investigation",
+            "target_id": "location_unknown",
+            "reason": "security camera logs for Sector Gamma entrance",
+        },
+    ]
+    NPCResponseGenerationResult.model_validate(normalized)
+
+
 def test_npc_response_generator_rejects_clue_effect_outside_active_slice() -> None:
     payload = copy.deepcopy(make_valid_payload())
     payload["structured_updates"]["clue_effects"][0]["clue_id"] = "clue_hidden_archive"

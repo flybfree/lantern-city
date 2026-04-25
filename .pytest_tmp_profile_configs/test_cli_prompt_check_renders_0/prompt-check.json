@@ -1,0 +1,16 @@
+{
+  "base_url": "http://localhost:1234/v1",
+  "model": "test-model",
+  "concept": "fog-bound records city",
+  "overall_status": "pass",
+  "stages": [
+    {
+      "name": "startup_probe",
+      "status": "pass",
+      "elapsed_seconds": 0.4,
+      "summary": "NPC probe validated with confidence 0.92",
+      "sample": "A careful witness points you toward the archive cart.",
+      "warnings": []
+    }
+  ]
+}

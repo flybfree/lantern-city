@@ -1,0 +1,16 @@
+{
+  "active_profile": "192.168.3.181:1234 | google/gemma-4-e4b",
+  "profiles": [
+    {
+      "name": "192.168.3.181:1234 | google/gemma-4-e4b",
+      "llm_url": "http://192.168.3.181:1234/v1",
+      "llm_model": "google/gemma-4-e4b",
+      "startup_mode": "generated_runtime",
+      "prompt_profile": "default"
+    }
+  ],
+  "llm_url": "http://192.168.3.181:1234/v1",
+  "llm_model": "google/gemma-4-e4b",
+  "startup_mode": "generated_runtime",
+  "prompt_profile": "default"
+}

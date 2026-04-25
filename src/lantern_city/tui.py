@@ -35,8 +35,12 @@ from textual.worker import Worker, WorkerState
 
 from lantern_city.app import LanternCityApp
 from lantern_city.cli import (
+    DEFAULT_PROMPT_PROFILE,
     _default_player_startup_mode,
+    _load_active_llm_profile,
     _load_llm_config,
+    _load_llm_profiles,
+    _load_prompt_profile,
     _load_startup_mode,
     _parse_startup_mode_arg,
     _save_llm_config,
@@ -52,6 +56,7 @@ from lantern_city.models import (
     LocationState,
     PlayerProgressState,
 )
+from lantern_city.prompt_diagnostics import run_prompt_diagnostics
 
 # Direct-command verbs whose output goes to the narrative pane (not info pane)
 _NARRATIVE_INFO_COMMANDS = frozenset({"clues", "look", "overview"})
@@ -292,10 +297,20 @@ class GenerateCityScreen(Screen[Path | None]):
         Binding("escape", "cancel", "Cancel"),
     ]
 
-    def __init__(self, saved_url: str = "", saved_model: str = "") -> None:
+    def __init__(
+        self,
+        saved_profiles: list[dict[str, str]] | None = None,
+        saved_url: str = "",
+        saved_model: str = "",
+        saved_profile_name: str = "",
+        saved_prompt_profile: str = DEFAULT_PROMPT_PROFILE,
+    ) -> None:
         super().__init__()
+        self._saved_profiles = saved_profiles or []
         self._saved_url = saved_url
         self._saved_model = saved_model
+        self._saved_profile_name = saved_profile_name
+        self._saved_prompt_profile = saved_prompt_profile
         self._generating = False
 
     def compose(self) -> ComposeResult:
@@ -303,6 +318,24 @@ class GenerateCityScreen(Screen[Path | None]):
         with Vertical(id="gen-box"):
             yield Static("[bold yellow]GENERATE NEW CITY[/bold yellow]", markup=True, id="gen-title")
             with ScrollableContainer(id="gen-form"):
+                if self._saved_profiles:
+                    yield Label("Saved profiles  [dim](select or type a new one below)[/dim]", markup=True)
+                    profile_items = [
+                        ListItem(
+                            Label(
+                                f"{p['name']}  [dim]({p['llm_model']} / {p.get('prompt_profile', DEFAULT_PROMPT_PROFILE)})[/dim]",
+                                markup=True,
+                            )
+                        )
+                        for p in self._saved_profiles
+                    ]
+                    yield ListView(*profile_items, id="gen-profile-list")
+                yield Label("Profile name")
+                yield Input(
+                    value=self._saved_profile_name,
+                    placeholder="office-lmstudio-gemma",
+                    id="inp-profile-name",
+                )
                 yield Label("LLM URL  [bold red]*[/bold red]  [dim](required)[/dim]", markup=True)
                 with Horizontal(id="gen-url-row"):
                     yield Input(value=self._saved_url, placeholder="http://192.168.x.x:1234/v1", id="inp-url")
@@ -311,6 +344,12 @@ class GenerateCityScreen(Screen[Path | None]):
                 yield ListView(id="gen-model-list")
                 yield Label("Model  [bold red]*[/bold red]  [dim](select above or type)[/dim]", markup=True)
                 yield Input(value=self._saved_model, placeholder="model name", id="inp-model")
+                yield Label("Prompt profile / system prompt id")
+                yield Input(
+                    value=self._saved_prompt_profile,
+                    placeholder="default",
+                    id="inp-prompt-profile",
+                )
                 yield Label("Concept  [dim](optional)[/dim]", markup=True)
                 yield Input(placeholder="e.g. steampunk port city run by criminal gangs", id="inp-concept")
                 yield Label("Output file")
@@ -340,15 +379,47 @@ class GenerateCityScreen(Screen[Path | None]):
             self._start_generation()
 
     def on_list_view_selected(self, event: ListView.Selected) -> None:
+        if event.list_view.id == "gen-profile-list":
+            self._apply_selected_profile(str(event.item.query_one(Label).renderable))
+            return
         if event.list_view.id == "gen-model-list":
             label = event.item.query_one(Label)
             self.query_one("#inp-model", Input).value = str(label.renderable).strip()
 
     def on_list_view_highlighted(self, event: ListView.Highlighted) -> None:
+        if event.list_view.id == "gen-profile-list" and event.item is not None:
+            self._apply_selected_profile(str(event.item.query_one(Label).renderable))
+            return
         if event.list_view.id != "gen-model-list" or event.item is None:
             return
         label = event.item.query_one(Label)
         self.query_one("#inp-model", Input).value = str(label.renderable).strip()
+
+    def _apply_selected_profile(self, rendered: str) -> None:
+        selected_name = rendered.split("  ")[0].strip()
+        profile = next((p for p in self._saved_profiles if p["name"] == selected_name), None)
+        if profile is None:
+            return
+        self.query_one("#inp-profile-name", Input).value = profile["name"]
+        self.query_one("#inp-url", Input).value = profile["llm_url"]
+        self.query_one("#inp-model", Input).value = profile["llm_model"]
+        self.query_one("#inp-prompt-profile", Input).value = profile.get("prompt_profile", DEFAULT_PROMPT_PROFILE)
+
+    def _is_new_profile_definition(
+        self,
+        *,
+        profile_name: str,
+        url: str,
+        model: str,
+        prompt_profile: str,
+    ) -> bool:
+        return _is_new_profile_definition(
+            self._saved_profiles,
+            profile_name=profile_name,
+            url=url,
+            model=model,
+            prompt_profile=prompt_profile,
+        )
 
     def _do_fetch_gen(self, url: str) -> None:
         self.query_one("#gen-fetch-status", Static).update("[dim]Fetching models…[/dim]")
@@ -366,8 +437,10 @@ class GenerateCityScreen(Screen[Path | None]):
         self.query_one("#gen-log", RichLog).write(msg)
 
     def _start_generation(self) -> None:
+        profile_name = self.query_one("#inp-profile-name", Input).value.strip()
         url = self.query_one("#inp-url", Input).value.strip()
         model = self.query_one("#inp-model", Input).value.strip()
+        prompt_profile = self.query_one("#inp-prompt-profile", Input).value.strip() or DEFAULT_PROMPT_PROFILE
         output_name = self.query_one("#inp-output", Input).value.strip()
         concept = self.query_one("#inp-concept", Input).value.strip()
 
@@ -397,14 +470,19 @@ class GenerateCityScreen(Screen[Path | None]):
         self._log(f"Starting generation → {output_name}")
         if concept:
             self._log(f"Concept: {concept}")
+        self._log(f"Profile: {profile_name or '(auto)'}")
         self._log(f"LLM: {url}  model: {model}")
+        self._log(f"Prompt profile: {prompt_profile}")
         log_path = output.with_suffix(".generation.log")
         self._log(f"Log: {log_path}")
         self._log("")
 
+        def write_progress(msg: str) -> None:
+            self.query_one("#gen-log", RichLog).write(msg)
+
         def on_progress(msg: str) -> None:
             self.app.call_from_thread(
-                lambda m=msg: self.query_one("#gen-log", RichLog).write(m)
+                lambda m=msg: write_progress(m)
             )
 
         async def _worker() -> Path | str:
@@ -413,6 +491,12 @@ class GenerateCityScreen(Screen[Path | None]):
             from lantern_city.cli import _save_llm_config
 
             log_file = open(log_path, "w", encoding="utf-8")  # noqa: SIM115
+            report_path = output.with_suffix(".prompt-check.json")
+
+            def _emit_app(msg: str) -> None:
+                write_progress(msg)
+                log_file.write(msg + "\n")
+                log_file.flush()
 
             def _emit(msg: str) -> None:
                 on_progress(msg)
@@ -420,7 +504,44 @@ class GenerateCityScreen(Screen[Path | None]):
                 log_file.flush()
 
             llm_config = OpenAICompatibleConfig(base_url=url, model=model)
-            _save_llm_config(str(output), url, model, startup_mode="generated_runtime")
+            if self._is_new_profile_definition(
+                profile_name=profile_name,
+                url=url,
+                model=model,
+                prompt_profile=prompt_profile,
+            ):
+                _emit_app("[diagnostics] New profile detected. Running prompt diagnostics before generation…")
+                try:
+                    report = await asyncio.to_thread(
+                        run_prompt_diagnostics,
+                        llm_config=llm_config,
+                        concept=concept,
+                    )
+                except Exception as exc:
+                    log_file.write(f"\nERROR: prompt diagnostics failed: {exc}\n")
+                    log_file.close()
+                    return f"ERROR: prompt diagnostics failed: {exc}"
+                report.write_json(report_path)
+                _emit_app(report.to_text())
+                _emit_app(f"[diagnostics] Report saved: {report_path}")
+                if _should_block_generation_on_prompt_check(report.overall_status):
+                    log_file.write(
+                        "\nERROR: prompt diagnostics did not pass for this new profile. "
+                        "Tune the endpoint/model/prompt profile before generating a city.\n"
+                    )
+                    log_file.close()
+                    return (
+                        "ERROR: prompt diagnostics did not pass for this new profile. "
+                        "Fix the model/profile first; city generation was not started."
+                    )
+            _save_llm_config(
+                str(output),
+                url,
+                model,
+                startup_mode="generated_runtime",
+                profile_name=profile_name or None,
+                prompt_profile=prompt_profile,
+            )
             game = LanternCityApp(
                 output,
                 llm_config=llm_config,
@@ -483,7 +604,7 @@ class GenerateCityScreen(Screen[Path | None]):
             self._log(f"\nGeneration failed: {event.worker.error}")
 
     def _set_inputs_disabled(self, disabled: bool) -> None:
-        for widget_id in ("#inp-url", "#inp-model", "#inp-concept", "#inp-output",
+        for widget_id in ("#inp-profile-name", "#inp-url", "#inp-model", "#inp-prompt-profile", "#inp-concept", "#inp-output",
                           "#btn-gen-start", "#btn-gen-cancel"):
             try:
                 self.query_one(widget_id).disabled = disabled  # type: ignore[union-attr]
@@ -548,22 +669,38 @@ class CityPickerScreen(Screen[Path | None]):
 
     def _open_generate_screen(self) -> None:
         # Find a saved LLM config: check city-paired .json files, then any .json in CWD
-        saved_url, saved_model = "", ""
+        saved_profiles: list[dict[str, str]] = []
+        saved_url, saved_model, saved_profile_name, saved_prompt_profile = "", "", "", DEFAULT_PROMPT_PROFILE
         candidates = list(self._cities) + list(Path.cwd().glob("*.json"))
         for candidate in candidates:
-            cfg = _load_llm_config(str(candidate.with_suffix(".sqlite3")))
-            if not cfg:
-                # Try the json file itself as the db path stub
-                cfg = _load_llm_config(str(candidate))
-            if cfg:
-                saved_url, saved_model = cfg.base_url, cfg.model
+            db_stub = str(candidate.with_suffix(".sqlite3"))
+            profiles = _load_llm_profiles(db_stub)
+            if not profiles:
+                profiles = _load_llm_profiles(str(candidate))
+            if profiles:
+                saved_profiles = profiles
+                active = _load_active_llm_profile(db_stub) or _load_active_llm_profile(str(candidate))
+                if active is not None:
+                    saved_url = active["llm_url"]
+                    saved_model = active["llm_model"]
+                    saved_profile_name = active["name"]
+                    saved_prompt_profile = active.get("prompt_profile", DEFAULT_PROMPT_PROFILE)
                 break
 
         def _on_generated(result: Path | None) -> None:
             if result is not None:
                 self.dismiss(result)
 
-        self.app.push_screen(GenerateCityScreen(saved_url, saved_model), _on_generated)
+        self.app.push_screen(
+            GenerateCityScreen(
+                saved_profiles,
+                saved_url,
+                saved_model,
+                saved_profile_name,
+                saved_prompt_profile,
+            ),
+            _on_generated,
+        )
 
     def action_open_selected(self) -> None:
         self._open_selected()
@@ -599,7 +736,33 @@ def _fetch_models_from_url(base_url: str) -> list[str]:
     return sorted(models)
 
 
-class SettingsScreen(ModalScreen[tuple[str, str, str] | None]):
+def _is_new_profile_definition(
+    saved_profiles: list[dict[str, str]],
+    *,
+    profile_name: str,
+    url: str,
+    model: str,
+    prompt_profile: str,
+) -> bool:
+    normalized_name = profile_name.strip()
+    normalized_url = url.strip()
+    normalized_model = model.strip()
+    normalized_prompt_profile = prompt_profile.strip() or DEFAULT_PROMPT_PROFILE
+    if normalized_name and any(p["name"] == normalized_name for p in saved_profiles):
+        return False
+    return not any(
+        p["llm_url"] == normalized_url
+        and p["llm_model"] == normalized_model
+        and p.get("prompt_profile", DEFAULT_PROMPT_PROFILE) == normalized_prompt_profile
+        for p in saved_profiles
+    )
+
+
+def _should_block_generation_on_prompt_check(overall_status: str) -> bool:
+    return overall_status == "fail"
+
+
+class SettingsScreen(ModalScreen[tuple[str, str, str, str, str] | None]):
     """Modal overlay for configuring startup mode and the LLM connection."""
 
     CSS = """
@@ -654,18 +817,42 @@ class SettingsScreen(ModalScreen[tuple[str, str, str] | None]):
 
     def __init__(
         self,
+        profiles: list[dict[str, str]] | None = None,
+        current_profile_name: str = "",
         current_url: str = "",
         current_model: str = "",
         current_startup_mode: str = "auto",
+        current_prompt_profile: str = DEFAULT_PROMPT_PROFILE,
     ) -> None:
         super().__init__()
+        self._profiles = profiles or []
+        self._current_profile_name = current_profile_name
         self._current_url = current_url
         self._current_model = current_model
         self._current_startup_mode = current_startup_mode
+        self._current_prompt_profile = current_prompt_profile
 
     def compose(self) -> ComposeResult:
         with Vertical(id="settings-dialog"):
             yield Static("[bold yellow]Startup And LLM Settings[/bold yellow]", markup=True)
+            if self._profiles:
+                yield Label("Saved profiles  [dim](select or edit)[/dim]", markup=True)
+                profile_items = [
+                    ListItem(
+                        Label(
+                            f"{p['name']}  [dim]({p['llm_model']} / {p.get('prompt_profile', DEFAULT_PROMPT_PROFILE)})[/dim]",
+                            markup=True,
+                        )
+                    )
+                    for p in self._profiles
+                ]
+                yield ListView(*profile_items, id="settings-profile-list")
+            yield Label("Profile name")
+            yield Input(
+                value=self._current_profile_name,
+                placeholder="office-lmstudio-gemma",
+                id="inp-settings-profile-name",
+            )
             yield Label("Base URL")
             with Horizontal(id="url-row"):
                 yield Input(
@@ -678,6 +865,12 @@ class SettingsScreen(ModalScreen[tuple[str, str, str] | None]):
             yield ListView(id="settings-model-list")
             yield Label("Model  [dim](select above or type)[/dim]", markup=True)
             yield Input(value=self._current_model, placeholder="model-name", id="inp-settings-model")
+            yield Label("Prompt profile / system prompt id")
+            yield Input(
+                value=self._current_prompt_profile,
+                placeholder="default",
+                id="inp-settings-prompt-profile",
+            )
             yield Label("Startup mode  [dim](generated_runtime | mvp_baseline)[/dim]", markup=True)
             yield Input(
                 value=self._current_startup_mode,
@@ -708,17 +901,34 @@ class SettingsScreen(ModalScreen[tuple[str, str, str] | None]):
             self._save()
 
     def on_list_view_selected(self, event: ListView.Selected) -> None:
+        if event.list_view.id == "settings-profile-list":
+            self._apply_selected_profile(str(event.item.query_one(Label).renderable))
+            return
         if event.list_view.id == "settings-model-list":
             label = event.item.query_one(Label)
             model_name = str(label.renderable).strip()
             self.query_one("#inp-settings-model", Input).value = model_name
 
     def on_list_view_highlighted(self, event: ListView.Highlighted) -> None:
+        if event.list_view.id == "settings-profile-list" and event.item is not None:
+            self._apply_selected_profile(str(event.item.query_one(Label).renderable))
+            return
         if event.list_view.id != "settings-model-list" or event.item is None:
             return
         label = event.item.query_one(Label)
         model_name = str(label.renderable).strip()
         self.query_one("#inp-settings-model", Input).value = model_name
+
+    def _apply_selected_profile(self, rendered: str) -> None:
+        selected_name = rendered.split("  ")[0].strip()
+        profile = next((p for p in self._profiles if p["name"] == selected_name), None)
+        if profile is None:
+            return
+        self.query_one("#inp-settings-profile-name", Input).value = profile["name"]
+        self.query_one("#inp-settings-url", Input).value = profile["llm_url"]
+        self.query_one("#inp-settings-model", Input).value = profile["llm_model"]
+        self.query_one("#inp-settings-startup-mode", Input).value = profile["startup_mode"]
+        self.query_one("#inp-settings-prompt-profile", Input).value = profile.get("prompt_profile", DEFAULT_PROMPT_PROFILE)
 
     def on_key(self, event) -> None:
         if event.key == "escape":
@@ -731,14 +941,16 @@ class SettingsScreen(ModalScreen[tuple[str, str, str] | None]):
                     self._do_fetch(url)
 
     def _save(self) -> None:
+        profile_name = self.query_one("#inp-settings-profile-name", Input).value.strip()
         url = self.query_one("#inp-settings-url", Input).value.strip()
         model = self.query_one("#inp-settings-model", Input).value.strip()
+        prompt_profile = self.query_one("#inp-settings-prompt-profile", Input).value.strip() or DEFAULT_PROMPT_PROFILE
         startup_mode = self.query_one("#inp-settings-startup-mode", Input).value.strip() or "auto"
         if startup_mode not in {"auto", "mvp_baseline", "generated_runtime"}:
             self.query_one("#inp-settings-startup-mode", Input).focus()
             return
         if url and model:
-            self.dismiss((url, model, startup_mode))
+            self.dismiss((profile_name, url, model, startup_mode, prompt_profile))
         elif not url:
             self.query_one("#inp-settings-url", Input).focus()
         else:
@@ -949,6 +1161,8 @@ class LanternCityTUI(App[None]):
         narrative.write(Text.from_markup(f"[dim]Switched to {mode_label}.[/dim]"))
 
     def action_settings(self) -> None:
+        profiles = _load_llm_profiles(self._database_path)
+        active_profile = _load_active_llm_profile(self._database_path)
         current = _load_llm_config(self._database_path)
         current_startup_mode = (
             _load_startup_mode(self._database_path)
@@ -960,21 +1174,47 @@ class LanternCityTUI(App[None]):
         )
         url = current.base_url if current else ""
         model = current.model if current else ""
+        profile_name = active_profile["name"] if active_profile is not None else ""
+        prompt_profile = _load_prompt_profile(self._database_path) or DEFAULT_PROMPT_PROFILE
 
-        def _on_close(result: tuple[str, str, str] | None) -> None:
+        def _on_close(result: tuple[str, str, str, str, str] | None) -> None:
             if result is None:
                 return
-            url, model, startup_mode = result
-            _save_llm_config(self._database_path, url, model, startup_mode=startup_mode)
-            self._apply_llm_config(url, model, startup_mode)
+            profile_name, url, model, startup_mode, prompt_profile = result
+            _save_llm_config(
+                self._database_path,
+                url,
+                model,
+                startup_mode=startup_mode,
+                profile_name=profile_name or None,
+                prompt_profile=prompt_profile,
+            )
+            self._apply_llm_config(url, model, startup_mode, prompt_profile=prompt_profile)
 
-        self.push_screen(SettingsScreen(url, model, current_startup_mode), _on_close)
+        self.push_screen(
+            SettingsScreen(
+                profiles,
+                profile_name,
+                url,
+                model,
+                current_startup_mode,
+                prompt_profile,
+            ),
+            _on_close,
+        )
 
     def action_toggle_info(self) -> None:
         self._info_mode = "stats" if self._info_mode == "surroundings" else "surroundings"
         self._refresh_surroundings()
 
-    def _apply_llm_config(self, url: str, model: str, startup_mode: str = "auto") -> None:
+    def _apply_llm_config(
+        self,
+        url: str,
+        model: str,
+        startup_mode: str = "auto",
+        *,
+        prompt_profile: str = DEFAULT_PROMPT_PROFILE,
+    ) -> None:
         """Instantiate a new LLM client + GM and enable GM mode."""
         llm_config = OpenAICompatibleConfig(base_url=url, model=model)
         self._game.llm_config = llm_config
@@ -988,7 +1228,7 @@ class LanternCityTUI(App[None]):
         narrative = self.query_one("#narrative", RichLog)
         narrative.write(Text.from_markup(
             f"[green]LLM configured:[/green] {escape(url)}  model: {escape(model)}\n"
-            f"[dim]Startup mode: {escape(startup_mode)}. GM mode activated.[/dim]"
+            f"[dim]Startup mode: {escape(startup_mode)}  |  prompt profile: {escape(prompt_profile)}. GM mode activated.[/dim]"
         ))
 
     # ------------------------------------------------------------------

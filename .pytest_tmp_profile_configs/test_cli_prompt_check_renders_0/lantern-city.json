@@ -1,0 +1,16 @@
+{
+  "active_profile": "localhost:1234 | test-model",
+  "profiles": [
+    {
+      "name": "localhost:1234 | test-model",
+      "llm_url": "http://localhost:1234/v1",
+      "llm_model": "test-model",
+      "startup_mode": "generated_runtime",
+      "prompt_profile": "default"
+    }
+  ],
+  "llm_url": "http://localhost:1234/v1",
+  "llm_model": "test-model",
+  "startup_mode": "generated_runtime",
+  "prompt_profile": "default"
+}

@@ -1,0 +1,23 @@
+{
+  "active_profile": "office-b",
+  "profiles": [
+    {
+      "name": "office-a",
+      "llm_url": "http://localhost:1234/v1",
+      "llm_model": "model-a",
+      "startup_mode": "generated_runtime",
+      "prompt_profile": "city_v1"
+    },
+    {
+      "name": "office-b",
+      "llm_url": "http://localhost:2234/v1",
+      "llm_model": "model-b",
+      "startup_mode": "mvp_baseline",
+      "prompt_profile": "city_v2"
+    }
+  ],
+  "llm_url": "http://localhost:2234/v1",
+  "llm_model": "model-b",
+  "startup_mode": "mvp_baseline",
+  "prompt_profile": "city_v2"
+}

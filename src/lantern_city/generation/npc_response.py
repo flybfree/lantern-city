@@ -240,6 +240,82 @@ def _humanize_loose_effect_text(value: object) -> str:
     return text[:160] if len(text) > 160 else text
 
 
+def _normalize_relationship_delta(value: object) -> float:
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError):
+        return 0.0
+    return max(RELATIONSHIP_DELTA_MIN, min(RELATIONSHIP_DELTA_MAX, numeric))
+
+
+def _normalize_redirect_target(entry: dict[str, Any]) -> dict[str, Any]:
+    target_type = entry.get("target_type") or entry.get("type") or "redirect hint"
+    target_id = entry.get("target_id") or entry.get("location_id") or entry.get("target")
+    if not isinstance(target_id, str) or not target_id.startswith("location_"):
+        target_id = _UNKNOWN_LOCATION_ID
+
+    reason_parts = [
+        entry.get("reason"),
+        entry.get("note"),
+        entry.get("focus"),
+        entry.get("area"),
+    ]
+    reason = next(
+        (
+            _humanize_loose_effect_text(part)
+            for part in reason_parts
+            if isinstance(part, str) and part.strip()
+        ),
+        "follow the lead this NPC is pointing toward",
+    )
+
+    return {
+        "target_type": _humanize_loose_effect_text(target_type),
+        "target_id": target_id,
+        "reason": reason,
+    }
+
+
+def _normalize_access_effect(entry: dict[str, Any]) -> dict[str, Any]:
+    effect_type = entry.get("effect_type") or entry.get("type") or "access hint"
+    target_id = entry.get("target_id") or entry.get("location_id")
+    if not isinstance(target_id, str) or not target_id.startswith("location_"):
+        target_id = None
+    note = next(
+        (
+            _humanize_loose_effect_text(part)
+            for part in (entry.get("note"), entry.get("reason"), entry.get("focus"), entry.get("area"))
+            if isinstance(part, str) and part.strip()
+        ),
+        "follow up on the access lead this NPC surfaced",
+    )
+    return {
+        "effect_type": _humanize_loose_effect_text(effect_type),
+        "target_id": target_id,
+        "note": note,
+    }
+
+
+def _normalize_clue_effect(entry: dict[str, Any]) -> dict[str, Any]:
+    effect_type = entry.get("effect_type") or entry.get("type") or "clue hint"
+    clue_id = entry.get("clue_id")
+    if not isinstance(clue_id, str) or not clue_id.startswith("clue_"):
+        clue_id = None
+    note = next(
+        (
+            _humanize_loose_effect_text(part)
+            for part in (entry.get("note"), entry.get("reason"), entry.get("focus"), entry.get("detail"))
+            if isinstance(part, str) and part.strip()
+        ),
+        "follow up on the clue this NPC is surfacing",
+    )
+    return {
+        "effect_type": _humanize_loose_effect_text(effect_type),
+        "clue_id": clue_id,
+        "note": note,
+    }
+
+
 def sanitize_npc_response_payload(payload: dict[str, Any]) -> dict[str, Any]:
     """Normalize near-miss structured outputs from smaller or looser local models.
 
@@ -248,9 +324,20 @@ def sanitize_npc_response_payload(payload: dict[str, Any]) -> dict[str, Any]:
     object shapes so downstream validation can keep useful responses instead of failing
     outright.
     """
+    if payload.get("task_type") != "npc_response":
+        payload["task_type"] = "npc_response"
+
     updates = payload.get("structured_updates")
     if not isinstance(updates, dict):
         return payload
+
+    relationship_shift = updates.get("relationship_shift")
+    if isinstance(relationship_shift, dict):
+        for field_name in ("trust_delta", "suspicion_delta", "fear_delta"):
+            if field_name in relationship_shift:
+                relationship_shift[field_name] = _normalize_relationship_delta(
+                    relationship_shift[field_name]
+                )
 
     if "redirect_targets" in updates:
         normalized_redirects: list[dict[str, Any]] = []
@@ -264,7 +351,7 @@ def sanitize_npc_response_payload(payload: dict[str, Any]) -> dict[str, Any]:
                     }
                 )
             elif isinstance(entry, dict):
-                normalized_redirects.append(entry)
+                normalized_redirects.append(_normalize_redirect_target(entry))
         updates["redirect_targets"] = normalized_redirects
 
     if "access_effects" in updates:
@@ -279,7 +366,7 @@ def sanitize_npc_response_payload(payload: dict[str, Any]) -> dict[str, Any]:
                     }
                 )
             elif isinstance(entry, dict):
-                normalized_access.append(entry)
+                normalized_access.append(_normalize_access_effect(entry))
         updates["access_effects"] = normalized_access
 
     if "clue_effects" in updates:
@@ -294,7 +381,7 @@ def sanitize_npc_response_payload(payload: dict[str, Any]) -> dict[str, Any]:
                     }
                 )
             elif isinstance(entry, dict):
-                normalized_clues.append(entry)
+                normalized_clues.append(_normalize_clue_effect(entry))
         updates["clue_effects"] = normalized_clues
 
     return payload

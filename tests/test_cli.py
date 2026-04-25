@@ -4,10 +4,26 @@ import json
 from io import StringIO
 from pathlib import Path
 
+import pytest
+
 from lantern_city.app import LanternCityApp, _load_default_seed
-from lantern_city.cli import _default_player_startup_mode, _load_startup_mode, main
+from lantern_city.cli import (
+    DEFAULT_PROMPT_PROFILE,
+    _default_player_startup_mode,
+    _load_active_llm_profile,
+    _load_llm_profiles,
+    _load_prompt_profile,
+    _load_startup_mode,
+    _save_llm_config,
+    main,
+)
 from lantern_city.prompt_diagnostics import PromptCheckStageResult, PromptDiagnosticsReport
 from lantern_city.seed_schema import validate_city_seed
+
+
+@pytest.fixture(autouse=True)
+def _isolated_cli_config_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.chdir(tmp_path)
 
 
 def run_cli(*args: str) -> str:
@@ -132,9 +148,9 @@ def test_cli_persists_startup_mode_with_llm_config(tmp_path: Path) -> None:
         "start",
     )
 
-    config = json.loads(database_path.with_suffix(".json").read_text(encoding="utf-8"))
+    config = json.loads((tmp_path / "lantern-city.profiles.json").read_text(encoding="utf-8"))
 
-    assert config["startup_mode"] == "mvp_baseline"
+    assert config["profiles"][0]["startup_mode"] == "mvp_baseline"
     assert _load_startup_mode(str(database_path)) == "mvp_baseline"
 
 
@@ -162,14 +178,65 @@ def test_cli_defaults_to_generated_runtime_when_llm_is_present_and_no_mode_is_sp
         "start",
     )
 
-    config = json.loads(database_path.with_suffix(".json").read_text(encoding="utf-8"))
+    config = json.loads((tmp_path / "lantern-city.profiles.json").read_text(encoding="utf-8"))
 
-    assert config["startup_mode"] == "generated_runtime"
+    assert config["profiles"][0]["startup_mode"] == "generated_runtime"
 
 
 def test_default_player_startup_mode_prefers_generated_runtime_when_llm_exists() -> None:
     assert _default_player_startup_mode(has_llm_config=True) == "generated_runtime"
     assert _default_player_startup_mode(has_llm_config=False) == "mvp_baseline"
+
+
+def test_save_llm_config_persists_named_profiles_and_active_selection(tmp_path: Path) -> None:
+    database_path = tmp_path / "lantern-city.sqlite3"
+
+    _save_llm_config(
+        str(database_path),
+        "http://localhost:1234/v1",
+        "model-a",
+        startup_mode="generated_runtime",
+        profile_name="office-a",
+        prompt_profile="city_v1",
+    )
+    _save_llm_config(
+        str(database_path),
+        "http://localhost:2234/v1",
+        "model-b",
+        startup_mode="mvp_baseline",
+        profile_name="office-b",
+        prompt_profile="city_v2",
+    )
+
+    profiles = _load_llm_profiles(str(database_path))
+    active = _load_active_llm_profile(str(database_path))
+
+    assert len(profiles) == 2
+    assert active is not None
+    assert active["name"] == "office-b"
+    assert active["llm_model"] == "model-b"
+    assert _load_startup_mode(str(database_path)) == "mvp_baseline"
+    assert _load_prompt_profile(str(database_path)) == "city_v2"
+
+
+def test_load_llm_profiles_ignores_legacy_per_save_config_shape(tmp_path: Path) -> None:
+    database_path = tmp_path / "legacy.sqlite3"
+    database_path.with_suffix(".json").write_text(
+        json.dumps(
+            {
+                "llm_url": "http://localhost:1234/v1",
+                "llm_model": "legacy-model",
+                "startup_mode": "generated_runtime",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    profiles = _load_llm_profiles(str(database_path))
+    active = _load_active_llm_profile(str(database_path))
+
+    assert profiles == []
+    assert active is None
 
 
 def test_cli_prompt_check_requires_llm_config(tmp_path: Path) -> None:
