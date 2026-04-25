@@ -1741,6 +1741,11 @@ class LanternCityApp:
             lines.append("Longer-term social consequences:")
             for item in social_consequences:
                 lines.append(f"  - {item}")
+        social_routes = self._recent_social_route_reads(limit=4)
+        if social_routes:
+            lines.append("Social routes:")
+            for item in social_routes:
+                lines.append(f"  - {item}")
         visible_case_clues = [
             clue
             for clue in clues
@@ -1770,6 +1775,11 @@ class LanternCityApp:
                 lines.append(f"  Read: {self._summarize_case_clues(sorted(case_clues, key=_clue_sort_key))}")
             for lead in self._build_lead_lines(case=case, pos=pos, limit=3):
                 lines.append(f"  - {lead}")
+        social_routes = self._recent_social_route_reads(limit=2)
+        if social_routes:
+            lines.append("Social openings:")
+            for item in social_routes:
+                lines.append(f"  - {item}")
         primary_case = cases[0]
         lines.append(
             f"What this suggests: {primary_case.title} is still the strongest active thread, and the next move should either clarify a weak clue or tighten the case picture."
@@ -2286,6 +2296,92 @@ class LanternCityApp:
             if len(reads) >= limit:
                 break
         return reads[:limit]
+
+    def _recent_social_route_reads(self, *, limit: int) -> list[str]:
+        reads: list[str] = []
+        for npc in sorted(
+            [
+                npc
+                for npc in self.store.list_objects("NPCState")
+                if isinstance(npc, NPCState) and npc.memory_log
+            ],
+            key=lambda npc: npc.updated_at,
+            reverse=True,
+        ):
+            route_read = self._latest_social_route_read(npc)
+            if route_read:
+                reads.append(f"{npc.name}: {route_read}")
+            if len(reads) >= limit:
+                break
+        return reads[:limit]
+
+    def _latest_social_route_read(self, npc: NPCState) -> str:
+        for entry in reversed(npc.memory_log):
+            if not isinstance(entry, dict) or entry.get("memory_type") != "conversation":
+                continue
+            player_flag = str(entry.get("player_flag", ""))
+            if player_flag not in {"promise_honored", "promise_broken"}:
+                continue
+            target_label = self._social_route_target_label(npc)
+            payoff_kind = self._social_route_kind(npc)
+            if player_flag == "promise_honored":
+                if payoff_kind == "access":
+                    return f"opened an access route into {target_label}"
+                if payoff_kind == "document":
+                    return f"opened a document route around {self._social_route_document_label(npc) or target_label}"
+                return f"opened a testimony route around {self._social_route_testimony_label(npc) or target_label}"
+            if payoff_kind == "access":
+                return f"closed an access route into {target_label}"
+            if payoff_kind == "document":
+                return f"closed a document route around {self._social_route_document_label(npc) or target_label}"
+            return f"closed a testimony route around {self._social_route_testimony_label(npc) or target_label}"
+        return ""
+
+    def _social_route_kind(self, npc: NPCState) -> str:
+        role = npc.role_category.lower()
+        identity = f"{npc.public_identity} {npc.current_objective} {npc.hidden_objective}".lower()
+        if role in {"authority", "gatekeeper"}:
+            return "access"
+        if any(token in identity for token in ("record", "ledger", "archive", "registr", "certification", "copy sheet")):
+            return "document"
+        return "testimony"
+
+    def _social_route_target_label(self, npc: NPCState) -> str:
+        if npc.location_id:
+            location = self.store.load_object("LocationState", npc.location_id)
+            if isinstance(location, LocationState):
+                return location.name
+        if npc.district_id:
+            district = self._district(npc.district_id)
+            if district is not None:
+                return district.name
+        return npc.name
+
+    def _social_route_document_label(self, npc: NPCState) -> str:
+        for clue_id in npc.known_clue_ids:
+            clue = self.store.load_object("ClueState", clue_id)
+            if isinstance(clue, ClueState) and clue.source_type == "document":
+                return _clue_label(clue.id)
+        return ""
+
+    def _social_route_testimony_label(self, npc: NPCState) -> str:
+        for clue_id in npc.known_clue_ids:
+            clue = self.store.load_object("ClueState", clue_id)
+            if not isinstance(clue, ClueState):
+                continue
+            if clue.reliability == "contradicted":
+                return _clue_label(clue.id)
+        for clue_id in npc.known_clue_ids:
+            clue = self.store.load_object("ClueState", clue_id)
+            if not isinstance(clue, ClueState):
+                continue
+            other_npc_ids = [npc_id for npc_id in clue.related_npc_ids if npc_id != npc.id]
+            if other_npc_ids:
+                other = self._npc(other_npc_ids[0])
+                return other.name if other is not None else other_npc_ids[0]
+            if clue.source_type == "testimony":
+                return _clue_label(clue.id)
+        return ""
 
     def _faction_pressure_reads(
         self,

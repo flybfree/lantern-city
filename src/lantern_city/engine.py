@@ -751,6 +751,8 @@ def _social_followthrough_effects(
     player_flag: str | None,
 ) -> _GeneratedNPCOutcomeRead:
     target_label = _promise_route_target(active_slice, npc)
+    clue_label = _promise_document_target_label(active_slice, npc)
+    testimony_target = _promise_testimony_target_read(active_slice, npc) or target_label
     if player_flag == "promise_honored":
         payoff_kind = _promise_payoff_kind(npc)
         if payoff_kind == "access":
@@ -766,24 +768,25 @@ def _social_followthrough_effects(
                 state_changes=["Access shift: keeping your word opened an institutional route through this NPC."],
             )
         if payoff_kind == "document":
-            now_available = [f"Ask {npc.name} for the document trail they were holding back around {target_label}."]
+            document_target = clue_label or target_label
+            now_available = [f"Ask {npc.name} for the document trail they were holding back around {document_target}."]
             now_available.append(f"Follow the records opening around {target_label}.")
             return _GeneratedNPCOutcomeRead(
-                learned=[f"{npc.name} is ready to expose part of the paper trail around {target_label}."],
+                learned=[f"{npc.name} is ready to expose part of the paper trail around {document_target}."],
                 now_available=now_available,
                 next_actions=[
-                    f"Ask for the copy, ledger, or certification tied to {target_label}.",
+                    f"Ask for the copy, ledger, or certification tied to {document_target}.",
                     "Compare the new paperwork quickly before it gets corrected away.",
                 ],
                 state_changes=["Access shift: keeping your word opened a document path through this NPC."],
             )
-        now_available = [f"Ask {npc.name} what they will risk telling you about {target_label} now."]
+        now_available = [f"Ask {npc.name} what they will risk telling you about {testimony_target} now."]
         now_available.append(f"Use the opening around {target_label}.")
         return _GeneratedNPCOutcomeRead(
-            learned=[f"{npc.name} treats the favor-based opening around {target_label} as real now."],
+            learned=[f"{npc.name} treats the favor-based opening around {testimony_target} as real now."],
             now_available=now_available,
             next_actions=[
-                f"Ask for the detail they were holding back about {target_label}.",
+                f"Ask for the detail they were holding back about {testimony_target}.",
                 "Press the strongest follow-up while the goodwill is fresh.",
             ],
             state_changes=["Access shift: keeping your word opened a more direct line with this NPC."],
@@ -830,6 +833,33 @@ def _promise_payoff_kind(npc: NPCState) -> str:
     return "testimony"
 
 
+def _promise_document_target_label(active_slice: ActiveSlice, npc: NPCState) -> str | None:
+    for clue in active_slice.clues:
+        if clue.source_type != "document":
+            continue
+        if clue.related_npc_ids and npc.id not in clue.related_npc_ids:
+            continue
+        return _clue_label(clue.id)
+    return None
+
+
+def _promise_testimony_target_read(active_slice: ActiveSlice, npc: NPCState) -> str | None:
+    for clue in active_slice.clues:
+        if clue.related_npc_ids and npc.id not in clue.related_npc_ids:
+            continue
+        if clue.reliability == "contradicted":
+            return _clue_label(clue.id)
+    for clue in active_slice.clues:
+        if clue.related_npc_ids and npc.id not in clue.related_npc_ids:
+            continue
+        other_npc_ids = [npc_id for npc_id in clue.related_npc_ids if npc_id != npc.id]
+        if other_npc_ids:
+            return _display_name(other_npc_ids[0])
+        if clue.source_type == "testimony":
+            return _clue_label(clue.id)
+    return None
+
+
 def _promise_route_target(active_slice: ActiveSlice, npc: NPCState) -> str:
     if active_slice.location is not None:
         return active_slice.location.name
@@ -838,6 +868,12 @@ def _promise_route_target(active_slice: ActiveSlice, npc: NPCState) -> str:
     if active_slice.district is not None:
         return active_slice.district.name
     return npc.name
+
+
+def _clue_label(clue_id: str) -> str:
+    if clue_id.startswith("clue_"):
+        return clue_id.removeprefix("clue_").replace("_", " ").title()
+    return clue_id.replace("_", " ").title()
 
 
 def _district_notable_objects(active_slice: ActiveSlice) -> list[str]:

@@ -510,6 +510,87 @@ def test_handle_player_request_can_resolve_a_tracked_promise(
     assert any("opened a more direct line" in line for line in outcome.response.state_changes)
 
 
+def test_handle_player_request_testimony_route_prefers_named_contradiction_or_person(
+    populated_store: SQLiteStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from lantern_city import engine
+
+    location = populated_store.load_object("LocationState", LOCATION_ID)
+    case = populated_store.load_object("CaseState", CASE_ID)
+    npc = populated_store.load_object("NPCState", NPC_ID)
+    assert isinstance(location, LocationState)
+    assert isinstance(case, CaseState)
+    assert isinstance(npc, NPCState)
+    populated_store.save_objects_atomically(
+        [
+            ClueState(
+                id="clue_archive_story_conflict",
+                created_at=TURN_ZERO,
+                updated_at=TURN_ZERO,
+                source_type="testimony",
+                source_id=NPC_ID,
+                clue_text="Ila's account conflicts with what the archive clerk logged that night.",
+                reliability="contradicted",
+                related_npc_ids=[NPC_ID, "npc_archive_clerk"],
+                related_case_ids=[CASE_ID],
+                related_district_ids=[DISTRICT_ID],
+            ),
+            location.model_copy(update={"clue_ids": ["clue_archive_story_conflict"]}),
+            case.model_copy(update={"known_clue_ids": ["clue_archive_story_conflict"]}),
+            npc.model_copy(
+                update={
+                    "known_clue_ids": ["clue_archive_story_conflict"],
+                    "known_promises": ["Player promised: I will come back with the ledger copy."],
+                    "relationship_flags": [*npc.relationship_flags, "awaiting_player_promise"],
+                }
+            ),
+        ]
+    )
+
+    request = make_request(
+        intent="conversation",
+        target_id=NPC_ID,
+        input_text="As promised, I brought the ledger copy.",
+    )
+
+    monkeypatch.setattr(
+        engine,
+        "_generate_npc_dialogue",
+        lambda *args, **kwargs: NPCResponseGenerationResult.model_validate(
+            {
+                "task_type": "npc_response",
+                "request_id": request.id,
+                "summary_text": "Ila is finally ready to explain the contradiction.",
+                "structured_updates": {
+                    "dialogue_act": "accepts_follow_through",
+                    "npc_stance": "relieved",
+                    "relationship_shift": {
+                        "trust_delta": 0.0,
+                        "suspicion_delta": 0.0,
+                        "fear_delta": 0.0,
+                        "tag": "steady",
+                    },
+                    "clue_effects": [],
+                    "access_effects": [],
+                    "redirect_targets": [],
+                },
+                "cacheable_text": {
+                    "npc_line": "Good. Then I can finally tell you why that story does not line up.",
+                    "follow_up_suggestions": ["Ask which account breaks down first."],
+                    "exit_line_if_needed": "Listen carefully this time.",
+                },
+                "confidence": 0.8,
+                "warnings": [],
+            }
+        ),
+    )
+
+    outcome = engine.handle_player_request(populated_store, city_id=CITY_ID, request=request)
+
+    assert "Ask Ila Venn what they will risk telling you about Archive Story Conflict now." in outcome.response.now_available
+    assert "Ask for the detail they were holding back about Archive Story Conflict." in outcome.response.next_actions
+
+
 def test_handle_player_request_marks_broken_promise_as_closed_route(
     populated_store: SQLiteStore, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -643,14 +724,36 @@ def test_handle_player_request_promise_kept_opens_document_route_for_records_npc
 ) -> None:
     from lantern_city import engine
 
+    location = populated_store.load_object("LocationState", LOCATION_ID)
     npc = populated_store.load_object("NPCState", NPC_ID)
+    case = populated_store.load_object("CaseState", CASE_ID)
     assert isinstance(npc, NPCState)
+    assert isinstance(location, LocationState)
+    assert isinstance(case, CaseState)
+    populated_store.save_objects_atomically(
+        [
+            ClueState(
+                id="clue_hidden_copy_sheet",
+                created_at=TURN_ZERO,
+                updated_at=TURN_ZERO,
+                source_type="document",
+                source_id=LOCATION_ID,
+                clue_text="A hidden copy sheet was preserved off-ledger.",
+                related_npc_ids=[NPC_ID],
+                related_case_ids=[CASE_ID],
+                related_district_ids=[DISTRICT_ID],
+            ),
+            location.model_copy(update={"clue_ids": ["clue_hidden_copy_sheet"]}),
+            case.model_copy(update={"known_clue_ids": ["clue_hidden_copy_sheet"]}),
+        ]
+    )
     populated_store.save_object(
         npc.model_copy(
             update={
                 "role_category": "informant",
                 "public_identity": "commercial records clerk",
                 "current_objective": "Protect the archive corrections trail.",
+                "known_clue_ids": ["clue_hidden_copy_sheet"],
                 "known_promises": ["Player promised: I will bring you the clean ledger copy."],
                 "relationship_flags": [*npc.relationship_flags, "awaiting_player_promise"],
             }
@@ -697,8 +800,8 @@ def test_handle_player_request_promise_kept_opens_document_route_for_records_npc
 
     outcome = engine.handle_player_request(populated_store, city_id=CITY_ID, request=request)
 
-    assert "Ask Ila Venn for the document trail they were holding back around Shrine Lane." in outcome.response.now_available
-    assert "Ask for the copy, ledger, or certification tied to Shrine Lane." in outcome.response.next_actions
+    assert "Ask Ila Venn for the document trail they were holding back around Hidden Copy Sheet." in outcome.response.now_available
+    assert "Ask for the copy, ledger, or certification tied to Hidden Copy Sheet." in outcome.response.next_actions
     assert any("opened a document path" in line for line in outcome.response.state_changes)
 
 

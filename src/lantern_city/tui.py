@@ -1403,6 +1403,9 @@ class LanternCityTUI(App[None]):
             current_npc_id=current_npc_id,
             current_case_id=current_case_id,
             institutional_pressure=institutional_pressure,
+            social_route=None if not hasattr(self._game, "_recent_social_route_reads") else (
+                (self._game._recent_social_route_reads(limit=1) or [None])[0]
+            ),
         )
         if recovery:
             lines.append("")
@@ -1603,6 +1606,7 @@ def _recovery_panel_lines(
     current_npc_id: str | None = None,
     current_case_id: str | None = None,
     institutional_pressure: str | None = None,
+    social_route: str | None = None,
 ) -> list[str]:
     lines: list[str] = []
     if active_cases:
@@ -1610,6 +1614,8 @@ def _recovery_panel_lines(
         lines.append(
             f"  [yellow]{escape(case.title)}[/yellow] [dim]{escape(case.pressure_level)} pressure[/dim]"
         )
+    if social_route:
+        lines.append(f"  [dim]- social route: {escape(social_route)}[/dim]")
     pressure_lines = _institutional_pressure_recovery_lines(
         institutional_pressure=institutional_pressure,
         current_npc_id=current_npc_id,

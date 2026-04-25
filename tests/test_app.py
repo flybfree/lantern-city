@@ -675,6 +675,61 @@ def test_status_and_journal_surface_longer_term_social_consequences(tmp_path) ->
     assert "Ila Venn: expects a return favor from the player." in journal_output
 
 
+def test_journal_and_leads_surface_recent_social_routes(tmp_path) -> None:
+    app = LanternCityApp(tmp_path / "lantern-city.sqlite3")
+    app.start_new_game()
+    app.enter_district("district_old_quarter")
+    app._introduce_case("case_missing_clerk")
+    location = app.store.load_object("LocationState", "location_shrine_lane")
+    case = app.store.load_object("CaseState", "case_missing_clerk")
+    npc = app._npc("npc_shrine_keeper")
+    assert location is not None
+    assert case is not None
+    assert npc is not None
+    app.store.save_objects_atomically(
+        [
+            ClueState(
+                id="clue_archive_story_conflict",
+                created_at="turn_0",
+                updated_at="turn_0",
+                source_type="testimony",
+                source_id="npc_shrine_keeper",
+                clue_text="Ila's story conflicts with the archive clerk's log.",
+                reliability="contradicted",
+                related_npc_ids=["npc_shrine_keeper", "npc_archive_clerk"],
+                related_case_ids=["case_missing_clerk"],
+                related_district_ids=["district_old_quarter"],
+            ),
+            location.model_copy(update={"clue_ids": ["clue_archive_story_conflict"]}),
+            case.model_copy(update={"known_clue_ids": ["clue_archive_story_conflict"]}),
+            npc.model_copy(
+                update={
+                    "role_category": "witness",
+                    "public_identity": "shrine witness",
+                    "current_objective": "Decide whether to finally explain the conflicting story.",
+                    "memory_log": [
+                        {
+                            "memory_type": "conversation",
+                            "turn": "turn_4",
+                            "player_flag": "promise_honored",
+                            "input_text": "As promised, I brought the ledger copy.",
+                        }
+                    ],
+                    "known_clue_ids": ["clue_archive_story_conflict"],
+                }
+            ),
+        ]
+    )
+
+    journal_output = app.journal()
+    leads_output = app.strongest_leads()
+
+    assert "Social routes:" in journal_output
+    assert "Ila Venn: opened a testimony route around Archive Story Conflict" in journal_output
+    assert "Social openings:" in leads_output
+    assert "Ila Venn: opened a testimony route around Archive Story Conflict" in leads_output
+
+
 def test_world_turn_output_surfaces_faction_pressure(tmp_path) -> None:
     app = LanternCityApp(tmp_path / "lantern-city.sqlite3")
     app.start_new_game()

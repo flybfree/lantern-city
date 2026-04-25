@@ -167,6 +167,18 @@ def test_recovery_panel_lines_support_generated_case_ids() -> None:
     assert any("board case_gen_002" in line for line in lines)
 
 
+def test_recovery_panel_lines_surface_social_route_summary() -> None:
+    lines = _recovery_panel_lines(
+        [SimpleNamespace(title="Missing Clerk", pressure_level="low")],
+        clue_count=2,
+        credible_count=1,
+        current_case_id="case_missing_clerk",
+        social_route="Ila Venn: opened a testimony route around Witness Instability",
+    )
+
+    assert any("social route: Ila Venn: opened a testimony route around Witness Instability" in line for line in lines)
+
+
 def test_clue_reading_lines_surface_support_contradiction_and_follow_up() -> None:
     lines = _clue_reading_lines(
         [
