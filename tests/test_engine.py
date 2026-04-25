@@ -586,9 +586,14 @@ def test_handle_player_request_testimony_route_prefers_named_contradiction_or_pe
     )
 
     outcome = engine.handle_player_request(populated_store, city_id=CITY_ID, request=request)
+    updated_clue = populated_store.load_object("ClueState", "clue_archive_story_conflict")
 
     assert "Ask Ila Venn what they will risk telling you about Archive Story Conflict now." in outcome.response.now_available
     assert "Ask for the detail they were holding back about Archive Story Conflict." in outcome.response.next_actions
+    assert any("World change: Archive Story Conflict is now primed for clarification through Ila Venn." in line for line in outcome.response.state_changes)
+    assert isinstance(updated_clue, ClueState)
+    assert updated_clue.status == "primed"
+    assert "ClueState:clue_archive_story_conflict" in outcome.changed_objects
 
 
 def test_handle_player_request_marks_broken_promise_as_closed_route(
@@ -662,7 +667,9 @@ def test_handle_player_request_promise_kept_opens_access_route_for_authority_npc
     from lantern_city import engine
 
     npc = populated_store.load_object("NPCState", NPC_ID)
+    location = populated_store.load_object("LocationState", LOCATION_ID)
     assert isinstance(npc, NPCState)
+    assert isinstance(location, LocationState)
     populated_store.save_object(
         npc.model_copy(
             update={
@@ -713,10 +720,15 @@ def test_handle_player_request_promise_kept_opens_access_route_for_authority_npc
     )
 
     outcome = engine.handle_player_request(populated_store, city_id=CITY_ID, request=request)
+    updated_location = populated_store.load_object("LocationState", LOCATION_ID)
 
     assert "Ask Ila Venn to open the formal route into Shrine Lane." in outcome.response.now_available
     assert "Ask which door, desk, or permit gets you into Shrine Lane." in outcome.response.next_actions
     assert any("opened an institutional route" in line for line in outcome.response.state_changes)
+    assert any("World change: Shrine Lane is now favor-open through Ila Venn." in line for line in outcome.response.state_changes)
+    assert isinstance(updated_location, LocationState)
+    assert updated_location.access_state == "favor_open"
+    assert f"LocationState:{LOCATION_ID}" in outcome.changed_objects
 
 
 def test_handle_player_request_promise_kept_opens_document_route_for_records_npc(
@@ -799,10 +811,15 @@ def test_handle_player_request_promise_kept_opens_document_route_for_records_npc
     )
 
     outcome = engine.handle_player_request(populated_store, city_id=CITY_ID, request=request)
+    updated_clue = populated_store.load_object("ClueState", "clue_hidden_copy_sheet")
 
     assert "Ask Ila Venn for the document trail they were holding back around Hidden Copy Sheet." in outcome.response.now_available
     assert "Ask for the copy, ledger, or certification tied to Hidden Copy Sheet." in outcome.response.next_actions
     assert any("opened a document path" in line for line in outcome.response.state_changes)
+    assert any("World change: Hidden Copy Sheet is now exposed through Ila Venn." in line for line in outcome.response.state_changes)
+    assert isinstance(updated_clue, ClueState)
+    assert updated_clue.status == "revealed"
+    assert "ClueState:clue_hidden_copy_sheet" in outcome.changed_objects
 
 
 def test_handle_player_request_biases_records_pressure_into_redirects_and_paper_trails(

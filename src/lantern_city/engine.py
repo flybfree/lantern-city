@@ -27,6 +27,7 @@ from lantern_city.models import (
     ClueState,
     DistrictState,
     FactionState,
+    LocationState,
     NPCState,
     PlayerProgressState,
     PlayerRequest,
@@ -61,6 +62,12 @@ class _GeneratedNPCOutcomeRead:
     learned: list[str]
     now_available: list[str]
     next_actions: list[str]
+    state_changes: list[str]
+
+
+@dataclass(frozen=True, slots=True)
+class SocialWorldUpdate:
+    updated_objects: list[RuntimeModel]
     state_changes: list[str]
 
 
@@ -239,6 +246,13 @@ def _handle_npc_conversation(
             updated_npc,
             player_flag=player_flag,
         )
+        social_world_updates = _apply_social_followthrough_world_state(
+            state_update_engine.store,
+            active_slice,
+            updated_npc,
+            player_flag=player_flag,
+            updated_at=request.updated_at,
+        )
         conversation_read = _conversation_outcome_read(
             generation_result.structured_updates.dialogue_act,
             generation_result.structured_updates.npc_stance,
@@ -248,9 +262,11 @@ def _handle_npc_conversation(
         state_changes.append(f"Relationship state: {summarize_relationship(updated_npc)}.")
         state_changes.extend(generation_read.state_changes)
         state_changes.extend(followthrough_read.state_changes)
+        state_changes.extend(social_world_updates.state_changes)
     else:
         player_flag = None
         followthrough_read = _GeneratedNPCOutcomeRead([], [], [], [])
+        social_world_updates = SocialWorldUpdate([], [])
 
     response = compose_response(
         narrative_text=narrative_text,
@@ -309,7 +325,7 @@ def _handle_npc_conversation(
             "updated_at": request.updated_at,
         }
     )
-    changed_objects = state_update_engine.apply_updates(updated_npc)
+    changed_objects = state_update_engine.apply_updates(updated_npc, *social_world_updates.updated_objects)
     return response, changed_objects
 
 
@@ -834,29 +850,38 @@ def _promise_payoff_kind(npc: NPCState) -> str:
 
 
 def _promise_document_target_label(active_slice: ActiveSlice, npc: NPCState) -> str | None:
+    clue = _promise_document_target_clue(active_slice, npc)
+    return None if clue is None else _clue_label(clue.id)
+
+
+def _promise_document_target_clue(active_slice: ActiveSlice, npc: NPCState) -> ClueState | None:
     for clue in active_slice.clues:
         if clue.source_type != "document":
             continue
         if clue.related_npc_ids and npc.id not in clue.related_npc_ids:
             continue
-        return _clue_label(clue.id)
+        return clue
     return None
 
 
 def _promise_testimony_target_read(active_slice: ActiveSlice, npc: NPCState) -> str | None:
+    clue = _promise_testimony_target_clue(active_slice, npc)
+    if clue is not None:
+        return _clue_label(clue.id)
+    return None
+
+
+def _promise_testimony_target_clue(active_slice: ActiveSlice, npc: NPCState) -> ClueState | None:
     for clue in active_slice.clues:
         if clue.related_npc_ids and npc.id not in clue.related_npc_ids:
             continue
         if clue.reliability == "contradicted":
-            return _clue_label(clue.id)
+            return clue
     for clue in active_slice.clues:
         if clue.related_npc_ids and npc.id not in clue.related_npc_ids:
             continue
-        other_npc_ids = [npc_id for npc_id in clue.related_npc_ids if npc_id != npc.id]
-        if other_npc_ids:
-            return _display_name(other_npc_ids[0])
         if clue.source_type == "testimony":
-            return _clue_label(clue.id)
+            return clue
     return None
 
 
@@ -874,6 +899,76 @@ def _clue_label(clue_id: str) -> str:
     if clue_id.startswith("clue_"):
         return clue_id.removeprefix("clue_").replace("_", " ").title()
     return clue_id.replace("_", " ").title()
+
+
+def _apply_social_followthrough_world_state(
+    store: SQLiteStore,
+    active_slice: ActiveSlice,
+    npc: NPCState,
+    *,
+    player_flag: str | None,
+    updated_at: str,
+) -> SocialWorldUpdate:
+    if player_flag != "promise_honored":
+        return SocialWorldUpdate([], [])
+    payoff_kind = _promise_payoff_kind(npc)
+    if payoff_kind == "access":
+        target_location_id = _promise_route_location_id(active_slice, npc)
+        if target_location_id is None:
+            return SocialWorldUpdate([], [])
+        location = store.load_object("LocationState", target_location_id)
+        if not isinstance(location, LocationState):
+            return SocialWorldUpdate([], [])
+        if location.access_state == "favor_open":
+            return SocialWorldUpdate([], [])
+        updated_location = location.model_copy(
+            update={
+                "access_state": "favor_open",
+                "updated_at": updated_at,
+                "version": location.version + 1,
+            }
+        )
+        return SocialWorldUpdate(
+            [updated_location],
+            [f"World change: {updated_location.name} is now favor-open through {npc.name}."],
+        )
+    if payoff_kind == "document":
+        clue = _promise_document_target_clue(active_slice, npc)
+        if clue is None or clue.status == "revealed":
+            return SocialWorldUpdate([], [])
+        updated_clue = clue.model_copy(
+            update={
+                "status": "revealed",
+                "updated_at": updated_at,
+                "version": clue.version + 1,
+            }
+        )
+        return SocialWorldUpdate(
+            [updated_clue],
+            [f"World change: {_clue_label(clue.id)} is now exposed through {npc.name}."],
+        )
+    clue = _promise_testimony_target_clue(active_slice, npc)
+    if clue is None or clue.status == "primed":
+        return SocialWorldUpdate([], [])
+    updated_clue = clue.model_copy(
+        update={
+            "status": "primed",
+            "updated_at": updated_at,
+            "version": clue.version + 1,
+        }
+    )
+    return SocialWorldUpdate(
+        [updated_clue],
+        [f"World change: {_clue_label(clue.id)} is now primed for clarification through {npc.name}."],
+    )
+
+
+def _promise_route_location_id(active_slice: ActiveSlice, npc: NPCState) -> str | None:
+    if active_slice.location is not None:
+        return active_slice.location.id
+    if npc.location_id is not None:
+        return npc.location_id
+    return None
 
 
 def _district_notable_objects(active_slice: ActiveSlice) -> list[str]:

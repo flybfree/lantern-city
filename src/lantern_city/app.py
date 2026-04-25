@@ -1905,6 +1905,8 @@ class LanternCityApp:
             raise LookupError(f"Location not found: {location_id}")
         self._save_position(location_id=location_id, npc_ids=[nid for nid in loc.known_npc_ids])
         lines = [f"→ {loc.name}  ({loc.location_type})"]
+        if loc.access_state and loc.access_state != "unknown":
+            lines.append(f"Access state: {loc.access_state}")
         if loc.known_npc_ids:
             npc_parts = []
             for nid in loc.known_npc_ids:

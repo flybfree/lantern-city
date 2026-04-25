@@ -744,6 +744,19 @@ def test_world_turn_output_surfaces_faction_pressure(tmp_path) -> None:
     assert faction.attitude_toward_player == "guarded"
 
 
+def test_go_surfaces_non_default_location_access_state(tmp_path) -> None:
+    app = LanternCityApp(tmp_path / "lantern-city.sqlite3")
+    app.start_new_game()
+    app.enter_district("district_old_quarter")
+    location = app.store.load_object("LocationState", "location_shrine_lane")
+    assert location is not None
+    app.store.save_object(location.model_copy(update={"access_state": "favor_open"}))
+
+    output = app.go("location_shrine_lane")
+
+    assert "Access state: favor_open" in output
+
+
 def test_faction_turn_operations_pressure_generated_case_and_targeted_npc(tmp_path) -> None:
     app = LanternCityApp(tmp_path / "lantern-city.sqlite3")
     app.start_new_game()
