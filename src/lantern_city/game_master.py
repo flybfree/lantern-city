@@ -109,6 +109,17 @@ what they are now involved in. Do not bury it or leave it implied.
 - If the game events include a "[Clue: …]" tag, the player has just discovered \
 physical evidence — describe what they found in concrete sensory detail so it feels \
 earned, not administrative.
+- If the game events include a "[Time passes: N extra turn(s)]" tag, the world has \
+continued moving while the player was away. Open with one sentence acknowledging the \
+time gap — something shifted, tightened, or moved on — before addressing the current \
+action. Do not treat this as a failure or a problem; it is simply the city's rhythm.
+- If the game events include a "[Case pressure]" section, one or more cases have \
+escalated or stalled while the player was occupied. Name which case and how it changed \
+— stalling or escalating — so the urgency is legible. Do not flatten this into vague \
+menace; be specific about what is slipping.
+- If the game events include a "[Offscreen shifts]" section, NPCs have moved or changed \
+stance between turns. Surface the most important shift — where someone went or how their \
+posture changed — as a detail that might matter. Keep it brief: one clause is enough.
 - End on atmosphere, not resolution.
 """
 

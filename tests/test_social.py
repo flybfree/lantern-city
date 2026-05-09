@@ -235,3 +235,57 @@ def test_apply_player_social_consequence_can_mark_promise_as_broken() -> None:
     assert "broken_promise" in result.npc.relationship_flags
     assert result.npc.suspicion > npc.suspicion
     assert any("broke your word" in change for change in result.state_changes)
+
+
+def test_run_offscreen_npc_tick_uses_location_name_when_npc_moves() -> None:
+    """Move notice must use the human-readable location name, not the raw ID."""
+    npc = make_npc().model_copy(
+        update={
+            "suspicion": 0.1,
+            "fear": 0.0,
+            "current_objective": "Patrol the district.",
+            "relationship_flags": ["district_bound"],
+        }
+    )
+
+    location_names = {
+        "location_archive_steps": "Archive Steps",
+        "location_registry_annex": "Registry Annex",
+    }
+
+    result = run_offscreen_npc_tick(
+        npc,
+        visible_location_ids=["location_archive_steps", "location_registry_annex"],
+        updated_at="turn_3",
+        location_names=location_names,
+    )
+
+    move_notices = [c for c in result.state_changes if "moved to" in c]
+    if move_notices:
+        assert all("location_" not in notice for notice in move_notices), (
+            "move notices must use location names, not raw IDs"
+        )
+        assert any("Registry Annex" in notice for notice in move_notices)
+
+
+def test_run_offscreen_npc_tick_falls_back_to_id_when_no_location_names_given() -> None:
+    """Without a location_names map the move notice must still be produced (using raw ID)."""
+    npc = make_npc().model_copy(
+        update={
+            "suspicion": 0.1,
+            "fear": 0.0,
+            "current_objective": "Patrol the district.",
+            "relationship_flags": ["district_bound"],
+        }
+    )
+
+    result = run_offscreen_npc_tick(
+        npc,
+        visible_location_ids=["location_archive_steps", "location_registry_annex"],
+        updated_at="turn_3",
+    )
+
+    move_notices = [c for c in result.state_changes if "moved to" in c]
+    if move_notices:
+        # Without names the raw ID is acceptable — must not crash
+        assert any("location_" in notice for notice in move_notices)

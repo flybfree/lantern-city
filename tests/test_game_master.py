@@ -527,6 +527,55 @@ def test_narrate_system_prompt_requires_legible_conversation_outcomes() -> None:
     assert "answered, deflected, redirected, confirmed, warned, or procedurally blocked" in system_prompt
 
 
+def test_narrate_system_prompt_includes_time_passage_instructions() -> None:
+    llm = _RecordingLLM()
+    gm = GameMaster(app=None, llm=llm)  # type: ignore[arg-type]
+
+    gm._narrate(
+        "enter district_old_quarter",
+        ["enter district_old_quarter"],
+        [
+            "[command ok: enter district_old_quarter]\n"
+            "[Time passes: 2 extra turn(s)]\n"
+            "[Case pressure]\n"
+            "The Missing Record is stalling.\n"
+            "[Offscreen shifts]\n"
+            "Sered Marr is now obstructing."
+        ],
+        "Current district: Old Quarter",
+    )
+
+    system_prompt = llm.calls[0]["messages"][0]["content"]
+    assert '[Time passes: N extra turn(s)]' in system_prompt, \
+        "narrator must have explicit instructions for catch-up time-passage events"
+    assert '[Case pressure]' in system_prompt, \
+        "narrator must have explicit instructions for case pressure escalation events"
+    assert '[Offscreen shifts]' in system_prompt, \
+        "narrator must have explicit instructions for NPC offscreen shift events"
+
+
+def test_case_pressure_update_does_not_include_technical_summary_every_turn(tmp_path) -> None:
+    """case_pressure_summary() technical dump must not appear in turn output — only meaningful transitions."""
+    llm = _RecordingLLM()
+    app = LanternCityApp(tmp_path / "lantern-city.sqlite3")
+    app.start_new_game()
+    app.enter_district("district_old_quarter")
+    app._introduce_case("case_missing_clerk")
+
+    # Inspect produces a world turn which runs case pressure updates
+    output = app.inspect_location("location_shrine_lane")
+
+    assert "pressure=" not in output, (
+        "technical case_pressure_summary() dump must not appear in player-facing output"
+    )
+    assert "idle=" not in output, (
+        "raw idle counter must not appear in player-facing output"
+    )
+    assert "window=" not in output, (
+        "raw resolution window field must not appear in player-facing output"
+    )
+
+
 def test_match_npc_finds_npc_via_relevant_npc_ids_when_not_in_visible_location(tmp_path) -> None:
     """NPC in relevant_npc_ids but absent from every visible location must still be matched."""
     llm = _RecordingLLM()

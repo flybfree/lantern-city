@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from unittest.mock import patch
+
 from lantern_city.active_slice import ActiveSlice
 from lantern_city.case_bootstrap import bootstrap_generated_case
 from datetime import UTC, datetime, timedelta
@@ -304,14 +306,14 @@ def test_run_command_inspect_passes_object_name(tmp_path) -> None:
 
     captured: dict[str, str | None] = {}
 
-    def _fake_inspect(location_id: str, object_name: str | None = None) -> str:
+    def _fake_inspect(self_or_location_id: object, location_id: str | None = None, object_name: str | None = None) -> str:
+        # patch.object passes self as first arg when patching an instance method on the class
         captured["location_id"] = location_id
         captured["object_name"] = object_name
         return "ok"
 
-    app.inspect_location = _fake_inspect  # type: ignore[method-assign]
-
-    result = app.run_command('inspect location_ledger_room "ledger shelf"')
+    with patch.object(LanternCityApp, "inspect_location", _fake_inspect):
+        result = app.run_command('inspect location_ledger_room "ledger shelf"')
 
     assert result == "ok"
     assert captured == {
@@ -328,14 +330,13 @@ def test_run_command_talk_accepts_multi_word_npc_name(tmp_path) -> None:
 
     captured: dict[str, str] = {}
 
-    def _fake_talk(npc_id: str, prompt: str) -> str:
+    def _fake_talk(_self: object, npc_id: str, prompt: str) -> str:
         captured["npc_id"] = npc_id
         captured["prompt"] = prompt
         return "ok"
 
-    app.talk_to_npc = _fake_talk  # type: ignore[method-assign]
-
-    result = app.run_command("talk Ila Venn what happened here?")
+    with patch.object(LanternCityApp, "talk_to_npc", _fake_talk):
+        result = app.run_command("talk Ila Venn what happened here?")
 
     assert result == "ok"
     assert captured == {
@@ -351,14 +352,13 @@ def test_run_command_inspect_accepts_multi_word_location_name(tmp_path) -> None:
 
     captured: dict[str, str | None] = {}
 
-    def _fake_inspect(location_id: str, object_name: str | None = None) -> str:
+    def _fake_inspect(_self: object, location_id: str | None = None, object_name: str | None = None) -> str:
         captured["location_id"] = location_id
         captured["object_name"] = object_name
         return "ok"
 
-    app.inspect_location = _fake_inspect  # type: ignore[method-assign]
-
-    result = app.run_command("inspect Ledger Room ledger shelf")
+    with patch.object(LanternCityApp, "inspect_location", _fake_inspect):
+        result = app.run_command("inspect Ledger Room ledger shelf")
 
     assert result == "ok"
     assert captured == {

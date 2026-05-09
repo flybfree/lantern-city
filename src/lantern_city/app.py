@@ -765,7 +765,7 @@ class LanternCityApp:
                     updated_at=updated_at,
                     reason="player advanced the investigation",
                 )
-                notices.append(f"{case.title}: {case_pressure_summary(current)}")
+                notices.append(f"{case.title}: investigation progressed.")
             else:
                 current, pressure_notices = advance_case_pressure(current, updated_at=updated_at)
                 notices.extend(pressure_notices)
@@ -775,7 +775,6 @@ class LanternCityApp:
                 )
                 extra_updates.extend(style_updates)
                 notices.extend(style_notices)
-                notices.append(f"{case.title}: {case_pressure_summary(current)}")
 
             if current != case:
                 updated_cases.append(current.model_copy(update={"version": case.version + 1}))
@@ -1281,6 +1280,11 @@ class LanternCityApp:
             for district in self.store.list_objects("DistrictState")
             if isinstance(district, DistrictState)
         }
+        location_names = {
+            loc.id: loc.name
+            for loc in self.store.list_objects("LocationState")
+            if isinstance(loc, LocationState)
+        }
         npcs = [
             npc for npc in self.store.list_objects("NPCState")
             if isinstance(npc, NPCState) and npc.id not in exclude
@@ -1301,6 +1305,7 @@ class LanternCityApp:
                 npc,
                 visible_location_ids=visible_location_ids,
                 updated_at=updated_at,
+                location_names=location_names,
             )
             if (
                 result.npc.offscreen_state != npc.offscreen_state

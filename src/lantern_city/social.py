@@ -340,6 +340,7 @@ def run_offscreen_npc_tick(
     *,
     visible_location_ids: list[str],
     updated_at: str,
+    location_names: dict[str, str] | None = None,
 ) -> SocialUpdateResult:
     current, consequence_changes = _apply_unresolved_promise_pressure(npc, updated_at=updated_at)
     new_state = _derive_offscreen_state(current)
@@ -367,7 +368,8 @@ def run_offscreen_npc_tick(
     if new_state != current.offscreen_state:
         state_changes.append(f"{current.name} is now {new_state}.")
     if new_location_id != current.location_id and new_location_id is not None:
-        state_changes.append(f"{current.name} moved to {new_location_id}.")
+        loc_label = (location_names or {}).get(new_location_id, new_location_id)
+        state_changes.append(f"{current.name} moved to {loc_label}.")
 
     if current.loyalty is not None:
         loyalty_result = _apply_loyalty_pressure(
