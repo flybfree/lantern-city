@@ -318,5 +318,5 @@ def test_bootstrap_city_loads_back_usable_runtime_models(tmp_path) -> None:
     assert district.lantern_condition == "dim"
     assert faction.attitude_toward_player == "wary"
     assert lantern.scope_id == "district_old_quarter"
-    assert case.status == "active"
+    assert case.status == "latent"
     assert npc.location_id == "location_shrine_lane"

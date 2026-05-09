@@ -320,6 +320,53 @@ def test_run_command_inspect_passes_object_name(tmp_path) -> None:
     }
 
 
+def test_run_command_talk_accepts_multi_word_npc_name(tmp_path) -> None:
+    app = LanternCityApp(tmp_path / "lantern-city.sqlite3")
+    app.start_new_game()
+    app.enter_district("district_old_quarter")
+    app.go("location_shrine_lane")
+
+    captured: dict[str, str] = {}
+
+    def _fake_talk(npc_id: str, prompt: str) -> str:
+        captured["npc_id"] = npc_id
+        captured["prompt"] = prompt
+        return "ok"
+
+    app.talk_to_npc = _fake_talk  # type: ignore[method-assign]
+
+    result = app.run_command("talk Ila Venn what happened here?")
+
+    assert result == "ok"
+    assert captured == {
+        "npc_id": "npc_shrine_keeper",
+        "prompt": "what happened here?",
+    }
+
+
+def test_run_command_inspect_accepts_multi_word_location_name(tmp_path) -> None:
+    app = LanternCityApp(tmp_path / "lantern-city.sqlite3")
+    app.start_new_game()
+    app.enter_district("district_old_quarter")
+
+    captured: dict[str, str | None] = {}
+
+    def _fake_inspect(location_id: str, object_name: str | None = None) -> str:
+        captured["location_id"] = location_id
+        captured["object_name"] = object_name
+        return "ok"
+
+    app.inspect_location = _fake_inspect  # type: ignore[method-assign]
+
+    result = app.run_command("inspect Ledger Room ledger shelf")
+
+    assert result == "ok"
+    assert captured == {
+        "location_id": "location_ledger_room",
+        "object_name": "ledger shelf",
+    }
+
+
 def test_meaningful_commands_advance_city_time_index(tmp_path) -> None:
     app = LanternCityApp(tmp_path / "lantern-city.sqlite3")
 
@@ -1062,6 +1109,30 @@ def test_compare_clues_includes_recovery_guidance(tmp_path) -> None:
     assert "  - board" in output
     assert "  - talk npc_brin_hesse" in output
     assert "  - matters" in output
+
+
+def test_compare_clues_accepts_numeric_shortcuts_for_known_clues(tmp_path) -> None:
+    app = LanternCityApp(tmp_path / "lantern-city.sqlite3")
+    app.start_new_game()
+    app.enter_district("district_old_quarter")
+    app._acquire_clues(["clue_missing_clerk_ledgers", "clue_missing_maintenance_line"])
+    app._introduce_case("case_missing_clerk")
+
+    output = app.run_command("compare 1 2")
+
+    assert "=== Compare Clues ===" in output
+    assert "Missing Clerk Ledgers" in output
+    assert "Missing Maintenance Line" in output
+
+
+def test_run_command_board_accepts_case_title(tmp_path) -> None:
+    app = LanternCityApp(tmp_path / "lantern-city.sqlite3")
+    app.start_new_game()
+    app.enter_district("district_old_quarter")
+
+    output = app.run_command("board Missing Clerk")
+
+    assert "=== Case Board: Missing Clerk ===" in output
 
 
 def test_clues_surface_support_contradiction_and_follow_up_roles(tmp_path) -> None:

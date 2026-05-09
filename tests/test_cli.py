@@ -87,15 +87,17 @@ def test_cli_returns_helpful_error_for_unknown_npc_in_current_slice(tmp_path: Pa
 
     run_cli("--db", str(database_path), "start")
     run_cli("--db", str(database_path), "enter", "district_old_quarter")
+    # Use a completely unrecognizable identifier (no shared tokens with any NPC)
+    # so the fuzzy resolver gives score 0 and passes the raw ID through, causing the error.
     output = run_cli(
         "--db",
         str(database_path),
         "talk",
-        "npc_sered_marr",
+        "zxqvjmfoo",
         "Ask about the missing clerk.",
     )
 
-    assert "Missing required world object NPCState:npc_sered_marr" in output
+    assert "Missing required world object NPCState:zxqvjmfoo" in output
     assert "Hint: run `enter <district_id>` first and use one of the IDs shown in the district output." in output
 
 

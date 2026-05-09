@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import shlex
 import sys
 from collections.abc import Callable
@@ -240,26 +241,28 @@ class LanternCityApp:
         if verb == "journal":
             return self.journal()
         if verb in {"board", "caseboard"}:
-            return self.case_board(parts[1] if len(parts) > 1 else None)
+            return self.case_board(" ".join(parts[1:]) if len(parts) > 1 else None)
         if verb == "leads":
             return self.strongest_leads()
         if verb in {"matters", "standout"}:
             return self.what_matters_here()
         if verb == "compare" and len(parts) >= 3:
-            return self.compare_clues(parts[1], parts[2])
+            left_ref, right_ref = self._split_compare_refs(parts[1:])
+            return self.compare_clues(left_ref, right_ref)
         if verb == "go" and len(parts) >= 2:
-            return self.go(parts[1])
+            return self.go(" ".join(parts[1:]))
         if verb == "look":
-            return self.look(parts[1] if len(parts) >= 2 else None)
+            return self.look(" ".join(parts[1:]) if len(parts) >= 2 else None)
         if verb == "enter" and len(parts) >= 2:
-            return self.enter_district(self._resolve_district_id(parts[1]))
+            return self.enter_district(self._resolve_district_id(" ".join(parts[1:])))
         if verb == "talk" and len(parts) >= 3:
-            return self.talk_to_npc(parts[1], " ".join(parts[2:]))
+            npc_id, prompt = self._split_talk_target(parts[1:])
+            return self.talk_to_npc(npc_id, prompt)
         if verb == "inspect" and len(parts) >= 2:
-            object_name = " ".join(parts[2:]) if len(parts) > 2 else None
-            return self.inspect_location(parts[1], object_name=object_name)
+            location_id, object_name = self._split_inspect_target(parts[1:])
+            return self.inspect_location(location_id, object_name=object_name)
         if verb == "case" and len(parts) >= 2:
-            return self.advance_case(parts[1])
+            return self.advance_case(" ".join(parts[1:]))
         raise ValueError(f"Unsupported command: {command}")
 
     def enter_district(self, district_id: str) -> str:
@@ -350,6 +353,7 @@ class LanternCityApp:
         return "\n".join(lines)
 
     def talk_to_npc(self, npc_id: str, prompt: str) -> str:
+        npc_id = self._resolve_npc_id(npc_id)
         city = self._require_city()
         progress = self._require_progress()
         turn_plan = self._plan_world_turn()
@@ -456,6 +460,7 @@ class LanternCityApp:
         return "\n".join(lines)
 
     def inspect_location(self, location_id: str, object_name: str | None = None) -> str:
+        location_id = self._resolve_location_id(location_id)
         city = self._require_city()
         progress = self._require_progress()
         turn_plan = self._plan_world_turn()
@@ -512,6 +517,7 @@ class LanternCityApp:
         )
         self.store.save_objects_atomically([*updated_clues, progress])
         self._acquire_clues([c.id for c in updated_clues], updated_at=updated_at)
+        reveal_notices = self._reveal_hidden_locations_from_clues(updated_clues, updated_at=updated_at)
 
         propagation_notices = self._propagate_missingness(city, district, updated_at=updated_at)
 
@@ -531,6 +537,7 @@ class LanternCityApp:
             lines.append(f"[Clue found: {clue_status}]")
         if _has_pre_case_signal(outcome.response.case_relevance):
             lines.append("[New lead]")
+        lines.extend(reveal_notices)
         lines.append(f"[Lantern: {district.lantern_condition}]")
         lines.extend(propagation_notices)
         self._append_scene_affordances(
@@ -572,6 +579,7 @@ class LanternCityApp:
         return "\n".join(lines)
 
     def advance_case(self, case_id: str) -> str:
+        case_id = self._resolve_case_id(case_id)
         city = self._require_city()
         turn_plan = self._plan_world_turn()
         updated_at = self._planned_updated_at(turn_plan)
@@ -1911,6 +1919,7 @@ class LanternCityApp:
         return "\n".join(lines)
 
     def go(self, location_id: str) -> str:
+        location_id = self._resolve_location_id(location_id)
         pos = self._load_position()
         if pos is None or pos.district_id is None:
             raise LookupError("No current district. Use 'enter <district_id>' first.")
@@ -1954,6 +1963,8 @@ class LanternCityApp:
             if pos is None or pos.district_id is None:
                 raise LookupError("No current district. Use 'enter <district_id>' first.")
             district_id = pos.district_id
+        else:
+            district_id = self._resolve_district_id(district_id)
         district = self._district(district_id)
         if district is None:
             raise LookupError(f"District not found: {district_id}")
@@ -2061,6 +2072,7 @@ class LanternCityApp:
         case_id: str | None,
     ) -> CaseState | None:
         if case_id is not None:
+            case_id = self._resolve_case_id(case_id)
             case = self.store.load_object("CaseState", case_id)
             if isinstance(case, CaseState) and case.status != "latent":
                 return case
@@ -2596,20 +2608,17 @@ class LanternCityApp:
             for clue_id in known_ids
             if isinstance(clue := self.store.load_object("ClueState", clue_id), ClueState)
         }
+        ordered = sorted(clue_map.values(), key=_clue_sort_key)
+        if raw.isdigit():
+            index = int(raw)
+            if 1 <= index <= len(ordered):
+                return ordered[index - 1]
         if raw in clue_map:
             return clue_map[raw]
-        normalized = raw.lower().replace("_", " ").replace("-", " ")
         best: ClueState | None = None
         best_score = 0
-        for clue in clue_map.values():
-            label = _clue_label(clue.id).lower()
-            source = clue.source_id.lower().replace("_", " ")
-            score = 0
-            if normalized in label or label in normalized:
-                score += 3
-            if normalized in source or source in normalized:
-                score += 2
-            score += len(set(normalized.split()) & set(label.split()))
+        for clue in ordered:
+            score = self._lookup_score(raw, clue.id, _clue_label(clue.id), clue.source_id)
             if score > best_score:
                 best = clue
                 best_score = score
@@ -3758,6 +3767,21 @@ class LanternCityApp:
                         "is tied to a missing registry clerk named Tovin Vale. She needs someone "
                         "outside the archive office to follow it before the record closes over him."
                     ),
+                    "objective_summary": (
+                        "Find Tovin Vale, a registry clerk who vanished while the lantern near his "
+                        "archive route was altered. The official record is already being rewritten."
+                    ),
+                    "open_questions": [
+                        "Who ordered the lantern at Shrine Lane altered before Tovin Vale disappeared?",
+                        "Why was the official maintenance record rewritten, and who had access to do so?",
+                        "Where is Tovin Vale now — in hiding, detained, or moved beyond the district?",
+                        "Who at the civic level knew about the disappearance before the complaint was filed?",
+                        "Was the archive ledger alteration limited to Tovin's record, or is it part of something broader?",
+                    ],
+                    "offscreen_risk_flags": [
+                        "The administrative closure order predates the formal complaint — someone is moving fast.",
+                        "Memory Keepers faction controls the archive and has motive to keep the record closed.",
+                    ],
                     "updated_at": TURN_ZERO,
                 }
             )
@@ -3839,6 +3863,34 @@ class LanternCityApp:
             )
         )
 
+    def _reveal_hidden_locations_from_clues(
+        self, discovered_clues: list[ClueState], *, updated_at: str
+    ) -> list[str]:
+        """Promote hidden locations to visible when key clues are discovered."""
+        notices: list[str] = []
+        discovered_ids = {clue.id for clue in discovered_clues}
+        if "clue_hidden_copy_sheet" not in discovered_ids:
+            return notices
+        district = self.store.load_object("DistrictState", "district_old_quarter")
+        if not isinstance(district, DistrictState):
+            return notices
+        hidden = "location_subarchive_chamber"
+        if hidden not in district.hidden_locations or hidden in district.visible_locations:
+            return notices
+        updated_district = district.model_copy(
+            update={
+                "hidden_locations": [loc for loc in district.hidden_locations if loc != hidden],
+                "visible_locations": [*district.visible_locations, hidden],
+                "updated_at": updated_at,
+                "version": district.version + 1,
+            }
+        )
+        self.store.save_object(updated_district)
+        notices.append(
+            "[Location revealed: Subarchive Chamber — the copy sheet points to a hidden access route]"
+        )
+        return notices
+
     def _acquire_clues(self, clue_ids: list[str], *, updated_at: str | None = None) -> None:
         """Merge clue_ids into the player's ActiveWorkingSet without duplicates."""
         if not clue_ids:
@@ -3906,6 +3958,28 @@ class LanternCityApp:
             raise LookupError("No active game. Run start first.")
         return city
 
+    def _normalize_lookup_text(self, value: str) -> str:
+        return re.sub(r"[^a-z0-9]+", " ", value.lower()).strip()
+
+    def _lookup_score(self, raw: str, *candidates: str) -> int:
+        raw_norm = self._normalize_lookup_text(raw)
+        if not raw_norm:
+            return 0
+        raw_words = set(raw_norm.split())
+        best = 0
+        for candidate in candidates:
+            cand_norm = self._normalize_lookup_text(candidate)
+            if not cand_norm:
+                continue
+            score = 0
+            if raw_norm == cand_norm:
+                score += 10
+            elif raw_norm in cand_norm or cand_norm in raw_norm:
+                score += 5
+            score += len(raw_words & set(cand_norm.split()))
+            best = max(best, score)
+        return best
+
     def _resolve_district_id(self, raw: str) -> str:
         """Return the canonical district_id for raw, falling back to name/fuzzy match."""
         city = self._city()
@@ -3938,6 +4012,154 @@ class LanternCityApp:
         resolved = best if best is not None and best_score > 0 else raw
         log.debug("_resolve_district_id %r → %r (score=%d)", raw, resolved, best_score)
         return resolved
+
+    def _resolve_location_id(self, raw: str) -> str:
+        best, score = self._best_location_match(raw)
+        return best if best is not None and score > 0 else raw
+
+    def _best_location_match(self, raw: str) -> tuple[str | None, int]:
+        pos = self._load_position()
+        candidate_ids: list[str] = []
+        if pos is not None and pos.district_id is not None:
+            district = self._district(pos.district_id)
+            if district is not None:
+                candidate_ids.extend(district.visible_locations)
+        city = self._city()
+        if city is not None:
+            for district_id in city.district_ids:
+                district = self._district(district_id)
+                if district is not None:
+                    for location_id in district.visible_locations:
+                        if location_id not in candidate_ids:
+                            candidate_ids.append(location_id)
+        if self.store.load_object("LocationState", raw) is not None:
+            return raw, 100
+        best: str | None = None
+        best_score = 0
+        for location_id in candidate_ids:
+            loc = self.store.load_object("LocationState", location_id)
+            if not isinstance(loc, LocationState):
+                continue
+            score = self._lookup_score(raw, location_id, loc.name)
+            if score > best_score:
+                best = location_id
+                best_score = score
+        return best, best_score
+
+    def _resolve_case_id(self, raw: str) -> str:
+        city = self._city()
+        if city is None:
+            return raw
+        pos = self._load_position()
+        known_ids = set([] if pos is None else pos.known_case_ids)
+        if self.store.load_object("CaseState", raw) is not None:
+            return raw
+        best: str | None = None
+        best_score = 0
+        for case_id in city.active_case_ids:
+            case = self.store.load_object("CaseState", case_id)
+            if not isinstance(case, CaseState) or case.status == "latent":
+                continue
+            if known_ids and case.id not in known_ids:
+                continue
+            score = self._lookup_score(raw, case.id, case.title)
+            if score > best_score:
+                best = case.id
+                best_score = score
+        return best if best is not None and best_score > 0 else raw
+
+    def _resolve_npc_id(self, raw: str) -> str:
+        best, score = self._best_npc_match(raw)
+        return best if best is not None and score > 0 else raw
+
+    def _best_npc_match(self, raw: str) -> tuple[str | None, int]:
+        pos = self._load_position()
+        candidate_ids: list[str] = []
+        if pos is not None:
+            candidate_ids.extend(pos.npc_ids)
+            if pos.location_id:
+                location = self.store.load_object("LocationState", pos.location_id)
+                if isinstance(location, LocationState):
+                    for npc_id in location.known_npc_ids:
+                        if npc_id not in candidate_ids:
+                            candidate_ids.append(npc_id)
+            if pos.district_id:
+                district = self._district(pos.district_id)
+                if district is not None:
+                    for npc_id in district.relevant_npc_ids:
+                        if npc_id not in candidate_ids:
+                            candidate_ids.append(npc_id)
+        for npc in self.store.list_objects("NPCState"):
+            if isinstance(npc, NPCState) and npc.id not in candidate_ids:
+                candidate_ids.append(npc.id)
+        if self.store.load_object("NPCState", raw) is not None:
+            return raw, 100
+        best: str | None = None
+        best_score = 0
+        for npc_id in candidate_ids:
+            npc = self._npc(npc_id)
+            if npc is None:
+                continue
+            score = self._lookup_score(raw, npc.id, npc.name)
+            if score > best_score:
+                best = npc.id
+                best_score = score
+        return best, best_score
+
+    def _split_talk_target(self, parts: list[str]) -> tuple[str, str]:
+        if len(parts) < 2:
+            raise ValueError("talk requires an NPC target and prompt")
+        best_choice: tuple[str, str] | None = None
+        best_score = 0
+        best_prefix_len = 0
+        for end in range(len(parts) - 1, 0, -1):
+            npc_ref = " ".join(parts[:end])
+            npc_id, score = self._best_npc_match(npc_ref)
+            if npc_id is not None and score > 0:
+                prompt = " ".join(parts[end:]).strip()
+                if prompt:
+                    if score > best_score or (score == best_score and (best_prefix_len == 0 or end < best_prefix_len)):
+                        best_choice = (npc_id, prompt)
+                        best_score = score
+                        best_prefix_len = end
+        if best_choice is not None:
+            return best_choice
+        return parts[0], " ".join(parts[1:])
+
+    def _split_inspect_target(self, parts: list[str]) -> tuple[str, str | None]:
+        best_choice: tuple[str, str | None] | None = None
+        best_score = 0
+        best_prefix_len = 0
+        for end in range(len(parts), 0, -1):
+            location_ref = " ".join(parts[:end])
+            location_id, score = self._best_location_match(location_ref)
+            if location_id is not None and score > 0:
+                object_name = " ".join(parts[end:]).strip() or None
+                if score > best_score or (score == best_score and (best_prefix_len == 0 or end < best_prefix_len)):
+                    best_choice = (location_id, object_name)
+                    best_score = score
+                    best_prefix_len = end
+        if best_choice is not None:
+            return best_choice
+        return parts[0], " ".join(parts[1:]).strip() or None
+
+    def _split_compare_refs(self, parts: list[str]) -> tuple[str, str]:
+        separators = {"|", "/", "//", "vs"}
+        for index, part in enumerate(parts):
+            if part.lower() in separators and 0 < index < len(parts) - 1:
+                return " ".join(parts[:index]), " ".join(parts[index + 1 :])
+        pos = self._load_position()
+        known_ids = [] if pos is None else pos.clue_ids
+        if known_ids:
+            for end in range(len(parts) - 1, 0, -1):
+                left_ref = " ".join(parts[:end])
+                right_ref = " ".join(parts[end:])
+                if (
+                    self._resolve_known_clue(left_ref, known_ids) is not None
+                    and self._resolve_known_clue(right_ref, known_ids) is not None
+                ):
+                    return left_ref, right_ref
+        return parts[0], parts[1]
 
     def _district(self, district_id: str) -> DistrictState | None:
         district = self.store.load_object("DistrictState", district_id)

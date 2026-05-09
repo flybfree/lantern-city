@@ -431,6 +431,11 @@ class GameMaster:
         if object_inspect_command is not None:
             return [object_inspect_command]
 
+        # If the player is asking FOR INFORMATION about a named NPC (not trying to
+        # start a conversation), return 0 commands and let the narrator answer from context.
+        if _is_npc_info_request(player_input) and self._match_npc_from_player_text(player_input) is not None:
+            return []
+
         normalized: list[str] = []
         for command in commands:
             parts = command.split(maxsplit=1)
@@ -438,6 +443,11 @@ class GameMaster:
                 continue
             verb = parts[0].lower()
             arg = "" if len(parts) == 1 else parts[1]
+
+            # Drop any command whose verb is not in the known vocabulary — prevents
+            # LLM outputs like "examine <object>" from passing through as raw execute calls.
+            if verb not in _KNOWN_VERBS:
+                continue
 
             if verb in {"enter", "look"} and arg:
                 district_id = self._match_district_from_player_text(player_input)
@@ -454,6 +464,11 @@ class GameMaster:
                 if current_location_id is not None and _is_scene_examination_request(player_input):
                     normalized.append(f"inspect {current_location_id}")
                     continue
+
+            # If the LLM targeted the wrong NPC in a talk command but the player
+            # explicitly named a specific NPC, fix the target.
+            if verb == "talk":
+                command = self._fix_talk_npc_target(command, player_input)
 
             normalized.append(command)
         if normalized:
@@ -540,6 +555,45 @@ class GameMaster:
                 best_score = score
                 best_id = district_id
         return best_id if best_score >= 6 else None
+
+    def _match_npc_from_player_text(self, player_input: str) -> str | None:
+        """Return an NPC ID whose name best matches the player's input, or None."""
+        city = self.app._city()
+        if city is None:
+            return None
+        text = _normalize_match_text(player_input)
+        all_npc_ids: set[str] = set()
+        for district_id in city.district_ids:
+            district = self.app._district(district_id)
+            if district is None:
+                continue
+            for loc_id in district.visible_locations:
+                loc = self.app.store.load_object("LocationState", loc_id)
+                if isinstance(loc, LocationState):
+                    all_npc_ids.update(loc.known_npc_ids)
+        best_id: str | None = None
+        best_score = 0
+        for npc_id in all_npc_ids:
+            npc = self.app._npc(npc_id)
+            if npc is None:
+                continue
+            score = _score_named_target(text, npc.name, npc_id)
+            if score > best_score:
+                best_score = score
+                best_id = npc_id
+        return best_id if best_score >= 6 else None
+
+    def _fix_talk_npc_target(self, command: str, player_input: str) -> str:
+        """If a talk command targets the wrong NPC but the player named a specific one, fix it."""
+        parts = command.split(maxsplit=2)
+        if len(parts) < 2 or parts[0].lower() != "talk":
+            return command
+        current_target = parts[1]
+        rest = parts[2] if len(parts) > 2 else ""
+        named_npc_id = self._match_npc_from_player_text(player_input)
+        if named_npc_id is not None and named_npc_id != current_target:
+            return f"talk {named_npc_id} {rest}".strip()
+        return command
 
     # ------------------------------------------------------------------
     # Phase 2: execute
@@ -854,6 +908,37 @@ def _summarize_clue_implication(clue: ClueState) -> str:
     return "This is a follow-up lead rather than a conclusion. Treat it as something to test."
 
 
+def _is_npc_info_request(player_input: str) -> bool:
+    """Return True when the player is asking FOR INFORMATION ABOUT an NPC, not initiating a conversation.
+
+    "tell me about Ila Venn" → True (narrator answers from context, no talk command)
+    "ask Ila Venn about the ledger" → False (player wants a conversation)
+    """
+    text = _normalize_match_text(player_input)
+    if not text:
+        return False
+    info_patterns = (
+        "tell me about",
+        "who is",
+        "who are",
+        "what do you know about",
+        "what can you tell me about",
+        "give me background on",
+        "describe",
+    )
+    talk_patterns = (
+        "ask ",
+        "talk to",
+        "speak with",
+        "speak to",
+        "approach",
+        "confront",
+    )
+    if any(text.startswith(pat) or pat in text for pat in talk_patterns):
+        return False
+    return any(text.startswith(pat) or pat in text for pat in info_patterns)
+
+
 def _is_recovery_request(player_input: str) -> bool:
     text = _normalize_match_text(player_input)
     if not text:
@@ -862,11 +947,18 @@ def _is_recovery_request(player_input: str) -> bool:
         "what should i do next",
         "what do i do next",
         "what now",
+        "what s next",
         "where should i go next",
+        "where to next",
+        "next step",
         "what matters here",
         "what matters",
         "what lead matters",
         "strongest lead",
+        "best lead",
+        "what should i investigate",
+        "what can i do",
+        "what are my options",
         "i am stuck",
         "im stuck",
         "i m stuck",
@@ -875,6 +967,9 @@ def _is_recovery_request(player_input: str) -> bool:
         "unsure what to do",
         "lost the thread",
         "help me recover",
+        "help me out",
+        "i need a hint",
+        "give me a hint",
     )
     return any(phrase in text for phrase in recovery_phrases)
 
@@ -892,6 +987,17 @@ def _is_case_theory_request(player_input: str) -> bool:
         "what is the current theory",
         "show my case theory",
         "what is the theory",
+        "show the case board",
+        "show case board",
+        "case board",
+        "where do i stand on the case",
+        "where do i stand",
+        "what s my theory",
+        "what have i figured out",
+        "review the case",
+        "what have i learned",
+        "summarize the case",
+        "summarize my case",
     )
     return any(phrase in text for phrase in theory_phrases)
 
@@ -904,13 +1010,29 @@ def _is_scene_examination_request(player_input: str) -> bool:
         "look around",
         "look closer",
         "look more closely",
+        "look here",
+        "look at this place",
+        "look at the scene",
         "inspect around",
         "inspect the room",
         "inspect the area",
+        "inspect this place",
+        "inspect here",
         "examine the room",
         "examine the area",
+        "examine the scene",
+        "examine this place",
+        "examine around",
         "scan the room",
         "scan the area",
+        "search the room",
+        "search the area",
+        "search around",
+        "survey the area",
+        "what do i see",
+        "what s here",
+        "what is here",
+        "take a look",
     )
     return any(phrase in text for phrase in scene_phrases)
 

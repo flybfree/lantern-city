@@ -194,9 +194,9 @@ def test_command_reference_lines_include_core_direct_commands() -> None:
 
     assert lines[0] == "[bold]CMD Reference:[/bold]"
     assert "  start" in lines
-    assert "  enter <district_id>" in lines
-    assert '  inspect <location_id> "<object>"' in lines
-    assert "  board [case_id]" in lines
+    assert "  enter <district>" in lines
+    assert '  inspect <location> "<object>"' in lines
+    assert "  board [case]" in lines
     assert "  compare <clue_a> <clue_b>" in lines
 
 
