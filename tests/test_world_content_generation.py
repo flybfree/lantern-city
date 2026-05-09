@@ -123,6 +123,11 @@ def _briefing_payload() -> dict:
         "title": "The Vanished Clerk",
         "discovery_hook": "Ila Venn lowers her voice. The clerk disappeared three days ago.",
         "objective_summary": "Find out what happened to the archive clerk.",
+        "open_questions": [
+            "Who reported the clerk missing, and why did they wait three days?",
+            "Where was the clerk last seen before the lantern near the archive was altered?",
+            "What record was the clerk working on before disappearing?",
+        ],
     }
 
 
@@ -337,3 +342,60 @@ def test_resolution_paths_clamp_unknown_clue_ids() -> None:
     best_path = next(p for p in updated_case.resolution_conditions if p["priority"] == 1)
     assert "clue_does_not_exist" not in best_path["required_clue_ids"], \
         "unknown clue IDs must be stripped from required_clue_ids"
+
+
+def test_generate_populates_open_questions_from_briefing() -> None:
+    district = _make_district()
+    npc = _make_npc("npc_ila_venn")
+    case = _make_case()
+
+    clue_ids = ["clue_test_001_altered_ledger", "clue_test_001_missing_clerk_note"]
+
+    llm = StubLLMClient([
+        _location_payload(),
+        _clue_payload(),
+        _briefing_payload(),
+        _resolution_paths_payload(clue_ids),
+    ])
+
+    gen = WorldContentGenerator(llm)
+    result = gen.generate(districts=[district], npcs=[npc], cases=[case])
+
+    updated_case = result.case_updates[0]
+    assert updated_case.open_questions, "open_questions must be populated from briefing"
+    assert len(updated_case.open_questions) == 3
+    assert all("?" in q for q in updated_case.open_questions), \
+        "each open question must end with or contain a question mark"
+    for q in updated_case.open_questions:
+        assert not any(
+            clue_text in q
+            for clue_text in ["ledger entry has been altered", "missing clerk note"]
+        ), "open_questions must not be clue text snippets"
+
+
+def test_generate_open_questions_skipped_when_briefing_omits_them() -> None:
+    district = _make_district()
+    npc = _make_npc("npc_ila_venn")
+    case = _make_case()
+
+    briefing_without_questions = {
+        "title": "The Vanished Clerk",
+        "discovery_hook": "Ila Venn lowers her voice.",
+        "objective_summary": "Find the clerk.",
+        "open_questions": [],
+    }
+    clue_ids = ["clue_test_001_altered_ledger", "clue_test_001_missing_clerk_note"]
+
+    llm = StubLLMClient([
+        _location_payload(),
+        _clue_payload(),
+        briefing_without_questions,
+        _resolution_paths_payload(clue_ids),
+    ])
+
+    gen = WorldContentGenerator(llm)
+    result = gen.generate(districts=[district], npcs=[npc], cases=[case])
+
+    updated_case = result.case_updates[0]
+    assert updated_case.open_questions == [], \
+        "empty open_questions from briefing must not overwrite existing case questions"

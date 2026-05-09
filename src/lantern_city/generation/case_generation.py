@@ -368,6 +368,7 @@ class CaseGenerationResult(LanternCityModel):
     intensity: str
     opening_hook: str
     objective_summary: str
+    open_questions: list[str] = Field(default_factory=list, max_length=5)
     involved_district_ids: list[str] = Field(min_length=1, max_length=5)
     hook_npc_index: int | None = Field(
         default=None,
@@ -403,6 +404,12 @@ class CaseGenerationResult(LanternCityModel):
     @classmethod
     def _v_objective(cls, v: str) -> str:
         return _bounded(v, field_name="objective_summary", max_length=200)
+
+    @field_validator("open_questions")
+    @classmethod
+    def _v_open_questions(cls, v: list[str]) -> list[str]:
+        cleaned = [q.strip()[:200] for q in v if q.strip()]
+        return cleaned[:5]
 
 
 @dataclass(frozen=True, slots=True)
@@ -519,6 +526,9 @@ class CaseGenerator:
             "- opening_hook: 1-3 sentences that the hook NPC speaks (or implies) when approached — "
             "written as natural dialogue or overheard words, grounded, civic, no magic. "
             "This is what surfaces the case when the player talks to the hook NPC.\n"
+            "- open_questions: 3-5 investigative questions the player must answer to resolve the case. "
+            "Frame each as a genuine 'Who...?', 'Where...?', 'Why...?', or 'What...?' question — "
+            "not clue summaries, but the questions that would unlock the resolution paths.\n"
             f"- {COMMON_AVOID_RULES}\n\n"
             f"request_id: {request.request_id}\n\n"
             f"JSON Schema:\n{json.dumps(CaseGenerationResult.model_json_schema(), indent=2)}"

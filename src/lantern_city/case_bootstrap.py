@@ -161,7 +161,7 @@ def bootstrap_generated_case(
         involved_district_ids=list(result.involved_district_ids),
         involved_npc_ids=[npc.id for npc in final_npcs],
         known_clue_ids=[clue.id for clue in clues],
-        open_questions=[s.clue_text[:80] for s in result.clue_specs[:3]],
+        open_questions=result.open_questions or _derive_open_questions(result),
         objective_summary=result.objective_summary,
         pressure_level="low",
         time_since_last_progress=0,
@@ -235,6 +235,24 @@ def bootstrap_generated_case(
         updated_districts=updated_districts,
         updated_city=updated_city,
     )
+
+
+def _derive_open_questions(result: CaseGenerationResult) -> list[str]:
+    """Synthesize investigative questions from resolution paths when the LLM omits them."""
+    questions: list[str] = []
+    for path in sorted(result.resolution_paths, key=lambda p: p.priority):
+        if path.outcome_status == "solved" and path.summary_text:
+            q = f"What evidence establishes the truth of this {result.case_type} case?"
+            questions.append(q)
+            break
+    if result.objective_summary:
+        obj = result.objective_summary.rstrip(".?!")
+        questions.append(f"{obj}?")
+    for path in sorted(result.resolution_paths, key=lambda p: p.priority):
+        if path.outcome_status == "failed" and path.fallout_text:
+            questions.append(f"What happens if the investigation closes without a resolution?")
+            break
+    return questions or [f"What happened in this {result.case_type} case?"]
 
 
 def _find_location(

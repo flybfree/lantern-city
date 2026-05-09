@@ -113,8 +113,13 @@ _CASE_BRIEFING_SCHEMA: dict[str, Any] = {
             "type": "string",
             "description": "1-2 sentences: what you need to find out or accomplish",
         },
+        "open_questions": {
+            "type": "array",
+            "items": {"type": "string"},
+            "description": "3-5 investigative questions the player must answer — 'Who...?', 'Where...?', 'Why...?' — not clue text",
+        },
     },
-    "required": ["title", "discovery_hook", "objective_summary"],
+    "required": ["title", "discovery_hook", "objective_summary", "open_questions"],
     "additionalProperties": False,
 }
 
@@ -231,6 +236,10 @@ class WorldContentGenerator:
                 case_patch["title"] = briefing.get("title", case.title) or case.title
                 case_patch["discovery_hook"] = briefing.get("discovery_hook", "") or ""
                 case_patch["objective_summary"] = briefing.get("objective_summary", case.objective_summary) or case.objective_summary
+                raw_questions = briefing.get("open_questions") or []
+                cleaned_questions = [q.strip()[:200] for q in raw_questions if isinstance(q, str) and q.strip()]
+                if cleaned_questions:
+                    case_patch["open_questions"] = cleaned_questions[:5]
             if resolution_conditions:
                 case_patch["resolution_conditions"] = resolution_conditions
             if len(case_patch) > 1:
@@ -580,6 +589,10 @@ class WorldContentGenerator:
             f"{hook_instruction}"
             "- objective_summary: 1 sentence. What the player must find out or accomplish. "
             "Keep it concrete and specific — not 'investigate' but 'find out what happened to X'.\n"
+            "- open_questions: 3-5 investigative questions the player must answer to resolve the case. "
+            "Frame each as 'Who...?', 'Where...?', 'Why...?', or 'What...?' — "
+            "questions that map to what the resolution paths need to establish. "
+            "Do NOT copy clue text; write the questions the player is trying to answer.\n"
             "- Do not reveal clue content directly — the discovery_hook sets atmosphere, "
             "not a data dump. The player will discover clues through play.\n"
             "- Keep language grounded, civic, noir. No magic. No fantasy clichés.\n"
