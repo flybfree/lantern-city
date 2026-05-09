@@ -367,6 +367,91 @@ def test_run_command_inspect_accepts_multi_word_location_name(tmp_path) -> None:
     }
 
 
+def test_run_command_examine_is_alias_for_inspect(tmp_path) -> None:
+    app = LanternCityApp(tmp_path / "lantern-city.sqlite3")
+    app.start_new_game()
+
+    captured: dict[str, str | None] = {}
+
+    def _fake_inspect(_self: object, location_id: str | None = None, object_name: str | None = None) -> str:
+        captured["location_id"] = location_id
+        captured["object_name"] = object_name
+        return "ok"
+
+    with patch.object(LanternCityApp, "inspect_location", _fake_inspect):
+        result = app.run_command("examine location_ledger_room clock")
+
+    assert result == "ok"
+    assert captured["location_id"] == "location_ledger_room"
+    assert captured["object_name"] == "clock"
+
+
+def test_run_command_talk_without_prompt_uses_default(tmp_path) -> None:
+    app = LanternCityApp(tmp_path / "lantern-city.sqlite3")
+    app.start_new_game()
+    app.enter_district("district_old_quarter")
+    app.go("location_shrine_lane")
+
+    captured: dict[str, str] = {}
+
+    def _fake_talk(_self: object, npc_id: str, prompt: str) -> str:
+        captured["npc_id"] = npc_id
+        captured["prompt"] = prompt
+        return "ok"
+
+    with patch.object(LanternCityApp, "talk_to_npc", _fake_talk):
+        result = app.run_command("talk npc_shrine_keeper")
+
+    assert result == "ok"
+    assert captured["npc_id"] == "npc_shrine_keeper"
+    assert captured["prompt"] == "What can you tell me?"
+
+
+def test_run_command_npc_returns_profile(tmp_path) -> None:
+    app = LanternCityApp(tmp_path / "lantern-city.sqlite3")
+    app.start_new_game()
+
+    output = app.run_command("npc npc_shrine_keeper")
+
+    assert "Ila Venn" in output
+    assert "Shrine keeper" in output
+    assert "talk npc_shrine_keeper" in output
+
+
+def test_run_command_npc_resolves_by_name(tmp_path) -> None:
+    app = LanternCityApp(tmp_path / "lantern-city.sqlite3")
+    app.start_new_game()
+    app.enter_district("district_old_quarter")
+
+    output = app.run_command("npc Ila Venn")
+
+    assert "Ila Venn" in output
+
+
+def test_run_command_theory_routes_to_what_matters_here(tmp_path) -> None:
+    app = LanternCityApp(tmp_path / "lantern-city.sqlite3")
+    app.start_new_game()
+    app.enter_district("district_old_quarter")
+    app._introduce_case("case_missing_clerk")
+
+    theory_output = app.run_command("theory")
+    matters_output = app.what_matters_here()
+
+    assert theory_output == matters_output
+
+
+def test_run_command_recover_routes_to_what_matters_here(tmp_path) -> None:
+    app = LanternCityApp(tmp_path / "lantern-city.sqlite3")
+    app.start_new_game()
+    app.enter_district("district_old_quarter")
+    app._introduce_case("case_missing_clerk")
+
+    recover_output = app.run_command("recover")
+    matters_output = app.what_matters_here()
+
+    assert recover_output == matters_output
+
+
 def test_meaningful_commands_advance_city_time_index(tmp_path) -> None:
     app = LanternCityApp(tmp_path / "lantern-city.sqlite3")
 
@@ -1547,6 +1632,91 @@ def test_generated_case_recovery_surfaces_use_generated_case_id(tmp_path) -> Non
     assert "  - board case_gen_001" in journal_output
     assert "Borrowed Ledger" in leads_output
     assert "  - board case_gen_001" in leads_output
+
+
+def test_bootstrap_generated_case_enforces_clue_reliability_mix(tmp_path) -> None:
+    app = LanternCityApp(tmp_path / "lantern-city.sqlite3")
+    app.start_new_game()
+    city = app._require_city()
+
+    result = CaseGenerationResult(
+        request_id="req_mix_001",
+        title="All Credible",
+        case_type="records tampering",
+        intensity="medium",
+        opening_hook="Every record looks too clean.",
+        objective_summary="Find the single discrepancy that unlocks the rest.",
+        involved_district_ids=["district_old_quarter"],
+        hook_npc_index=0,
+        npc_specs=[
+            GeneratedNPCSpec(
+                name="Pen Arlow",
+                role_category="witness",
+                district_id="district_old_quarter",
+                location_type_hint="records",
+                public_identity="Junior archivist",
+                hidden_objective="Avoid the investigation entirely.",
+                current_objective="File routine corrections.",
+                trust_in_player=0.3,
+                suspicion=0.2,
+                fear=0.1,
+            )
+        ],
+        clue_specs=[
+            GeneratedClueSpec(
+                source_type="document",
+                district_id="district_old_quarter",
+                location_type_hint="records",
+                clue_text="A ledger page with a suspicious erasure.",
+                starting_reliability="credible",
+                known_by_npc_index=None,
+            ),
+            GeneratedClueSpec(
+                source_type="physical",
+                district_id="district_old_quarter",
+                location_type_hint="records",
+                clue_text="Ink residue on the shelf edge.",
+                starting_reliability="credible",
+                known_by_npc_index=None,
+            ),
+            GeneratedClueSpec(
+                source_type="testimony",
+                district_id="district_old_quarter",
+                location_type_hint="office",
+                clue_text="A witness says the page changed overnight.",
+                starting_reliability="credible",
+                known_by_npc_index=0,
+            ),
+        ],
+        resolution_paths=[
+            GeneratedResolutionPath(
+                path_id="main",
+                label="Prove the erasure",
+                outcome_status="solved",
+                required_clue_indices=[0, 1],
+                required_credible_count=2,
+                summary_text="The erasure trail is documented.",
+                fallout_text="The archive formally acknowledges the tampering.",
+                priority=1,
+            ),
+            GeneratedResolutionPath(
+                path_id="fallback",
+                label="Suggest tampering happened",
+                outcome_status="partially solved",
+                required_clue_indices=[0],
+                required_credible_count=1,
+                summary_text="The ledger is flagged but not resolved.",
+                fallout_text="Someone cleans the rest before an audit.",
+                priority=2,
+            ),
+        ],
+    )
+    bootstrap = bootstrap_generated_case(result, store=app.store, city=city, case_index=99, updated_at="turn_test")
+
+    reliabilities = [c.reliability for c in bootstrap.clues]
+    assert any(r not in {"credible", "solid"} for r in reliabilities), (
+        f"all clues are credible — reliability mix enforcement failed: {reliabilities}"
+    )
 
 
 def test_case_runtime_mode_marks_missing_clerk_as_mvp_baseline(tmp_path) -> None:

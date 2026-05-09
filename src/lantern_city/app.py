@@ -62,6 +62,7 @@ from lantern_city.social import (
     apply_relationship_shift,
     build_offscreen_memory_entry,
     run_offscreen_npc_tick,
+    summarize_relationship,
 )
 from lantern_city.store import SQLiteStore
 from lantern_city.log import get_logger
@@ -255,14 +256,18 @@ class LanternCityApp:
             return self.look(" ".join(parts[1:]) if len(parts) >= 2 else None)
         if verb == "enter" and len(parts) >= 2:
             return self.enter_district(self._resolve_district_id(" ".join(parts[1:])))
-        if verb == "talk" and len(parts) >= 3:
+        if verb == "talk" and len(parts) >= 2:
             npc_id, prompt = self._split_talk_target(parts[1:])
-            return self.talk_to_npc(npc_id, prompt)
-        if verb == "inspect" and len(parts) >= 2:
+            return self.talk_to_npc(npc_id, prompt or "What can you tell me?")
+        if verb in {"inspect", "examine"} and len(parts) >= 2:
             location_id, object_name = self._split_inspect_target(parts[1:])
             return self.inspect_location(location_id, object_name=object_name)
+        if verb == "npc" and len(parts) >= 2:
+            return self.npc_info(" ".join(parts[1:]))
         if verb == "case" and len(parts) >= 2:
             return self.advance_case(" ".join(parts[1:]))
+        if verb in {"theory", "recover"}:
+            return self.what_matters_here()
         raise ValueError(f"Unsupported command: {command}")
 
     def enter_district(self, district_id: str) -> str:
@@ -2093,6 +2098,29 @@ class LanternCityApp:
         lines.append("  - leads")
         return "\n".join(lines)
 
+    def npc_info(self, npc_id: str) -> str:
+        npc_id = self._resolve_npc_id(npc_id)
+        npc = self._npc(npc_id)
+        if npc is None:
+            raise LookupError(f"NPC not found: {npc_id}")
+        lines = [
+            f"=== {npc.name} ===",
+            f"Identity: {npc.public_identity or npc.role_category}",
+            f"District: {npc.district_id}",
+            f"Stance: {summarize_relationship(npc)}",
+        ]
+        if npc.current_objective:
+            lines.append(f"Objective: {npc.current_objective}")
+        if npc.offscreen_state and npc.offscreen_state != "idle":
+            lines.append(f"Offscreen state: {npc.offscreen_state}")
+        if npc.loyalty:
+            lines.append(f"Loyalty: {npc.loyalty}")
+        if npc.grievances:
+            lines.append(f"Grievances: {len(npc.grievances)} recorded")
+        lines.append("")
+        lines.append(f"  - talk {npc_id} <question>")
+        return "\n".join(lines)
+
     def get_state_snapshot(self) -> dict[str, object]:
         city = self._require_city()
         case = self._active_case(city)
@@ -3660,7 +3688,7 @@ class LanternCityApp:
         # --- NPC updates with cast-sheet values ---
         updated_shrine_keeper = shrine_keeper.model_copy(
             update={
-                "public_identity": "shrine keeper",
+                "public_identity": "Shrine keeper of the Old Quarter, unofficial district memory steward",
                 "hidden_objective": (
                     "Avoid exposing how much she knows about the lantern alteration. "
                     "Prevent blame from falling entirely on the shrine."
@@ -3679,7 +3707,7 @@ class LanternCityApp:
         )
         updated_archive_clerk = archive_clerk.model_copy(
             update={
-                "public_identity": "acting archive registrar",
+                "public_identity": "Acting archive registrar, certification officer for Old Quarter records",
                 "hidden_objective": (
                     "Keep the incident from becoming a scandal. "
                     "Avoid superiors discovering how compromised local records became."
@@ -3697,7 +3725,7 @@ class LanternCityApp:
         )
         updated_brin_hesse = brin_hesse.model_copy(
             update={
-                "public_identity": "lamplighter's assistant",
+                "public_identity": "Lamplighter's assistant on the Old Quarter maintenance route circuit",
                 "hidden_objective": (
                     "Cover for a paid errand that moved a maintenance key at the wrong time."
                 ),
@@ -3714,7 +3742,7 @@ class LanternCityApp:
         )
         updated_tovin_vale = tovin_vale.model_copy(
             update={
-                "public_identity": "registry clerk, officially missing",
+                "public_identity": "Former sub-archive registry clerk, officially listed as missing",
                 "hidden_objective": (
                     "Survive. Be found by someone who will act on what they find, "
                     "not suppress it further."
@@ -4198,8 +4226,11 @@ class LanternCityApp:
         return best, best_score
 
     def _split_talk_target(self, parts: list[str]) -> tuple[str, str]:
-        if len(parts) < 2:
-            raise ValueError("talk requires an NPC target and prompt")
+        if not parts:
+            raise ValueError("talk requires an NPC target")
+        if len(parts) == 1:
+            npc_id, score = self._best_npc_match(parts[0])
+            return (npc_id if npc_id and score > 0 else parts[0]), ""
         best_choice: tuple[str, str] | None = None
         best_score = 0
         best_prefix_len = 0

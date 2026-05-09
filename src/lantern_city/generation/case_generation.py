@@ -516,6 +516,8 @@ class CaseGenerator:
             "(e.g. 'archive', 'service passage', 'storage', 'outdoor', 'administrative office')\n"
             "- known_by_npc_index: 0-based index into npc_specs for the NPC who knows this clue, "
             "or null if the clue is discovered through location inspection\n"
+            "- starting_reliability: distribute levels — include at least 1 'uncertain' or 'unstable' clue; "
+            "do not make all clues 'credible'\n"
             "- resolution_paths: priority 1 = best outcome checked first, "
             "higher numbers = worse fallback paths\n"
             "- required_clue_indices: indices into clue_specs that must be credible for this path\n"

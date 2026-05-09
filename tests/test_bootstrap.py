@@ -370,3 +370,30 @@ def test_bootstrap_case_open_questions_are_not_failure_modes(tmp_path) -> None:
     assert isinstance(case, CaseState)
     assert "evidence destroyed" not in case.open_questions
     assert "Missingness escalates" not in case.open_questions
+
+
+def test_default_seed_npcs_have_rich_profile_text(tmp_path) -> None:
+    from lantern_city.app import LanternCityApp
+
+    app = LanternCityApp(tmp_path / "lantern-city.sqlite3")
+    app.start_new_game()
+
+    ila = app.store.load_object("NPCState", "npc_shrine_keeper")
+    sered = app.store.load_object("NPCState", "npc_archive_clerk")
+    brin = app.store.load_object("NPCState", "npc_brin_hesse")
+    tovin = app.store.load_object("NPCState", "npc_tovin_vale")
+
+    assert isinstance(ila, NPCState)
+    assert ila.public_identity != "informant", "Ila Venn must have a real public identity"
+    assert ila.relationships["player"].trust > 0.0
+    assert ila.relationships["player"].suspicion > 0.0
+
+    assert isinstance(sered, NPCState)
+    assert sered.public_identity != "gatekeeper", "Sered Marr must have a real public identity"
+    assert sered.relationships["player"].suspicion > 0.3, "Sered should start suspicious"
+
+    assert isinstance(brin, NPCState)
+    assert brin.public_identity != "informant"
+
+    assert isinstance(tovin, NPCState)
+    assert tovin.relationships["player"].fear > 0.5, "Tovin should start fearful"

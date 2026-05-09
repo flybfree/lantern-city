@@ -123,6 +123,8 @@ def bootstrap_generated_case(
             )
         )
 
+    clues = _enforce_clue_reliability_mix(clues)
+
     # Assign clue knowledge back onto NPCs
     final_npcs: list[NPCState] = []
     for i, npc in enumerate(npcs):
@@ -235,6 +237,22 @@ def bootstrap_generated_case(
         updated_districts=updated_districts,
         updated_city=updated_city,
     )
+
+
+def _enforce_clue_reliability_mix(clues: list[ClueState]) -> list[ClueState]:
+    """Guarantee at least one non-credible clue so the case requires real evidence building."""
+    credible = {"credible", "solid"}
+    if not clues or any(c.reliability not in credible for c in clues):
+        return clues
+    # Prefer downgrading a document/physical clue (testimony is harder to re-verify)
+    for i in range(len(clues) - 1, -1, -1):
+        if clues[i].source_type in {"document", "physical", "composite"}:
+            result = list(clues)
+            result[i] = clues[i].model_copy(update={"reliability": "uncertain"})
+            return result
+    result = list(clues)
+    result[-1] = clues[-1].model_copy(update={"reliability": "uncertain"})
+    return result
 
 
 def _derive_open_questions(result: CaseGenerationResult) -> list[str]:

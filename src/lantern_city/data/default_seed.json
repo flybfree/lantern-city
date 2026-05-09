@@ -232,7 +232,13 @@
         "relationship_density": "medium",
         "secrecy_level": "high",
         "mobility_pattern": "district-bound",
-        "relevance_level": "immediate"
+        "relevance_level": "immediate",
+        "public_identity": "Shrine keeper and district memory steward",
+        "hidden_objective": "Preserve the shrine's unofficial record of civic distortions before the Memory Keepers seal it",
+        "current_objective": "Determine whether the clerk's absence is connected to last week's archive access requests",
+        "trust_in_player": 0.15,
+        "suspicion": 0.35,
+        "fear": 0.20
       },
       {
         "id": "npc_archive_clerk",
@@ -244,7 +250,13 @@
         "relationship_density": "medium",
         "secrecy_level": "high",
         "mobility_pattern": "district-bound",
-        "relevance_level": "immediate"
+        "relevance_level": "immediate",
+        "public_identity": "Archive access clerk and document certification officer",
+        "hidden_objective": "Ensure no one traces the altered maintenance record back through his certifications",
+        "current_objective": "Process the access backlog slowly enough to give the faction time to normalize the discrepancy",
+        "trust_in_player": 0.05,
+        "suspicion": 0.60,
+        "fear": 0.15
       },
       {
         "id": "npc_brin_hesse",
@@ -256,7 +268,13 @@
         "relationship_density": "low",
         "secrecy_level": "medium",
         "mobility_pattern": "route-bound",
-        "relevance_level": "secondary"
+        "relevance_level": "secondary",
+        "public_identity": "Maintenance route worker and unofficial district courier",
+        "hidden_objective": "Stay clear of whatever caused the maintenance ledger irregularity",
+        "current_objective": "Complete the route without drawing attention from the archive or the ward",
+        "trust_in_player": 0.25,
+        "suspicion": 0.20,
+        "fear": 0.35
       },
       {
         "id": "npc_tovin_vale",
@@ -268,7 +286,13 @@
         "relationship_density": "low",
         "secrecy_level": "extreme",
         "mobility_pattern": "stationary",
-        "relevance_level": "immediate"
+        "relevance_level": "immediate",
+        "public_identity": "Former sub-archive clerk, officially on administrative leave",
+        "hidden_objective": "Get word out that his removal was not voluntary before the official record settles permanently",
+        "current_objective": "Wait for someone to find the copy sheet he left in the sub-archive chamber",
+        "trust_in_player": 0.40,
+        "suspicion": 0.10,
+        "fear": 0.70
       },
       {
         "id": "npc_sister_calis",
