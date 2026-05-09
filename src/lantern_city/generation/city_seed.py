@@ -235,7 +235,7 @@ _NPC_SCHEMA = {
 _CASES_NPCS_SCHEMA: dict[str, Any] = {
     "type": "object",
     "properties": {
-        "cases": {"type": "array", "items": _CASE_SCHEMA},
+        "cases": {"type": "array", "items": _CASE_SCHEMA, "minItems": 1, "maxItems": 1},
         "npcs": {"type": "array", "items": _NPC_SCHEMA},
         "starting_lantern_understanding": {"type": "integer"},
         "starting_access": {"type": "integer"},
@@ -494,11 +494,24 @@ def _fix_id_list(id_list: list[str], valid_ids: list[str], prefix: str) -> list[
     return out
 
 
+_RESERVED_CASE_SLUGS = frozenset({"npcs", "npc", "cases", "case", "districts", "factions"})
+
+
 def _assemble(framework: dict[str, Any], cases_npcs: dict[str, Any]) -> dict[str, Any]:
     districts = list(framework.get("districts", []))
     factions = list(framework.get("factions", []))
-    cases = list(cases_npcs.get("cases", []))
     npcs = list(cases_npcs.get("npcs", []))
+
+    # Filter malformed case IDs (e.g. "case_npcs" where the LLM confused schema keys with case IDs)
+    raw_cases = list(cases_npcs.get("cases", []))
+    cases: list[dict[str, Any]] = []
+    for c in raw_cases:
+        case_id = str(c.get("id", ""))
+        slug = case_id.removeprefix("case_").lower()
+        if slug and slug not in _RESERVED_CASE_SLUGS:
+            cases.append(c)
+    # Only use one starting case; prefer the first valid one
+    cases = cases[:1] or raw_cases[:1]
 
     district_ids = [str(d.get("id", "")) for d in districts]
     faction_ids = [str(f.get("id", "")) for f in factions]
