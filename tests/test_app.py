@@ -16,7 +16,7 @@ from lantern_city.generation.case_generation import (
     GeneratedResolutionPath,
 )
 from lantern_city.llm_client import OpenAICompatibleConfig
-from lantern_city.models import CaseState, ClueState
+from lantern_city.models import CaseState, ClueState, NPCState
 from lantern_city.response import compose_response
 from lantern_city.seed_schema import validate_city_seed
 
@@ -1078,8 +1078,8 @@ def test_records_faction_drift_degrades_document_clue_over_time(tmp_path) -> Non
 
     assert clue is not None
     assert clue.reliability == "uncertain"
-    assert any("muddying the paper trail" in notice for notice in notices)
-    assert any("reliability now uncertain" in notice for notice in notices)
+    assert any("muddying the evidence" in notice for notice in notices)
+    assert any("reliability slipping to uncertain" in notice for notice in notices)
 
 
 def test_civic_faction_drift_tightens_district_access_over_time(tmp_path) -> None:
@@ -1121,6 +1121,163 @@ def test_civic_faction_drift_tightens_district_access_over_time(tmp_path) -> Non
     assert npc.offscreen_state == "obstructing"
     assert npc.suspicion > 0.0
     assert any("more procedural and guarded" in notice for notice in notices)
+
+
+def test_records_faction_drift_degrades_unstable_clue_to_compromised(tmp_path) -> None:
+    app = LanternCityApp(tmp_path / "lantern-city.sqlite3")
+    app.start_new_game()
+    city = app._require_city()
+    app.store.save_object(city.model_copy(update={"active_case_ids": ["case_gen_urgent_001"]}))
+    app.store.save_object(
+        CaseState(
+            id="case_gen_urgent_001",
+            created_at="turn_0",
+            updated_at="turn_0",
+            title="Urgent Ledger",
+            case_type="records tampering",
+            status="active",
+            involved_district_ids=["district_old_quarter"],
+            involved_faction_ids=["faction_memory_keepers"],
+            known_clue_ids=["clue_unstable_001"],
+            pressure_level="urgent",
+            time_since_last_progress=3,
+            objective_summary="Track the falsified trail before it disappears.",
+        )
+    )
+    app.store.save_object(
+        ClueState(
+            id="clue_unstable_001",
+            created_at="turn_0",
+            updated_at="turn_0",
+            source_type="document",
+            source_id="location_ledger_room",
+            clue_text="A correction mark that does not match any filed request.",
+            reliability="unstable",
+            related_case_ids=["case_gen_urgent_001"],
+        )
+    )
+
+    app._run_case_pressure_updates(
+        updated_at="turn_2",
+        progressed_case_ids=set(),
+        focus_district_id="district_old_quarter",
+    )
+
+    clue = app.store.load_object("ClueState", "clue_unstable_001")
+    assert clue is not None
+    assert clue.reliability == "compromised"
+
+
+def test_records_faction_drift_degrades_testimony_clue_at_urgent_pressure(tmp_path) -> None:
+    app = LanternCityApp(tmp_path / "lantern-city.sqlite3")
+    app.start_new_game()
+    city = app._require_city()
+    app.store.save_object(city.model_copy(update={"active_case_ids": ["case_gen_urgent_002"]}))
+    app.store.save_object(
+        CaseState(
+            id="case_gen_urgent_002",
+            created_at="turn_0",
+            updated_at="turn_0",
+            title="Urgent Testimony",
+            case_type="records tampering",
+            status="active",
+            involved_district_ids=["district_old_quarter"],
+            involved_faction_ids=["faction_memory_keepers"],
+            known_clue_ids=["clue_testimony_001"],
+            pressure_level="urgent",
+            time_since_last_progress=3,
+            objective_summary="Get to the witness before they are silenced.",
+        )
+    )
+    app.store.save_object(
+        ClueState(
+            id="clue_testimony_001",
+            created_at="turn_0",
+            updated_at="turn_0",
+            source_type="testimony",
+            source_id="npc_archive_clerk",
+            clue_text="A witness saw the ledger pulled the night it was altered.",
+            reliability="credible",
+            related_case_ids=["case_gen_urgent_002"],
+        )
+    )
+
+    app._run_case_pressure_updates(
+        updated_at="turn_2",
+        progressed_case_ids=set(),
+        focus_district_id="district_old_quarter",
+    )
+
+    clue = app.store.load_object("ClueState", "clue_testimony_001")
+    assert clue is not None
+    assert clue.reliability == "uncertain"
+
+
+def test_civic_faction_drift_rotates_npc_pressure_targets(tmp_path) -> None:
+    app = LanternCityApp(tmp_path / "lantern-city.sqlite3")
+    app.start_new_game()
+    city = app._require_city()
+    app.store.save_object(city.model_copy(update={"active_case_ids": ["case_gen_civic_rotate"]}))
+    app.store.save_object(
+        CaseState(
+            id="case_gen_civic_rotate",
+            created_at="turn_0",
+            updated_at="turn_0",
+            title="Dock Rotation",
+            case_type="procedural obstruction",
+            status="active",
+            involved_district_ids=["district_the_docks"],
+            involved_faction_ids=["faction_council_lights"],
+            npc_pressure_targets=["npc_first_target", "npc_second_target"],
+            pressure_level="rising",
+            time_since_last_progress=1,
+            objective_summary="Follow the obstruction before the trail cools.",
+        )
+    )
+
+    app._run_case_pressure_updates(
+        updated_at="turn_2",
+        progressed_case_ids=set(),
+        focus_district_id="district_the_docks",
+    )
+
+    case = app.store.load_object("CaseState", "case_gen_civic_rotate")
+    assert case is not None
+    assert case.npc_pressure_targets[0] == "npc_second_target"
+    assert case.npc_pressure_targets[1] == "npc_first_target"
+
+
+def test_case_faction_style_drift_runs_civic_enforcement_for_mvp_baseline(tmp_path) -> None:
+    app = LanternCityApp(tmp_path / "lantern-city.sqlite3")
+    app.start_new_game()
+    city = app._require_city()
+    app.store.save_object(city.model_copy(update={"active_case_ids": ["case_missing_clerk"]}))
+    app.store.save_object(
+        CaseState(
+            id="case_missing_clerk",
+            created_at="turn_0",
+            updated_at="turn_0",
+            title="Missing Clerk",
+            case_type="disappearance",
+            status="active",
+            involved_district_ids=["district_the_docks"],
+            involved_faction_ids=["faction_council_lights"],
+            npc_pressure_targets=["npc_dockmaster"],
+            pressure_level="rising",
+            time_since_last_progress=2,
+            objective_summary="Find out what happened to the missing dock clerk.",
+        )
+    )
+
+    notices = app._run_case_pressure_updates(
+        updated_at="turn_2",
+        progressed_case_ids=set(),
+        focus_district_id="district_the_docks",
+    )
+
+    district = app.store.load_object("DistrictState", "district_the_docks")
+    assert district is not None
+    assert any("narrowing official access" in notice for notice in notices)
 
 
 def test_overview_and_status_surface_faction_posture(tmp_path) -> None:

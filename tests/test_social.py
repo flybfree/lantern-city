@@ -289,3 +289,76 @@ def test_run_offscreen_npc_tick_falls_back_to_id_when_no_location_names_given() 
     if move_notices:
         # Without names the raw ID is acceptable — must not crash
         assert any("location_" in notice for notice in move_notices)
+
+
+def test_run_offscreen_npc_tick_hiding_npc_drifts_suspicious_toward_player() -> None:
+    npc = make_npc().model_copy(
+        update={"suspicion": 0.7, "trust_in_player": 0.1, "fear": 0.85}
+    )
+
+    result = run_offscreen_npc_tick(
+        npc,
+        visible_location_ids=["location_archive_steps"],
+        updated_at="turn_5",
+    )
+
+    assert result.npc.offscreen_state == "withdrawing"
+    assert result.npc.suspicion > npc.suspicion
+    assert result.npc.trust_in_player < npc.trust_in_player
+
+
+def test_run_offscreen_npc_tick_obstructing_npc_trust_erodes() -> None:
+    npc = make_npc().model_copy(
+        update={"role_category": "authority", "suspicion": 0.55, "trust_in_player": 0.4, "fear": 0.1}
+    )
+
+    result = run_offscreen_npc_tick(
+        npc,
+        visible_location_ids=["location_archive_steps"],
+        updated_at="turn_5",
+    )
+
+    assert result.npc.offscreen_state == "obstructing"
+    assert result.npc.trust_in_player < npc.trust_in_player
+    assert result.npc.suspicion > npc.suspicion
+
+
+def test_run_offscreen_npc_tick_stable_npc_suspicion_eases() -> None:
+    npc = make_npc().model_copy(
+        update={
+            "suspicion": 0.3,
+            "fear": 0.2,
+            "trust_in_player": 0.4,
+            "current_objective": "File the quarterly ledger corrections.",
+            "grievances": [],
+        }
+    )
+
+    result = run_offscreen_npc_tick(
+        npc,
+        visible_location_ids=["location_archive_steps"],
+        updated_at="turn_5",
+    )
+
+    assert result.npc.offscreen_state == "pursuing_objective"
+    assert result.npc.suspicion < npc.suspicion
+
+
+def test_run_offscreen_npc_tick_updates_objective_on_pressure_state_transition() -> None:
+    npc = make_npc().model_copy(
+        update={
+            "offscreen_state": "pursuing_objective",
+            "fear": 0.85,
+            "current_objective": "File the quarterly ledger corrections.",
+        }
+    )
+
+    result = run_offscreen_npc_tick(
+        npc,
+        visible_location_ids=["location_archive_steps"],
+        updated_at="turn_5",
+    )
+
+    assert result.npc.offscreen_state == "withdrawing"
+    assert result.npc.current_objective != "File the quarterly ledger corrections."
+    assert "distance" in result.npc.current_objective.lower() or "investigation" in result.npc.current_objective.lower()

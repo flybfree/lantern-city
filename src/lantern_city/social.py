@@ -335,6 +335,13 @@ def build_offscreen_memory_entry(
     return entry
 
 
+_PRESSURE_STATE_OBJECTIVES: dict[str, str] = {
+    "hiding": "Stay unseen and avoid drawing attention.",
+    "withdrawing": "Put distance between myself and the investigation.",
+    "obstructing": "Block unauthorized access to sensitive matters.",
+}
+
+
 def run_offscreen_npc_tick(
     npc: NPCState,
     *,
@@ -344,6 +351,13 @@ def run_offscreen_npc_tick(
 ) -> SocialUpdateResult:
     current, consequence_changes = _apply_unresolved_promise_pressure(npc, updated_at=updated_at)
     new_state = _derive_offscreen_state(current)
+
+    current = _apply_autonomous_player_stance_shift(current, offscreen_state=new_state, updated_at=updated_at)
+    if new_state != current.offscreen_state and new_state in _PRESSURE_STATE_OBJECTIVES:
+        current = current.model_copy(
+            update={"current_objective": _PRESSURE_STATE_OBJECTIVES[new_state], "updated_at": updated_at}
+        )
+
     new_location_id = current.location_id
 
     if visible_location_ids and _can_relocate(current):
@@ -447,6 +461,28 @@ def _relationship_status(*, trust: float, suspicion: float, fear: float) -> str:
 
 def _append_recent(events: list[str], event: str, *, keep: int = 6) -> list[str]:
     return [*events, event][-keep:]
+
+
+def _apply_autonomous_player_stance_shift(
+    npc: NPCState,
+    *,
+    offscreen_state: str,
+    updated_at: str,
+) -> NPCState:
+    """Silent per-turn drift: NPC's stance toward player shifts based on their offscreen state."""
+    if offscreen_state in {"hiding", "withdrawing"}:
+        return apply_relationship_shift(
+            npc, trust_delta=-0.03, suspicion_delta=0.04, fear_delta=0.02, updated_at=updated_at
+        ).npc
+    if offscreen_state == "obstructing":
+        return apply_relationship_shift(
+            npc, trust_delta=-0.02, suspicion_delta=0.03, updated_at=updated_at
+        ).npc
+    if offscreen_state == "pursuing_objective" and not npc.grievances:
+        return apply_relationship_shift(
+            npc, suspicion_delta=-0.01, fear_delta=-0.01, updated_at=updated_at
+        ).npc
+    return npc
 
 
 def _apply_loyalty_pressure(

@@ -92,6 +92,14 @@ def run_faction_turn(
                 )
             )
 
+    if attitude == faction.attitude_toward_player and attitude != "neutral":
+        has_high_pressure = any(_pressure_rank(case) >= 2 for case in related_cases)
+        if not has_high_pressure:
+            next_attitude = _de_escalate_attitude(attitude)
+            if next_attitude != attitude:
+                attitude = next_attitude
+                notices.append(f"{faction.name} is easing off — now {attitude} toward you.")
+
     updated = faction.model_copy(
         update={
             "active_plans": active_plans,
@@ -194,6 +202,13 @@ def _escalate_attitude(attitude: str) -> str:
     if index >= len(_ATTITUDE_ORDER) - 1:
         return attitude
     return _ATTITUDE_ORDER[index + 1]
+
+
+def _de_escalate_attitude(attitude: str) -> str:
+    if attitude not in _ATTITUDE_ORDER:
+        return attitude
+    index = _ATTITUDE_ORDER.index(attitude)
+    return _ATTITUDE_ORDER[max(0, index - 1)]
 
 
 __all__ = [

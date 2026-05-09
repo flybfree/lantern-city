@@ -789,9 +789,6 @@ class LanternCityApp:
         *,
         updated_at: str,
     ) -> tuple[CaseState, list[RuntimeModel], list[str]]:
-        if _case_runtime_mode(case) != "evolved_runtime":
-            return case, [], []
-
         current = case
         updates: list[RuntimeModel] = []
         notices: list[str] = []
@@ -816,6 +813,16 @@ class LanternCityApp:
                 )
                 updates.extend(district_updates)
                 notices.extend(district_notices)
+                if len(current.npc_pressure_targets) > 1:
+                    current = current.model_copy(
+                        update={
+                            "npc_pressure_targets": [
+                                *current.npc_pressure_targets[1:],
+                                current.npc_pressure_targets[0],
+                            ],
+                            "updated_at": updated_at,
+                        }
+                    )
         return current, updates, notices
 
     def _apply_records_case_drift(
@@ -825,8 +832,12 @@ class LanternCityApp:
         faction: FactionState,
         updated_at: str,
     ) -> tuple[CaseState, list[RuntimeModel], list[str]]:
+        if _case_runtime_mode(case) != "evolved_runtime":
+            return case, [], []
         if case.pressure_level not in {"rising", "urgent"}:
             return case, [], []
+        is_urgent = case.pressure_level == "urgent"
+        eligible_reliabilities = {"credible", "uncertain", "unstable"} if is_urgent else {"credible", "uncertain"}
         known_ids = list(case.known_clue_ids)
         if not known_ids:
             known_ids = [
@@ -838,9 +849,16 @@ class LanternCityApp:
             clue = self.store.load_object("ClueState", clue_id)
             if not isinstance(clue, ClueState):
                 continue
-            if clue.source_type != "document" or clue.reliability not in {"credible", "uncertain"}:
+            if clue.reliability not in eligible_reliabilities:
                 continue
-            next_reliability = "uncertain" if clue.reliability == "credible" else "unstable"
+            if not is_urgent and clue.source_type != "document":
+                continue
+            if clue.reliability == "credible":
+                next_reliability = "uncertain"
+            elif clue.reliability == "uncertain":
+                next_reliability = "unstable"
+            else:
+                next_reliability = "compromised"
             updated_clue = clue.model_copy(update={"reliability": next_reliability, "updated_at": updated_at})
             risk_flag = f"records_drift:{faction.id}"
             if risk_flag not in case.offscreen_risk_flags:
@@ -854,8 +872,8 @@ class LanternCityApp:
                 case,
                 [updated_clue.model_copy(update={"version": clue.version + 1})],
                 [
-                    f"{faction.name} is muddying the paper trail around {case.title}.",
-                    f"[Pressure: {_clue_label(clue.id)} is slipping - reliability now {next_reliability}]",
+                    f"{faction.name} is muddying the evidence around {case.title}.",
+                    f"[Pressure: {_clue_label(clue.id)} reliability slipping to {next_reliability}]",
                 ],
             )
         return case, [], []
@@ -1312,6 +1330,9 @@ class LanternCityApp:
                 or result.npc.location_id != npc.location_id
                 or result.npc.recent_events != npc.recent_events
                 or result.npc.memory_log != npc.memory_log
+                or result.npc.trust_in_player != npc.trust_in_player
+                or result.npc.relationships != npc.relationships
+                or result.npc.current_objective != npc.current_objective
             ):
                 updated_npcs.append(result.npc.model_copy(update={"version": npc.version + 1}))
                 changes.extend(result.state_changes)

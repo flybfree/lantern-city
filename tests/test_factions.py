@@ -253,3 +253,52 @@ def test_run_faction_turn_uses_civic_style_for_council_faction() -> None:
 
     assert any(operation.kind == "district_surveillance" for operation in result.operations)
     assert any(operation.kind == "case_isolation" for operation in result.operations)
+
+
+def test_run_faction_turn_de_escalates_attitude_when_cases_have_low_pressure() -> None:
+    city = CityState(
+        id="city_001",
+        created_at="turn_0",
+        updated_at="turn_0",
+        city_seed_id="seed_001",
+        time_index=1,
+        player_presence_level=0.0,
+        active_case_ids=["case_low_001"],
+        district_ids=["district_old_quarter"],
+        faction_ids=["faction_memory_keepers"],
+    )
+    faction = FactionState(
+        id="faction_memory_keepers",
+        created_at="turn_0",
+        updated_at="turn_0",
+        name="Memory Keepers",
+        public_goal="preserve continuity",
+        hidden_goal="control what the city remembers",
+        known_assets=["memory stewardship", "records"],
+        active_plans=["manage fallout"],
+        influence_by_district={"district_old_quarter": 0.8},
+        attitude_toward_player="guarded",
+    )
+    case = CaseState(
+        id="case_low_001",
+        created_at="turn_0",
+        updated_at="turn_0",
+        title="Quiet Correction",
+        case_type="records tampering",
+        status="active",
+        involved_district_ids=["district_old_quarter"],
+        involved_faction_ids=["faction_memory_keepers"],
+        pressure_level="low",
+    )
+
+    result = run_faction_turn(
+        faction,
+        city=city,
+        related_cases=[case],
+        updated_at="turn_3",
+        focus_district_id="district_old_quarter",
+        district_access_level="informal",
+    )
+
+    assert result.faction.attitude_toward_player == "wary"
+    assert any("easing off" in notice for notice in result.notices)
