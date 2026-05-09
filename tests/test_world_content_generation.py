@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from lantern_city.generation.world_content import WorldContentGenerator
+from lantern_city.generation.world_content import WorldContentGenerator, _enforce_reliability_mix
 from lantern_city.models import CaseState, ClueState, DistrictState, LocationState, NPCState
 
 TURN_ZERO = "turn_0"
@@ -399,3 +399,87 @@ def test_generate_open_questions_skipped_when_briefing_omits_them() -> None:
     updated_case = result.case_updates[0]
     assert updated_case.open_questions == [], \
         "empty open_questions from briefing must not overwrite existing case questions"
+
+
+def test_enforce_reliability_mix_promotes_non_testimony_clues() -> None:
+    """When all clues start uncertain, at least 2 non-testimony clues should be promoted."""
+    clues = [
+        _make_clue("clue_doc_a", reliability="uncertain"),
+        _make_clue("clue_phy_b", reliability="uncertain"),
+        _make_clue("clue_tst_c", reliability="uncertain"),
+    ]
+    # Mark the third as testimony to verify it's not the first promoted
+    clues[2] = clues[2].model_copy(update={"source_type": "testimony", "related_npc_ids": ["npc_x"]})
+
+    result = _enforce_reliability_mix(clues)
+
+    credible = [c for c in result if c.reliability in {"credible", "solid"}]
+    assert len(credible) >= 2, "at least 2 clues must be credible after enforcement"
+    # Testimony clue should not be promoted if non-testimony candidates are available
+    testimony = next(c for c in result if c.source_type == "testimony")
+    assert testimony.reliability == "uncertain", "testimony clue must not be promoted when non-testimony alternatives exist"
+
+
+def test_enforce_reliability_mix_leaves_already_credible_clues_alone() -> None:
+    """When 2+ clues are already credible, no changes should be made."""
+    clues = [
+        _make_clue("clue_a", reliability="credible"),
+        _make_clue("clue_b", reliability="credible"),
+        _make_clue("clue_c", reliability="uncertain"),
+    ]
+    result = _enforce_reliability_mix(clues)
+    reliabilities = [c.reliability for c in result]
+    assert reliabilities == ["credible", "credible", "uncertain"], \
+        "reliability mix must not change when 2+ credible clues already exist"
+
+
+def test_generate_clues_always_produces_at_least_two_credible() -> None:
+    """Integration: even when LLM returns all-uncertain clues, enforcement produces 2 credible."""
+    district = _make_district()
+    npc = _make_npc("npc_ila_venn")
+    case = _make_case()
+
+    all_uncertain_clues = {
+        "clues": [
+            {
+                "id_slug": "clue_one",
+                "clue_text": "A smudged entry in the ledger.",
+                "source_type": "document",
+                "reliability": "uncertain",
+                "location_id": "location_archive_steps",
+                "related_npc_ids": [],
+            },
+            {
+                "id_slug": "clue_two",
+                "clue_text": "Dust disturbed near the lower shelf.",
+                "source_type": "physical",
+                "reliability": "uncertain",
+                "location_id": "location_archive_steps",
+                "related_npc_ids": [],
+            },
+            {
+                "id_slug": "clue_three",
+                "clue_text": "Someone heard footsteps after closing.",
+                "source_type": "testimony",
+                "reliability": "uncertain",
+                "location_id": "location_archive_steps",
+                "related_npc_ids": ["npc_ila_venn"],
+            },
+        ]
+    }
+    clue_ids = ["clue_test_001_clue_one", "clue_test_001_clue_two"]
+
+    llm = StubLLMClient([
+        _location_payload(),
+        all_uncertain_clues,
+        _briefing_payload(),
+        _resolution_paths_payload(clue_ids),
+    ])
+
+    gen = WorldContentGenerator(llm)
+    result = gen.generate(districts=[district], npcs=[npc], cases=[case])
+
+    clue_reliabilities = [c.reliability for c in result.clues]
+    credible_count = sum(1 for r in clue_reliabilities if r in {"credible", "solid"})
+    assert credible_count >= 2, \
+        f"expected ≥2 credible clues after enforcement, got {credible_count}: {clue_reliabilities}"

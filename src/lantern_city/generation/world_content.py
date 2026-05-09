@@ -443,6 +443,7 @@ class WorldContentGenerator:
                 related_district_ids=list(case.involved_district_ids),
             ))
 
+        out = _enforce_reliability_mix(out)
         return out
 
     # ── Resolution paths ──────────────────────────────────────────────────────
@@ -701,6 +702,53 @@ def _fallback_resolution_paths(clues: list[ClueState]) -> list[dict]:
         "fallout_text": "Truth buried. Missingness pressure increases.",
     })
     return paths
+
+
+_CREDIBLE_SET = frozenset({"credible", "solid"})
+_NON_TESTIMONY_SOURCES = frozenset({"document", "physical", "composite"})
+_PROMOTION_ORDER = ("uncertain", "unstable", "contradicted")
+
+
+def _enforce_reliability_mix(clues: list[ClueState]) -> list[ClueState]:
+    """Guarantee at least 2 credible/solid clues without destroying fragile ones.
+
+    The LLM is instructed to produce 2+ credible clues but doesn't always comply.
+    We promote non-testimony clues (physical/document/composite) first, since those
+    can also be upgraded later via physical discovery. Testimony clues are left alone
+    because NPC dialogue is their natural upgrade path.
+    """
+    if not clues:
+        return clues
+
+    credible_count = sum(1 for c in clues if c.reliability in _CREDIBLE_SET)
+    needed = max(0, 2 - credible_count)
+    if needed == 0:
+        return clues
+
+    # Candidates: non-testimony clues not already credible, ordered by promotion priority
+    candidates = [
+        i for i, c in enumerate(clues)
+        if c.source_type in _NON_TESTIMONY_SOURCES and c.reliability not in _CREDIBLE_SET
+    ]
+
+    result = list(clues)
+    promoted = 0
+    for idx in candidates:
+        if promoted >= needed:
+            break
+        result[idx] = result[idx].model_copy(update={"reliability": "credible"})
+        promoted += 1
+
+    # If we still need credible clues and only testimony clues remain, promote one
+    if promoted < needed:
+        for i, c in enumerate(result):
+            if promoted >= needed:
+                break
+            if c.reliability not in _CREDIBLE_SET:
+                result[i] = c.model_copy(update={"reliability": "credible"})
+                promoted += 1
+
+    return result
 
 
 def _slugify(text: str) -> str:
