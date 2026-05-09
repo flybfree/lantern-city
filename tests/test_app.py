@@ -462,6 +462,67 @@ def test_case_board_includes_actionable_recovery_section(tmp_path) -> None:
     assert "Use 'leads' to rank the strongest unresolved thread." in output
 
 
+def test_advance_case_on_latent_case_returns_not_ready_message(tmp_path) -> None:
+    app = LanternCityApp(tmp_path / "lantern-city.sqlite3")
+    app.start_new_game()
+    city = app._require_city()
+    hook_npc_id = "npc_shrine_keeper"
+    app.store.save_object(
+        CaseState(
+            id="case_gen_latent_guard_001",
+            created_at="turn_0",
+            updated_at="turn_0",
+            title="Quiet Ledger",
+            case_type="records tampering",
+            status="latent",
+            involved_district_ids=["district_old_quarter"],
+            hook_npc_id=hook_npc_id,
+            objective_summary="Unresolved.",
+        )
+    )
+    app.store.save_object(
+        city.model_copy(update={"active_case_ids": [*city.active_case_ids, "case_gen_latent_guard_001"]})
+    )
+
+    output = app.advance_case("case_gen_latent_guard_001")
+    case_after = app.store.load_object("CaseState", "case_gen_latent_guard_001")
+
+    assert isinstance(case_after, CaseState)
+    assert case_after.status == "latent", "advance_case must not corrupt a latent case"
+    assert "not yet introduced" in output
+    assert "Ila Venn" in output, "should name the hook NPC by their actual name"
+
+
+def test_enter_district_activates_latent_case_with_no_hook_npc(tmp_path) -> None:
+    app = LanternCityApp(tmp_path / "lantern-city.sqlite3")
+    app.start_new_game()
+    city = app._require_city()
+    app.store.save_object(
+        CaseState(
+            id="case_gen_no_hook_001",
+            created_at="turn_0",
+            updated_at="turn_0",
+            title="Doorstep Record",
+            case_type="missing person",
+            status="latent",
+            hook_npc_id="",
+            involved_district_ids=["district_old_quarter"],
+            objective_summary="Someone did not show up.",
+        )
+    )
+    app.store.save_object(
+        city.model_copy(update={"active_case_ids": [*city.active_case_ids, "case_gen_no_hook_001"]})
+    )
+
+    output = app.enter_district("district_old_quarter")
+    case_after = app.store.load_object("CaseState", "case_gen_no_hook_001")
+
+    assert isinstance(case_after, CaseState)
+    assert case_after.status == "active", "entering the district should activate a no-hook latent case"
+    assert case_after.active_resolution_window == "open"
+    assert "Case surfaced: Doorstep Record" in output
+
+
 def test_advance_case_warns_before_terminal_failure(tmp_path) -> None:
     app = LanternCityApp(tmp_path / "lantern-city.sqlite3")
     app.start_new_game()

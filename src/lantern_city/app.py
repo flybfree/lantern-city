@@ -290,6 +290,22 @@ class LanternCityApp:
             visited_district_ids=visited,
             updated_at=updated_at,
         )
+        # Activate any latent generated case that has no hook NPC and involves this district.
+        # Cases with a hook_npc_id are activated by talking to that NPC instead.
+        district_entry_notices: list[str] = []
+        for latent_case_id in city.active_case_ids:
+            latent_case = self.store.load_object("CaseState", latent_case_id)
+            if (
+                isinstance(latent_case, CaseState)
+                and latent_case.status == "latent"
+                and not latent_case.hook_npc_id
+                and district_id in latent_case.involved_district_ids
+            ):
+                activated = transition_case(latent_case, "active", updated_at=updated_at)
+                self.store.save_object(activated)
+                self._introduce_case(latent_case_id, updated_at=updated_at)
+                district_entry_notices.append(f"[Case surfaced: {latent_case.title}]")
+
         visible_npc = "None"
         preferred_npc = next(
             (npc for npc in outcome.active_slice.npcs if npc.id == "npc_shrine_keeper"),
@@ -317,6 +333,7 @@ class LanternCityApp:
             f"Available location IDs: {available_locations}",
             f"Summary: {outcome.response.narrative_text}",
         ]
+        lines.extend(district_entry_notices)
         self._append_scene_affordances(
             lines,
             state_changes=outcome.response.state_changes,
@@ -593,6 +610,10 @@ class LanternCityApp:
         if not isinstance(case_obj, CaseState):
             raise LookupError(f"Case not found: {case_id}")
         case = case_obj
+
+        if case.status == "latent":
+            return self._latent_case_not_ready_message(case)
+
         progress = self._require_progress()
 
         runtime_mode = _case_runtime_mode(case)
@@ -2882,6 +2903,26 @@ class LanternCityApp:
             hook_text = case.discovery_hook or None
             return case, hook_text
         return None, None
+
+    def _latent_case_not_ready_message(self, case: CaseState) -> str:
+        """Return a helpful message when the player tries to resolve a case that isn't active yet."""
+        lines = [
+            f"Case: {case.title}",
+            "Status: not yet introduced",
+            "",
+            "This case hasn't surfaced yet. You need to discover it before you can work it.",
+        ]
+        if case.hook_npc_id:
+            npc = self._npc(case.hook_npc_id)
+            if npc is not None:
+                lines.append(f"Find and talk to {npc.name} to open this thread.")
+            else:
+                lines.append("Talk to the right contact in the involved district to open this thread.")
+        elif case.involved_district_ids:
+            district = self._district(case.involved_district_ids[0])
+            if district is not None:
+                lines.append(f"Explore {district.name} — the entry point will surface there.")
+        return "\n".join(lines)
 
     def _generate_latent_cases(self, count: int = 2) -> None:
         """Call the LLM to generate new latent cases and bootstrap them into the world."""
