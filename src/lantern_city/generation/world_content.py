@@ -3,6 +3,7 @@
 Given a bootstrapped city (districts, NPCs, cases), generates:
   - Locations for each district (3–5 per district)
   - Clues for each starting case (4–6 clues across relevant locations)
+  - Resolution paths for each starting case (2–4 paths, priority-ordered)
   - NPC placement (each NPC assigned to exactly one location)
   - District visible/hidden location lists
   - NPC location_id and known_clue_ids updates
@@ -28,6 +29,37 @@ TURN_ZERO = "turn_0"
 
 _VALID_SOURCE_TYPES = frozenset({"document", "physical", "testimony", "composite"})
 _VALID_RELIABILITIES = frozenset({"credible", "uncertain", "contradicted", "unstable"})
+_VALID_OUTCOME_STATUSES = frozenset({"solved", "partially solved", "failed"})
+
+_RESOLUTION_PATHS_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "resolution_paths": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "priority": {"type": "integer", "description": "1 = best outcome checked first, higher = worse fallback"},
+                    "path_id": {"type": "string", "description": "snake_case label, e.g. 'clean_exposure'"},
+                    "label": {"type": "string", "description": "Short human-readable label"},
+                    "outcome_status": {"type": "string", "enum": ["solved", "partially solved", "failed"]},
+                    "required_clue_ids": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Exact clue IDs from the list provided that must be credible for this path",
+                    },
+                    "required_credible_count": {"type": "integer", "description": "Minimum credible clues from required_clue_ids needed"},
+                    "summary_text": {"type": "string", "description": "2-3 sentences: what happened when this path resolves"},
+                    "fallout_text": {"type": "string", "description": "1-2 sentences: city/district consequences"},
+                },
+                "required": ["priority", "path_id", "label", "outcome_status", "required_clue_ids", "required_credible_count", "summary_text", "fallout_text"],
+                "additionalProperties": False,
+            },
+        }
+    },
+    "required": ["resolution_paths"],
+    "additionalProperties": False,
+}
 
 
 @runtime_checkable
@@ -186,15 +218,23 @@ class WorldContentGenerator:
                     location_map[clue.source_id] = loc.model_copy(
                         update={"clue_ids": [*loc.clue_ids, clue.id]}
                     )
+            hook_npc = _pick_hook_npc(case_npcs, case_clues, npc_location_map)
             _emit(f"[world] Generating case briefing for: {case.title}…")
-            briefing = self._generate_case_briefing(case, case_clues, case_npcs)
+            briefing = self._generate_case_briefing(case, case_clues, case_npcs, hook_npc=hook_npc)
+            _emit(f"[world] Generating resolution paths for: {case.title}…")
+            resolution_conditions = self._generate_resolution_paths(case, case_clues, case_npcs)
+            _emit(f"[world]   {len(resolution_conditions)} resolution paths generated")
+            case_patch: dict[str, object] = {"updated_at": TURN_ZERO}
+            if hook_npc is not None:
+                case_patch["hook_npc_id"] = hook_npc.id
             if briefing:
-                case_updates.append(case.model_copy(update={
-                    "title": briefing.get("title", case.title) or case.title,
-                    "discovery_hook": briefing.get("discovery_hook", "") or "",
-                    "objective_summary": briefing.get("objective_summary", case.objective_summary) or case.objective_summary,
-                    "updated_at": TURN_ZERO,
-                }))
+                case_patch["title"] = briefing.get("title", case.title) or case.title
+                case_patch["discovery_hook"] = briefing.get("discovery_hook", "") or ""
+                case_patch["objective_summary"] = briefing.get("objective_summary", case.objective_summary) or case.objective_summary
+            if resolution_conditions:
+                case_patch["resolution_conditions"] = resolution_conditions
+            if len(case_patch) > 1:
+                case_updates.append(case.model_copy(update=case_patch))
 
         # Build NPC updates: assign location_id and known_clue_ids
         npc_clue_map: dict[str, list[str]] = {}
@@ -396,6 +436,103 @@ class WorldContentGenerator:
 
         return out
 
+    # ── Resolution paths ──────────────────────────────────────────────────────
+
+    def _generate_resolution_paths(
+        self,
+        case: CaseState,
+        clues: list[ClueState],
+        npcs: list[NPCState],
+    ) -> list[dict]:
+        clue_lines = "\n".join(
+            f"  {c.id}: [{c.source_type}, {c.reliability}] {c.clue_text}" for c in clues
+        ) or "  (no clues)"
+        npc_lines = "\n".join(
+            f"  {n.name} ({n.role_category})" for n in npcs[:4]
+        ) or "  (none)"
+
+        system = (
+            "You are designing investigation resolution paths for Lantern City, a noir game. "
+            "Resolution paths are checked priority-1-first; the last must always be reachable (required_credible_count: 0). "
+            "Return valid JSON only."
+        )
+        user = (
+            f"Generate 3 resolution paths for this case.\n\n"
+            f"Case title: {case.title}\n"
+            f"Objective: {case.objective_summary}\n\n"
+            f"Available clues (use ONLY these exact IDs in required_clue_ids):\n{clue_lines}\n\n"
+            f"Key NPCs:\n{npc_lines}\n\n"
+            "Rules:\n"
+            "  - priority 1: best outcome ('solved'), requires the most credible clues (2–3 specific IDs)\n"
+            "  - priority 2: partial outcome ('partially solved'), requires 1–2 credible clues\n"
+            "  - priority 3: fallback ('failed'), required_credible_count must be 0 so it always triggers\n"
+            "  - required_clue_ids: subset of exact IDs listed above\n"
+            "  - required_credible_count: how many from required_clue_ids must be credible\n"
+            "  - summary_text: 2-3 sentences of what happens when this path resolves\n"
+            "  - fallout_text: 1-2 sentences of lasting city/district consequence\n"
+            "  - path_id: unique snake_case, e.g. 'clean_exposure', 'quiet_resolution', 'burial'\n"
+        )
+        try:
+            result = self._llm.generate_json(
+                messages=[{"role": "system", "content": system}, {"role": "user", "content": user}],
+                temperature=0.4,
+                max_tokens=1200,
+                schema=_RESOLUTION_PATHS_SCHEMA,
+            )
+            raw_paths = result.get("resolution_paths", [])
+        except Exception:
+            return _fallback_resolution_paths(clues)
+
+        valid_clue_ids = {c.id for c in clues}
+        out: list[dict] = []
+        seen_ids: set[str] = set()
+
+        for raw in raw_paths:
+            path_id = str(raw.get("path_id", "")).strip()
+            if not path_id or path_id in seen_ids:
+                continue
+            seen_ids.add(path_id)
+
+            outcome = str(raw.get("outcome_status", "failed"))
+            if outcome not in _VALID_OUTCOME_STATUSES:
+                outcome = "failed"
+
+            required_ids = [cid for cid in raw.get("required_clue_ids", []) if cid in valid_clue_ids]
+            required_count = max(0, int(raw.get("required_credible_count", 0)))
+            # Fallback path must always be reachable
+            if int(raw.get("priority", 99)) >= 3:
+                required_count = 0
+                required_ids = []
+
+            out.append({
+                "priority": int(raw.get("priority", len(out) + 1)),
+                "path_id": path_id,
+                "label": str(raw.get("label", path_id.replace("_", " ").title()))[:80],
+                "outcome_status": outcome,
+                "required_clue_ids": required_ids,
+                "required_credible_count": required_count,
+                "summary_text": str(raw.get("summary_text", "Case resolved."))[:400],
+                "fallout_text": str(raw.get("fallout_text", ""))[:300],
+            })
+
+        if not out:
+            return _fallback_resolution_paths(clues)
+
+        # Ensure there's always a reachable fallback
+        if not any(p["required_credible_count"] == 0 for p in out):
+            out.append({
+                "priority": max(p["priority"] for p in out) + 1,
+                "path_id": "burial",
+                "label": "Burial",
+                "outcome_status": "failed",
+                "required_clue_ids": [],
+                "required_credible_count": 0,
+                "summary_text": "The investigation closed without enough evidence. The official account held.",
+                "fallout_text": "District stability superficially restored. Truth buried.",
+            })
+
+        return sorted(out, key=lambda p: p["priority"])
+
     # ── Case briefing ─────────────────────────────────────────────────────────
 
     def _generate_case_briefing(
@@ -403,6 +540,8 @@ class WorldContentGenerator:
         case: CaseState,
         clues: list[ClueState],
         npcs: list[NPCState],
+        *,
+        hook_npc: NPCState | None = None,
     ) -> dict[str, str] | None:
         npc_lines = "\n".join(
             f"  {n.name} ({n.role_category}): {n.public_identity}" for n in npcs[:4]
@@ -413,6 +552,15 @@ class WorldContentGenerator:
         district_names = ", ".join(
             d.replace("district_", "").replace("_", " ").title()
             for d in case.involved_district_ids
+        )
+        hook_instruction = (
+            f"- discovery_hook: 2-3 sentences spoken or implied by {hook_npc.name} "
+            f"({hook_npc.role_category}). Write what they say or show the player — "
+            "grounded in their role, not a summary. Write as if the player just heard this.\n"
+        ) if hook_npc else (
+            "- discovery_hook: 2-3 sentences. Establish WHO brought this to you "
+            "(one of the contacts above, or an anonymous tip), WHAT they said or showed you, "
+            "and WHY you can't ignore it. Write as if the player just heard this.\n"
         )
 
         system = (
@@ -429,9 +577,7 @@ class WorldContentGenerator:
             f"Known clues (what exists in the world, not yet discovered by player):\n{clue_lines}\n\n"
             "Rules:\n"
             "- title: an evocative case name (not the ID), 4-8 words, present-tense or noun phrase\n"
-            "- discovery_hook: 2-3 sentences. Establish WHO brought this to you "
-            "(one of the contacts above, or an anonymous tip), WHAT they said or showed you, "
-            "and WHY you can't ignore it. Write as if the player just heard this.\n"
+            f"{hook_instruction}"
             "- objective_summary: 1 sentence. What the player must find out or accomplish. "
             "Keep it concrete and specific — not 'investigate' but 'find out what happened to X'.\n"
             "- Do not reveal clue content directly — the discovery_hook sets atmosphere, "
@@ -470,6 +616,78 @@ class WorldContentGenerator:
             scene_objects=["lantern post", "stone pavement"],
             clue_ids=[],
         )]
+
+
+_HOOK_ROLE_PRIORITY = {"informant": 0, "witness": 1, "gatekeeper": 2, "suspect": 3, "authority": 4}
+
+
+def _pick_hook_npc(
+    case_npcs: list[NPCState],
+    case_clues: list[ClueState],
+    npc_location_map: dict[str, str],
+) -> NPCState | None:
+    """Pick the NPC who will surface the case through conversation.
+
+    Prefers placed NPCs (have a location) with informant/witness roles, then by
+    how many case clues they're linked to. Falls back to any placed NPC, then
+    first NPC overall.
+    """
+    if not case_npcs:
+        return None
+
+    clue_npc_counts: dict[str, int] = {}
+    for clue in case_clues:
+        for nid in clue.related_npc_ids:
+            clue_npc_counts[nid] = clue_npc_counts.get(nid, 0) + 1
+
+    placed = [n for n in case_npcs if n.id in npc_location_map]
+    candidates = placed or case_npcs
+
+    return min(
+        candidates,
+        key=lambda n: (
+            _HOOK_ROLE_PRIORITY.get(n.role_category, 5),
+            -clue_npc_counts.get(n.id, 0),
+        ),
+    )
+
+
+def _fallback_resolution_paths(clues: list[ClueState]) -> list[dict]:
+    credible_ids = [c.id for c in clues if c.reliability == "credible"][:2]
+    paths: list[dict] = []
+    if credible_ids:
+        paths.append({
+            "priority": 1,
+            "path_id": "evidence_assembled",
+            "label": "Evidence Assembled",
+            "outcome_status": "solved",
+            "required_clue_ids": credible_ids,
+            "required_credible_count": len(credible_ids),
+            "summary_text": "The credible evidence was assembled and presented. The case closed with enough truth on the record.",
+            "fallout_text": "The district carries a recoverable scar. The city moves on.",
+        })
+    any_ids = [c.id for c in clues[:1]]
+    paths.append({
+        "priority": 2,
+        "path_id": "partial_resolution",
+        "label": "Partial Resolution",
+        "outcome_status": "partially solved",
+        "required_clue_ids": any_ids,
+        "required_credible_count": 1 if any_ids else 0,
+        "summary_text": "Some evidence surfaced but not enough for a complete resolution. The situation stabilised without full clarity.",
+        "fallout_text": "The case closes without a full answer. Related pressure may resurface.",
+    })
+    paths.append({
+        "priority": 3,
+        "path_id": "burial",
+        "label": "Burial",
+        "outcome_status": "failed",
+        "required_clue_ids": [],
+        "required_credible_count": 0,
+        "summary_text": "The investigation produced insufficient evidence. The official account hardened.",
+        "fallout_text": "Truth buried. Missingness pressure increases.",
+    })
+    return paths
 
 
 def _slugify(text: str) -> str:
