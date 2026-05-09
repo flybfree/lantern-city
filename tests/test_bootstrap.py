@@ -320,3 +320,43 @@ def test_bootstrap_city_loads_back_usable_runtime_models(tmp_path) -> None:
     assert lantern.scope_id == "district_old_quarter"
     assert case.status == "latent"
     assert npc.location_id == "location_shrine_lane"
+
+
+def test_bootstrap_npc_uses_profile_fields_from_seed(tmp_path) -> None:
+    store = SQLiteStore(tmp_path / "lantern-city.sqlite3")
+    seed_payload = make_valid_seed_payload()
+    shrine_keeper = next(
+        n for n in seed_payload["npc_configuration"]["npcs"] if n["id"] == "npc_shrine_keeper"
+    )
+    shrine_keeper["public_identity"] = "A quiet shrine attendant who keeps meticulous records."
+    shrine_keeper["hidden_objective"] = "Suppress knowledge of the clerk's true whereabouts."
+    shrine_keeper["current_objective"] = "Redirect investigators away from the subarchive."
+    shrine_keeper["trust_in_player"] = 0.35
+    shrine_keeper["suspicion"] = 0.55
+    shrine_keeper["fear"] = 0.6
+
+    bootstrap_city(validate_city_seed(seed_payload), store)
+
+    npc = store.load_object("NPCState", "npc_shrine_keeper")
+    assert isinstance(npc, NPCState)
+    assert npc.public_identity == "A quiet shrine attendant who keeps meticulous records."
+    assert npc.hidden_objective == "Suppress knowledge of the clerk's true whereabouts."
+    assert npc.current_objective == "Redirect investigators away from the subarchive."
+    assert npc.relationships["player"].trust == 0.35
+    assert npc.relationships["player"].suspicion == 0.55
+    assert npc.relationships["player"].fear == 0.6
+
+
+def test_bootstrap_npc_falls_back_to_templates_when_profile_absent(tmp_path) -> None:
+    store = SQLiteStore(tmp_path / "lantern-city.sqlite3")
+
+    bootstrap_city(make_valid_seed_document(), store)
+
+    npc = store.load_object("NPCState", "npc_shrine_keeper")
+    assert isinstance(npc, NPCState)
+    assert npc.public_identity == "informant"
+    assert "secrecy_level" in npc.hidden_objective or "high" in npc.hidden_objective
+    assert "district-bound" in npc.current_objective or "routine" in npc.current_objective
+    assert npc.relationships["player"].trust == 0.0
+    assert npc.relationships["player"].suspicion == 0.0
+    assert npc.relationships["player"].fear == 0.0

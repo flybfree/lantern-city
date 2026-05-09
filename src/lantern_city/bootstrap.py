@@ -238,6 +238,9 @@ def _build_case_state(seed: CitySeedDocument, case_id: str) -> CaseState:
 
 def _build_npc_state(seed: CitySeedDocument, npc_id: str) -> NPCState:
     npc = _npc_by_id(seed, npc_id)
+    public_identity = npc.public_identity or npc.role_category
+    hidden_objective = npc.hidden_objective or f"Protect secrets with {npc.secrecy_level} exposure risk."
+    current_objective = npc.current_objective or f"Maintain {npc.mobility_pattern} routine."
     return NPCState(
         id=npc.id,
         created_at=TURN_ZERO,
@@ -246,16 +249,16 @@ def _build_npc_state(seed: CitySeedDocument, npc_id: str) -> NPCState:
         role_category=npc.role_category,
         district_id=npc.district_id,
         location_id=npc.location_id,
-        public_identity=npc.role_category,
-        hidden_objective=f"Protect secrets with {npc.secrecy_level} exposure risk.",
-        current_objective=f"Maintain {npc.mobility_pattern} routine.",
+        public_identity=public_identity,
+        hidden_objective=hidden_objective,
+        current_objective=current_objective,
         loyalty=_governing_faction_id(seed, npc.district_id),
         relationship_flags=[npc.relationship_density, npc.memory_depth, npc.secrecy_level],
         relationships={
             "player": RelationshipSnapshot(
-                trust=0.0,
-                suspicion=0.0,
-                fear=0.0,
+                trust=npc.trust_in_player,
+                suspicion=npc.suspicion,
+                fear=npc.fear,
                 status="unknown",
                 last_updated_at=TURN_ZERO,
             )

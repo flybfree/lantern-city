@@ -186,11 +186,43 @@ _NPC_SCHEMA = {
             "type": "string",
             "enum": ["background", "low", "secondary", "medium", "high", "immediate", "critical"],
         },
+        "public_identity": {
+            "type": "string",
+            "description": "1–2 sentences: what this NPC appears to be publicly",
+        },
+        "hidden_objective": {
+            "type": "string",
+            "description": "What they are actually trying to accomplish — may reference faction goals or personal stakes",
+        },
+        "current_objective": {
+            "type": "string",
+            "description": "What they are doing right now in relation to the active investigation",
+        },
+        "trust_in_player": {
+            "type": "number",
+            "minimum": 0.0,
+            "maximum": 1.0,
+            "description": "Initial trust toward the player. Informants 0.3–0.5, authorities 0.1–0.3, suspects 0.0–0.2",
+        },
+        "suspicion": {
+            "type": "number",
+            "minimum": 0.0,
+            "maximum": 1.0,
+            "description": "Initial suspicion of the player. High-secrecy and suspect NPCs 0.4–0.7, others 0.1–0.3",
+        },
+        "fear": {
+            "type": "number",
+            "minimum": 0.0,
+            "maximum": 1.0,
+            "description": "Fear of exposure or player. Extreme secrecy 0.5–0.8, low secrecy 0.0–0.2",
+        },
     },
     "required": [
         "id", "name", "role_category", "district_id", "location_id",
         "memory_depth", "relationship_density", "secrecy_level",
         "mobility_pattern", "relevance_level",
+        "public_identity", "hidden_objective", "current_objective",
+        "trust_in_player", "suspicion", "fear",
     ],
     "additionalProperties": False,
 }
@@ -336,6 +368,10 @@ class CitySeedGenerator:
             "- npc.location_id: always use 'location_tbd'\n"
             "- Spread NPCs across at least 2 districts\n"
             "- Include at least 1 informant, 1 gatekeeper, 1 authority\n"
+            "- npc.public_identity: 1–2 sentences describing what this NPC appears to be\n"
+            "- npc.hidden_objective: what they are actually trying to accomplish (reference faction goals or personal stakes)\n"
+            "- npc.current_objective: what they are doing right now in the investigation context\n"
+            "- trust/suspicion/fear: 0.0–1.0 decimals; informants trust more (0.3–0.5), suspects and high-secrecy NPCs suspect/fear more (0.4–0.7)\n"
             "- Starting scores: integers 0–25 (new investigator, limited knowledge)\n"
         )
         try:
@@ -484,6 +520,12 @@ def _assemble(framework: dict[str, Any], cases_npcs: dict[str, Any]) -> dict[str
         raw_did = str(npc.get("district_id", ""))
         resolved = _resolve_id(raw_did, district_ids, "district_")
         npc["district_id"] = resolved if resolved else (district_ids[0] if district_ids else raw_did)
+        for field in ("trust_in_player", "suspicion", "fear"):
+            if field in npc:
+                try:
+                    npc[field] = float(npc[field])
+                except (TypeError, ValueError):
+                    npc[field] = 0.0
 
     return {
         "schema_version": "1.0",

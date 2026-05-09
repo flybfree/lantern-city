@@ -235,6 +235,12 @@ class NPCSeed(SeedModel):
     secrecy_level: NonEmptyStr
     mobility_pattern: NonEmptyStr
     relevance_level: NonEmptyStr
+    public_identity: str = ""
+    hidden_objective: str = ""
+    current_objective: str = ""
+    trust_in_player: float = 0.0
+    suspicion: float = 0.0
+    fear: float = 0.0
 
 
 class NPCConfiguration(SeedModel):
