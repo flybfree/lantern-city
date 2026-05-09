@@ -630,6 +630,30 @@ class LanternCityApp:
             path = new_status.replace(" ", "_")
             gains = _gains_for_outcome(new_status)
 
+        if new_status == "failed" and runtime_mode == "evolved_runtime" and case.pressure_level == "low":
+            lines = [
+                f"Case: {case.title}",
+                "Resolution attempt: insufficient evidence.",
+                "",
+                "The investigation is still early-stage — no failure clock has started.",
+                "Gather more evidence before attempting to close the case.",
+            ]
+            for step in self._case_recovery_actions(case=case, leads=[]):
+                lines.append(f"  - {step}")
+            turn_notices = self._apply_world_turn_plan(turn_plan, progressed_case_ids={case_id})
+            if turn_notices.catch_up_turns:
+                lines.append(f"\n[Time passes: {turn_notices.catch_up_turns} extra turn(s)]")
+            if turn_notices.faction_updates:
+                lines.append("\n[Faction pressure]")
+                lines.extend(_prioritized_faction_updates(turn_notices.faction_updates))
+            if turn_notices.case_pressure_updates:
+                lines.append("\n[Case pressure]")
+                lines.extend(turn_notices.case_pressure_updates[:4])
+            if turn_notices.offscreen_updates:
+                lines.append("\n[Offscreen shifts]")
+                lines.extend(turn_notices.offscreen_updates[:4])
+            return "\n".join(lines)
+
         if new_status == "failed" and self._should_issue_failure_warning(case):
             warned_case = self._issue_failure_warning(case, updated_at=updated_at)
             self.store.save_object(warned_case)

@@ -538,6 +538,7 @@ def test_advance_case_warns_before_terminal_failure(tmp_path) -> None:
             status="active",
             involved_district_ids=["district_old_quarter"],
             objective_summary="Prove the altered record trail before it closes.",
+            pressure_level="rising",
         )
     )
     app.store.save_object(
@@ -558,6 +559,40 @@ def test_advance_case_warns_before_terminal_failure(tmp_path) -> None:
     assert "Final warning:" in output
 
 
+def test_advance_case_at_low_pressure_does_not_start_failure_clock(tmp_path) -> None:
+    app = LanternCityApp(tmp_path / "lantern-city.sqlite3")
+    app.start_new_game()
+    app.enter_district("district_old_quarter")
+    city = app._require_city()
+    app.store.save_object(
+        CaseState(
+            id="case_gen_low_pressure_001",
+            created_at="turn_0",
+            updated_at="turn_0",
+            title="Quiet Records",
+            case_type="records tampering",
+            status="active",
+            involved_district_ids=["district_old_quarter"],
+            objective_summary="Find who altered the quiet ledger.",
+            pressure_level="low",
+            offscreen_risk_flags=["generated_case"],
+        )
+    )
+    app.store.save_object(
+        city.model_copy(update={"active_case_ids": [*city.active_case_ids, "case_gen_low_pressure_001"]})
+    )
+    app._introduce_case("case_gen_low_pressure_001")
+
+    output = app.advance_case("case_gen_low_pressure_001")
+    case = app.store.load_object("CaseState", "case_gen_low_pressure_001")
+
+    assert case is not None
+    assert case.status == "active", "low-pressure advance must not change case status"
+    assert "failure_warning_issued" not in case.offscreen_risk_flags
+    assert "insufficient evidence" in output
+    assert "no failure clock" in output
+
+
 def test_advance_case_fails_after_warning_is_issued(tmp_path) -> None:
     app = LanternCityApp(tmp_path / "lantern-city.sqlite3")
     app.start_new_game()
@@ -573,6 +608,7 @@ def test_advance_case_fails_after_warning_is_issued(tmp_path) -> None:
             status="active",
             involved_district_ids=["district_old_quarter"],
             objective_summary="Catch the forged certification trail before it settles.",
+            pressure_level="rising",
         )
     )
     app.store.save_object(
@@ -631,6 +667,7 @@ def test_last_chance_warning_state_survives_same_turn_progress_normalization(tmp
             status="active",
             involved_district_ids=["district_old_quarter"],
             objective_summary="Stop the quiet correction before it locks in.",
+            pressure_level="rising",
         )
     )
     app.store.save_object(

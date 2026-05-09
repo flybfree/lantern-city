@@ -222,7 +222,7 @@ def _build_case_state(seed: CitySeedDocument, case_id: str) -> CaseState:
         involved_district_ids=list(case.involved_district_ids),
         involved_npc_ids=list(case.key_npc_ids),
         involved_faction_ids=list(case.involved_faction_ids),
-        open_questions=list(case.failure_modes),
+        open_questions=[],
         objective_summary=(
             f"Resolve a {case.intensity} {case.type} case with {case.scope} scope. "
             f"Likely pressure patterns: {', '.join(district_biases) if district_biases else 'local contradiction'}."

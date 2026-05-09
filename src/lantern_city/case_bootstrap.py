@@ -238,21 +238,33 @@ def bootstrap_generated_case(
 
 
 def _derive_open_questions(result: CaseGenerationResult) -> list[str]:
-    """Synthesize investigative questions from resolution paths when the LLM omits them."""
+    """Synthesize investigative questions from resolution paths and NPCs when the LLM omits them."""
     questions: list[str] = []
+
+    suspects = [npc for npc in result.npc_specs if npc.role_category in {"suspect", "witness"}]
+    gatekeepers = [npc for npc in result.npc_specs if npc.role_category == "gatekeeper"]
+
+    if suspects:
+        questions.append(
+            f"Who is {suspects[0].name} really, and what do they know about this {result.case_type}?"
+        )
+
     for path in sorted(result.resolution_paths, key=lambda p: p.priority):
         if path.outcome_status == "solved" and path.summary_text:
-            q = f"What evidence establishes the truth of this {result.case_type} case?"
-            questions.append(q)
+            questions.append(f"What evidence establishes the truth of this {result.case_type} case?")
             break
-    if result.objective_summary:
-        obj = result.objective_summary.rstrip(".?!")
-        questions.append(f"{obj}?")
+
+    if gatekeepers:
+        questions.append(
+            f"Why is {gatekeepers[0].name} blocking access, and what are they protecting?"
+        )
+
     for path in sorted(result.resolution_paths, key=lambda p: p.priority):
-        if path.outcome_status == "failed" and path.fallout_text:
-            questions.append(f"What happens if the investigation closes without a resolution?")
+        if path.outcome_status in {"partially solved", "failed"} and path.fallout_text:
+            questions.append(f"What happens if this {result.case_type} closes without a clear answer?")
             break
-    return questions or [f"What happened in this {result.case_type} case?"]
+
+    return questions[:4] or [f"What happened in this {result.case_type} case?"]
 
 
 def _find_location(

@@ -360,3 +360,13 @@ def test_bootstrap_npc_falls_back_to_templates_when_profile_absent(tmp_path) -> 
     assert npc.relationships["player"].trust == 0.0
     assert npc.relationships["player"].suspicion == 0.0
     assert npc.relationships["player"].fear == 0.0
+
+
+def test_bootstrap_case_open_questions_are_not_failure_modes(tmp_path) -> None:
+    store = SQLiteStore(tmp_path / "lantern-city.sqlite3")
+    bootstrap_city(make_valid_seed_document(), store)
+
+    case = store.load_object("CaseState", "case_missing_clerk")
+    assert isinstance(case, CaseState)
+    assert "evidence destroyed" not in case.open_questions
+    assert "Missingness escalates" not in case.open_questions
