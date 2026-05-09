@@ -348,7 +348,7 @@ class WorldContentGenerator:
                 location_type=str(raw.get("location_type", "location")),
                 access_state="hidden" if is_hidden else "unknown",
                 known_npc_ids=npc_ids,
-                scene_objects=[str(o) for o in raw.get("scene_objects", [])],
+                scene_objects=_filter_scene_objects(raw.get("scene_objects", [])),
                 clue_ids=[],
             ))
 
@@ -750,6 +750,23 @@ def _enforce_reliability_mix(clues: list[ClueState]) -> list[ClueState]:
                 result[i] = c.model_copy(update={"reliability": "credible"})
                 promoted += 1
 
+    return result
+
+
+def _filter_scene_objects(raw: list) -> list[str]:
+    """Reject LLM-generated scene objects that look like unfilled placeholders or garbage IDs."""
+    result: list[str] = []
+    for obj in raw:
+        s = str(obj).strip()
+        if not s or len(s) < 4:
+            continue
+        low = s.lower()
+        if "placeholder" in low or "fix_this" in low or "todo" in low:
+            continue
+        # Reject strings that look like underscore-joined IDs (all lowercase, no spaces, has _)
+        if " " not in s and "_" in s and s == s.lower():
+            continue
+        result.append(s)
     return result
 
 

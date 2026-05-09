@@ -43,7 +43,9 @@ Available commands (use exact syntax):
   leads                       — show the strongest current leads
   matters                     — show what matters in the current scene
   compare <clue_a> <clue_b>   — compare two known clues
-  case <case_id>              — attempt to resolve a case
+
+IMPORTANT: Do NOT emit "case <case_id>" — case resolution is never triggered by the GM.
+If the player asks about a case or wants to review one, use "board <case_id>" instead.
 
 ID rules — CRITICAL:
 - district_id values start with "district_" (e.g. district_old_quarter)
@@ -400,6 +402,7 @@ class GameMaster:
                 "commands": {
                     "type": "array",
                     "items": {"type": "string"},
+                    "maxItems": 3,
                     "description": "0–3 command strings to execute",
                 },
                 "understood_as": {
@@ -449,6 +452,10 @@ class GameMaster:
 
         normalized: list[str] = []
         for command in commands:
+            # Drop commands with unfilled template markers like [clue] or [npc_id]
+            if "[" in command or "]" in command:
+                continue
+
             parts = command.split(maxsplit=1)
             if not parts:
                 continue
@@ -545,7 +552,8 @@ class GameMaster:
             return None
         if not _is_object_examination_request(player_input):
             return None
-        matched_object = _match_scene_object(player_input, location.scene_objects)
+        clean_objects = _clean_scene_objects(location.scene_objects)
+        matched_object = _match_scene_object(player_input, clean_objects)
         if matched_object is None:
             return None
         return f'inspect {current_location_id} "{matched_object}"'
@@ -834,7 +842,6 @@ _KNOWN_VERBS: frozenset[str] = frozenset(
         "leads",
         "matters",
         "compare",
-        "case",
     ]
 )
 
@@ -1085,6 +1092,19 @@ def _match_scene_object(player_input: str, scene_objects: list[str]) -> str | No
             best_score = score
             best_object = object_name
     return best_object if best_score >= 6 else None
+
+
+def _clean_scene_objects(scene_objects: list[str]) -> list[str]:
+    """Strip placeholder/garbage strings from stored scene objects before matching."""
+    result: list[str] = []
+    for obj in scene_objects:
+        low = obj.lower()
+        if "placeholder" in low or "fix_this" in low or "todo" in low:
+            continue
+        if " " not in obj and "_" in obj and obj == obj.lower():
+            continue
+        result.append(obj)
+    return result
 
 
 def _institutional_pressure_guidance(institutional_pressure: str) -> str:
