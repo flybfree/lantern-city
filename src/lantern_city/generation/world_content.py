@@ -279,7 +279,9 @@ class WorldContentGenerator:
         district_npcs: list[NPCState],
     ) -> list[LocationState]:
         npc_lines = "\n".join(
-            f"  {npc.id}: {npc.name} ({npc.role_category})" for npc in district_npcs
+            f"  {npc.id}: {npc.name} ({npc.role_category})"
+            + (f" — place in or near a {npc.location_type_hint}" if npc.location_type_hint else "")
+            for npc in district_npcs
         ) or "  (no named NPCs)"
 
         system = (

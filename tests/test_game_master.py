@@ -9,7 +9,12 @@ from lantern_city.generation.case_generation import (
     GeneratedNPCSpec,
     GeneratedResolutionPath,
 )
-from lantern_city.game_master import GameMaster
+from lantern_city.game_master import (
+    GameMaster,
+    _is_npc_info_request,
+    _is_object_examination_request,
+    _is_recovery_request,
+)
 
 
 class _RecordingLLM:
@@ -520,3 +525,111 @@ def test_narrate_system_prompt_requires_legible_conversation_outcomes() -> None:
 
     assert "make the exchange legible" in system_prompt
     assert "answered, deflected, redirected, confirmed, warned, or procedurally blocked" in system_prompt
+
+
+def test_match_npc_finds_npc_via_relevant_npc_ids_when_not_in_visible_location(tmp_path) -> None:
+    """NPC in relevant_npc_ids but absent from every visible location must still be matched."""
+    llm = _RecordingLLM()
+    app = LanternCityApp(tmp_path / "lantern-city.sqlite3")
+    app.start_new_game()
+    app.enter_district("district_old_quarter")
+
+    # Verify Ila Venn is reachable: she is in the district's relevant_npc_ids
+    from lantern_city.models import DistrictState, LocationState
+    district = app.store.load_object("DistrictState", "district_old_quarter")
+    assert isinstance(district, DistrictState)
+    assert "npc_shrine_keeper" in district.relevant_npc_ids
+
+    # Artificially remove her from all location known_npc_ids so only relevant_npc_ids remains
+    for loc_id in district.visible_locations:
+        loc = app.store.load_object("LocationState", loc_id)
+        if isinstance(loc, LocationState) and "npc_shrine_keeper" in loc.known_npc_ids:
+            app.store.save_object(
+                loc.model_copy(
+                    update={"known_npc_ids": [n for n in loc.known_npc_ids if n != "npc_shrine_keeper"]}
+                )
+            )
+
+    gm = GameMaster(app=app, llm=llm)
+    matched = gm._match_npc_from_player_text("who is Ila Venn")
+    assert matched == "npc_shrine_keeper", (
+        "NPC must be found via district.relevant_npc_ids even when absent from all visible locations"
+    )
+
+
+def test_normalize_commands_suppresses_talk_for_npc_info_request_via_relevant_npc_ids(tmp_path) -> None:
+    """Info requests about an NPC found only in relevant_npc_ids must produce zero commands."""
+    llm = _RecordingLLM()
+    app = LanternCityApp(tmp_path / "lantern-city.sqlite3")
+    app.start_new_game()
+    app.enter_district("district_old_quarter")
+
+    from lantern_city.models import DistrictState, LocationState
+    district = app.store.load_object("DistrictState", "district_old_quarter")
+    assert isinstance(district, DistrictState)
+
+    # Remove Ila Venn from all location known_npc_ids
+    for loc_id in district.visible_locations:
+        loc = app.store.load_object("LocationState", loc_id)
+        if isinstance(loc, LocationState) and "npc_shrine_keeper" in loc.known_npc_ids:
+            app.store.save_object(
+                loc.model_copy(
+                    update={"known_npc_ids": [n for n in loc.known_npc_ids if n != "npc_shrine_keeper"]}
+                )
+            )
+
+    gm = GameMaster(app=app, llm=llm)
+    # The interpreter would have generated a talk command, but the NPC info override should suppress it
+    normalized = gm._normalize_commands(
+        ["talk npc_shrine_keeper Who are you?"],
+        "who is Ila Venn",
+    )
+    assert normalized == [], "info request about a known NPC must suppress the talk command"
+
+
+def test_is_object_examination_request_matches_mid_sentence_phrasing() -> None:
+    """Verb appearing mid-sentence must still trigger object examination routing."""
+    assert _is_object_examination_request("I want to examine the ledger shelf")
+    assert _is_object_examination_request("let me look at the dust-covered counter")
+    assert _is_object_examination_request("can you help me inspect the registry")
+    # Standard prefix forms must still work
+    assert _is_object_examination_request("examine the registry board")
+    assert _is_object_examination_request("look at the ledger shelf")
+    # Non-examination input must not match
+    assert not _is_object_examination_request("talk to the clerk about the ledger")
+    assert not _is_object_examination_request("enter district_old_quarter")
+
+
+def test_normalize_commands_routes_mid_sentence_object_examination(tmp_path) -> None:
+    """Natural phrasing like 'I want to examine X' must route to the specific object inspect."""
+    llm = _RecordingLLM()
+    app = LanternCityApp(tmp_path / "lantern-city.sqlite3")
+    app.start_new_game()
+    app.enter_district("district_old_quarter")
+    app.go("location_archive_steps")
+    gm = GameMaster(app=app, llm=llm)
+
+    normalized = gm._normalize_commands(
+        [],  # interpreter returned nothing (couldn't parse the natural phrasing)
+        "I want to examine the registry board",
+    )
+
+    assert len(normalized) == 1
+    assert normalized[0].startswith("inspect location_archive_steps")
+    assert "registry board" in normalized[0]
+
+
+def test_is_recovery_request_matches_natural_investigation_variants() -> None:
+    """Newly added recovery phrases must be recognised."""
+    assert _is_recovery_request("what to investigate next")
+    assert _is_recovery_request("what are my next steps")
+    assert _is_recovery_request("where should I look")
+    assert _is_recovery_request("I don't know what to do")
+    assert _is_recovery_request("what is my next move")
+    assert _is_recovery_request("where do I go from here")
+    # Core phrases must still work
+    assert _is_recovery_request("what should I do next")
+    assert _is_recovery_request("I'm stuck")
+    # Unrelated input must not match
+    assert not _is_recovery_request("talk to the clerk")
+    assert not _is_recovery_request("examine the ledger shelf")

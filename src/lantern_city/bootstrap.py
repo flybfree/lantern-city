@@ -263,6 +263,7 @@ def _build_npc_state(seed: CitySeedDocument, npc_id: str) -> NPCState:
                 last_updated_at=TURN_ZERO,
             )
         },
+        location_type_hint=npc.location_type_hint,
         schedule_anchor=npc.location_id or npc.district_id or "",
         offscreen_state="idle",
         relevance_rating=RELEVANCE_RATINGS.get(npc.relevance_level, 0.5),

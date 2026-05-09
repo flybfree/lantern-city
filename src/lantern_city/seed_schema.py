@@ -241,6 +241,7 @@ class NPCSeed(SeedModel):
     trust_in_player: float = 0.0
     suspicion: float = 0.0
     fear: float = 0.0
+    location_type_hint: str = ""
 
 
 class NPCConfiguration(SeedModel):

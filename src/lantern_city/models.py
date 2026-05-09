@@ -111,6 +111,7 @@ class NPCState(RuntimeModel):
     relationship_flags: list[str] = Field(default_factory=list)
     relationships: dict[str, RelationshipSnapshot] = Field(default_factory=dict)
     memory_log: list[JSONObject] = Field(default_factory=list)
+    location_type_hint: str = ""
     schedule_anchor: str = ""
     offscreen_state: str = "idle"
     recent_events: list[str] = Field(default_factory=list)

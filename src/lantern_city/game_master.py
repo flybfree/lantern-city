@@ -571,6 +571,8 @@ class GameMaster:
                 loc = self.app.store.load_object("LocationState", loc_id)
                 if isinstance(loc, LocationState):
                     all_npc_ids.update(loc.known_npc_ids)
+            # Also include NPCs tracked at district level (not yet placed in a location)
+            all_npc_ids.update(district.relevant_npc_ids)
         best_id: str | None = None
         best_score = 0
         for npc_id in all_npc_ids:
@@ -957,14 +959,26 @@ def _is_recovery_request(player_input: str) -> bool:
         "strongest lead",
         "best lead",
         "what should i investigate",
+        "what to investigate next",
+        "what can i investigate",
         "what can i do",
         "what are my options",
+        "what are my next steps",
+        "what is my next move",
+        "what s my next move",
+        "where should i look",
+        "where do i look",
+        "where do i go from here",
+        "what can i follow up",
         "i am stuck",
         "im stuck",
         "i m stuck",
         "stuck",
         "not sure what to do",
         "unsure what to do",
+        "don t know what to do",
+        "dont know what to do",
+        "i don t know what to do",
         "lost the thread",
         "help me recover",
         "help me out",
@@ -1041,8 +1055,13 @@ def _is_object_examination_request(player_input: str) -> bool:
     text = _normalize_match_text(player_input)
     if not text:
         return False
-    prefixes = ("examine ", "inspect ", "look at ", "check ", "study ")
-    return text.startswith(prefixes)
+    # Verb at the start (most common and unambiguous form)
+    if text.startswith(("examine ", "inspect ", "look at ", "check ", "study ")):
+        return True
+    # Natural phrasing where the verb appears mid-sentence:
+    #   "I want to examine the ledger", "let me look at the shelf", etc.
+    examination_verbs = ("examine", "inspect", "look at", "check", "study")
+    return any(f" {v} " in text for v in examination_verbs)
 
 
 def _match_scene_object(player_input: str, scene_objects: list[str]) -> str | None:

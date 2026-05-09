@@ -216,6 +216,10 @@ _NPC_SCHEMA = {
             "maximum": 1.0,
             "description": "Fear of exposure or player. Extreme secrecy 0.5–0.8, low secrecy 0.0–0.2",
         },
+        "location_type_hint": {
+            "type": "string",
+            "description": "Type of location this NPC naturally inhabits, e.g. 'archive', 'market', 'office', 'shrine', 'rooftop', 'dock'. Used to place them intelligently during world generation.",
+        },
     },
     "required": [
         "id", "name", "role_category", "district_id", "location_id",
@@ -223,6 +227,7 @@ _NPC_SCHEMA = {
         "mobility_pattern", "relevance_level",
         "public_identity", "hidden_objective", "current_objective",
         "trust_in_player", "suspicion", "fear",
+        "location_type_hint",
     ],
     "additionalProperties": False,
 }
@@ -372,6 +377,7 @@ class CitySeedGenerator:
             "- npc.hidden_objective: what they are actually trying to accomplish (reference faction goals or personal stakes)\n"
             "- npc.current_objective: what they are doing right now in the investigation context\n"
             "- trust/suspicion/fear: 0.0–1.0 decimals; informants trust more (0.3–0.5), suspects and high-secrecy NPCs suspect/fear more (0.4–0.7)\n"
+            "- npc.location_type_hint: one word describing the type of location where this NPC is most likely found (e.g. archive, market, shrine, office, dock, rooftop, hall, passage)\n"
             "- Starting scores: integers 0–25 (new investigator, limited knowledge)\n"
         )
         try:
